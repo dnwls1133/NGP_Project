@@ -1,0 +1,248 @@
+[Animation_Name]
+N3Enemy_Hit
+[Texture_Name]
+N3Enemy_Hit
+[Textur_ Path]
+texture\Enemies\normal3_enemy_Hit.png
+[Frame_Count]
+20
+[Frame_Index]
+0
+[Left_Top]
+0 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+1
+[Left_Top]
+100 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+2
+[Left_Top]
+200 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+3
+[Left_Top]
+300 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+4
+[Left_Top]
+400 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+5
+[Left_Top]
+500 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+6
+[Left_Top]
+600 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+7
+[Left_Top]
+700 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+8
+[Left_Top]
+800 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+9
+[Left_Top]
+900 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+10
+[Left_Top]
+1000 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+11
+[Left_Top]
+1100 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+12
+[Left_Top]
+1200 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+13
+[Left_Top]
+1300 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+14
+[Left_Top]
+1400 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+15
+[Left_Top]
+1500 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+16
+[Left_Top]
+1600 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+17
+[Left_Top]
+1700 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+18
+[Left_Top]
+1800 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+19
+[Left_Top]
+1900 0
+[Slice_Size]
+100 100
+[Offset]
+0 0
+[Duration]
+0.050000
+
+

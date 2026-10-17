@@ -1,0 +1,56 @@
+[Animation_Name]
+PlayerMissile2
+[Texture_Name]
+PlayerMissileTex2
+[Textur_ Path]
+texture\Player_Missile_LV2.png
+[Frame_Count]
+4
+[Frame_Index]
+0
+[Left_Top]
+0 0
+[Slice_Size]
+50 89
+[Offset]
+0 0
+[Duration]
+0.500000
+
+
+[Frame_Index]
+1
+[Left_Top]
+50 0
+[Slice_Size]
+50 89
+[Offset]
+0 0
+[Duration]
+0.500000
+
+
+[Frame_Index]
+2
+[Left_Top]
+100 0
+[Slice_Size]
+50 89
+[Offset]
+0 0
+[Duration]
+0.500000
+
+
+[Frame_Index]
+3
+[Left_Top]
+150 0
+[Slice_Size]
+50 89
+[Offset]
+0 0
+[Duration]
+0.500000
+
+

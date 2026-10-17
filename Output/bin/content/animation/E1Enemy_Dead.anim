@@ -1,0 +1,164 @@
+[Animation_Name]
+E1Enemy_Dead
+[Texture_Name]
+E1Enemy_Dead
+[Textur_ Path]
+texture\Enemies\Epic1_Enemy_Dead.png
+[Frame_Count]
+13
+[Frame_Index]
+0
+[Left_Top]
+0 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+1
+[Left_Top]
+300 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+2
+[Left_Top]
+600 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+3
+[Left_Top]
+900 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+4
+[Left_Top]
+1200 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+5
+[Left_Top]
+1500 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+6
+[Left_Top]
+1800 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+7
+[Left_Top]
+2100 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+8
+[Left_Top]
+2400 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+9
+[Left_Top]
+2700 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+10
+[Left_Top]
+3000 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+11
+[Left_Top]
+3300 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+12
+[Left_Top]
+3600 0
+[Slice_Size]
+300 300
+[Offset]
+0 0
+[Duration]
+0.050000
+
+

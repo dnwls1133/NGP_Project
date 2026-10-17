@@ -1,0 +1,21 @@
+[Ranking_Count]
+3
+
+[Record]
+[Score]
+171050
+[Date]
+2025-06-11 08:28:00
+
+[Record]
+[Score]
+165400
+[Date]
+2025-06-11 08:21:46
+
+[Record]
+[Score]
+132600
+[Date]
+2025-06-11 08:33:31
+

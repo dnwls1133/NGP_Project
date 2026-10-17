@@ -1,0 +1,56 @@
+[Animation_Name]
+MonsterMiddleMissile2
+[Texture_Name]
+MonsterMissileTex3
+[Textur_ Path]
+texture\Monster_Middle_Bullet3.png
+[Frame_Count]
+4
+[Frame_Index]
+0
+[Left_Top]
+0 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+1
+[Left_Top]
+64 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+2
+[Left_Top]
+128 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+3
+[Left_Top]
+192 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.100000
+
+

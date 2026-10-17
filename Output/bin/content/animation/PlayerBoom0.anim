@@ -1,0 +1,488 @@
+[Animation_Name]
+PlayerBoom0
+[Texture_Name]
+PlayerBoombTex
+[Textur_ Path]
+texture\Boomb.png
+[Frame_Count]
+40
+[Frame_Index]
+0
+[Left_Top]
+0 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+1
+[Left_Top]
+540 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+2
+[Left_Top]
+1080 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+3
+[Left_Top]
+1620 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+4
+[Left_Top]
+2160 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+5
+[Left_Top]
+2700 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+6
+[Left_Top]
+3240 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+7
+[Left_Top]
+3780 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+8
+[Left_Top]
+4320 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+9
+[Left_Top]
+4860 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+10
+[Left_Top]
+5400 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+11
+[Left_Top]
+5940 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+12
+[Left_Top]
+6480 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+13
+[Left_Top]
+7020 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+14
+[Left_Top]
+7560 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+15
+[Left_Top]
+8100 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+16
+[Left_Top]
+8640 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+17
+[Left_Top]
+9180 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+18
+[Left_Top]
+9720 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+19
+[Left_Top]
+10260 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+20
+[Left_Top]
+10800 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+21
+[Left_Top]
+11340 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+22
+[Left_Top]
+11880 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+23
+[Left_Top]
+12420 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+24
+[Left_Top]
+12960 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+25
+[Left_Top]
+13500 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+26
+[Left_Top]
+14040 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+27
+[Left_Top]
+14580 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+28
+[Left_Top]
+15120 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+29
+[Left_Top]
+15660 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+30
+[Left_Top]
+16200 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+31
+[Left_Top]
+16740 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+32
+[Left_Top]
+17280 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+33
+[Left_Top]
+17820 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+34
+[Left_Top]
+18360 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+35
+[Left_Top]
+18900 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+36
+[Left_Top]
+19440 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+37
+[Left_Top]
+19980 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+38
+[Left_Top]
+20520 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+
+[Frame_Index]
+39
+[Left_Top]
+21060 0
+[Slice_Size]
+540 960
+[Offset]
+0 0
+[Duration]
+0.025000
+
+

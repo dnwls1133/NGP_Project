@@ -1,0 +1,188 @@
+[Animation_Name]
+N34Enemy_Dead
+[Texture_Name]
+N34Enemy_Dead
+[Textur_ Path]
+texture\Enemies\normal34_Enemy_Dead.png
+[Frame_Count]
+15
+[Frame_Index]
+0
+[Left_Top]
+0 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+1
+[Left_Top]
+64 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+2
+[Left_Top]
+129 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+3
+[Left_Top]
+194 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+4
+[Left_Top]
+259 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+5
+[Left_Top]
+324 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+6
+[Left_Top]
+389 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+7
+[Left_Top]
+454 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+8
+[Left_Top]
+518 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+9
+[Left_Top]
+583 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+10
+[Left_Top]
+648 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+11
+[Left_Top]
+713 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+12
+[Left_Top]
+778 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+13
+[Left_Top]
+843 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+14
+[Left_Top]
+908 0
+[Slice_Size]
+64 64
+[Offset]
+0 0
+[Duration]
+0.050000
+
+

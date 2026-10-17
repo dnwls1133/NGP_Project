@@ -1,0 +1,212 @@
+[Animation_Name]
+Eenemy_explosion
+[Texture_Name]
+Eenemy_explosion
+[Textur_ Path]
+texture\Enemies\Boss_explosion.png
+[Frame_Count]
+17
+[Frame_Index]
+0
+[Left_Top]
+0 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+1
+[Left_Top]
+128 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+2
+[Left_Top]
+256 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+3
+[Left_Top]
+384 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+4
+[Left_Top]
+512 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+5
+[Left_Top]
+640 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+6
+[Left_Top]
+768 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+7
+[Left_Top]
+896 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+8
+[Left_Top]
+1024 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+9
+[Left_Top]
+1152 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+10
+[Left_Top]
+1280 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+11
+[Left_Top]
+1408 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+12
+[Left_Top]
+1536 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+13
+[Left_Top]
+1664 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+14
+[Left_Top]
+1792 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+15
+[Left_Top]
+1920 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+
+[Frame_Index]
+16
+[Left_Top]
+2048 0
+[Slice_Size]
+128 128
+[Offset]
+0 0
+[Duration]
+0.100000
+
+

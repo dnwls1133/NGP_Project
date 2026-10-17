@@ -1,0 +1,188 @@
+[Animation_Name]
+Item0
+[Texture_Name]
+ItemTex0
+[Textur_ Path]
+texture\Item.png
+[Frame_Count]
+15
+[Frame_Index]
+0
+[Left_Top]
+0 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+1
+[Left_Top]
+20 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+2
+[Left_Top]
+40 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+3
+[Left_Top]
+60 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+4
+[Left_Top]
+80 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+5
+[Left_Top]
+100 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+6
+[Left_Top]
+120 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+7
+[Left_Top]
+140 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+8
+[Left_Top]
+160 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+9
+[Left_Top]
+180 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+10
+[Left_Top]
+200 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+11
+[Left_Top]
+220 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+12
+[Left_Top]
+240 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+13
+[Left_Top]
+260 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+14
+[Left_Top]
+280 0
+[Slice_Size]
+20 20
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
