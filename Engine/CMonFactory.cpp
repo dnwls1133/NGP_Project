@@ -195,7 +195,7 @@ CMonster* CMonFactory::CreateMonster(MON_TYPE _eType, MISSILE_PTRN _eMType,Vec2 
         tMonInfo info = {};
         info.fAtt = 1.f;
         info.fAttRange = 10.f;
-        info.fHP = 8000.f;
+        info.fHP = 80.f;
         info.fRecogRange = 3.f;
         info.fSpeed = 100.f;
         info.vDestPos = _vDPos;
