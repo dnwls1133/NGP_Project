@@ -37,7 +37,8 @@ public:
      */
     inline const RankingData& GetFirstRanking() const
     {
-        return m_vecGameRankings[0];
+        static const RankingData empty{ 0, L"" };
+        return m_vecGameRankings.empty() ? empty : m_vecGameRankings[0];
     }
 
     /**
@@ -47,7 +48,8 @@ public:
      */
     inline const RankingData& GetRanking(size_t index_) const
     {
-        return m_vecGameRankings[index_];
+        static const RankingData empty{ 0, L"" };
+        return index_ < m_vecGameRankings.size() ? m_vecGameRankings[index_] : empty;
     }
 
     /**

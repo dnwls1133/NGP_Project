@@ -3,12 +3,13 @@ class CPathMgr
 {
 	SINGLE(CPathMgr);
 private:
-	wchar_t		m_szContentPath[256]; // 윈도우 경로 제한 255글자
-    wchar_t     m_szRelativePath[256];
+	std::wstring m_resourcePath;
+	std::wstring m_contentPath;
 
 public:
 	void init();
-	const wchar_t* GetContentPath() { return m_szContentPath; }
+	const wchar_t* GetContentPath() const { return m_contentPath.c_str(); }
+	const wchar_t* GetResourcePath() const { return m_resourcePath.c_str(); }
 
     wstring GetRelativePath(const wchar_t* _filepath);
 };

@@ -8,11 +8,12 @@
 #include "CSoundMgr.h"
 #include "CResMgr.h"
 #include "CColliderMgr.h"
+#include "CPathMgr.h"
 
 CScene_Ranking::CScene_Ranking()
 {
-    AddFontResourceEx(L"fonts\\BMDOHYEON_ttf.ttf", FR_PRIVATE, NULL);
-    AddFontResourceEx(L"fonts\\BMDOHYEON_ttf.ttf", FR_PRIVATE, NULL);
+    const std::wstring fontPath = std::wstring(CPathMgr::GetInst()->GetContentPath()) + L"font\\BMDOHYEON_ttf.ttf";
+    AddFontResourceEx(fontPath.c_str(), FR_PRIVATE, NULL);
 
     m_hScoreFont = CreateFont(
         -80,            // height (픽셀 기준, 숫자를 키우면 글자가 커짐)
@@ -47,7 +48,8 @@ CScene_Ranking::CScene_Ranking()
 
 CScene_Ranking::~CScene_Ranking()
 {
-    RemoveFontResourceEx(L"fonts\\RetroGaming.ttf", FR_PRIVATE, NULL);
+    const std::wstring fontPath = std::wstring(CPathMgr::GetInst()->GetContentPath()) + L"font\\BMDOHYEON_ttf.ttf";
+    RemoveFontResourceEx(fontPath.c_str(), FR_PRIVATE, NULL);
     DeleteObject(m_hScoreFont);
     DeleteObject(m_hDateFont);
 }

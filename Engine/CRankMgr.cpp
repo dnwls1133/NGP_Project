@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "CRankMgr.h"
+#include "CPathMgr.h"
 
 CRankMgr::CRankMgr()
 {
@@ -14,8 +15,9 @@ CRankMgr::~CRankMgr()
 void CRankMgr::LoadRanking()
 {
     FILE* pFile = nullptr;
-    _wfopen_s(&pFile, L"Ranking.txt", L"rt");
-    assert(pFile);
+    const std::wstring path = std::wstring(CPathMgr::GetInst()->GetResourcePath()) + L"Ranking.txt";
+    _wfopen_s(&pFile, path.c_str(), L"rt");
+    if (!pFile) { m_vecGameRankings.clear(); return; }
 
     wchar_t szLine[128];
     m_vecGameRankings.clear();
@@ -50,8 +52,9 @@ void CRankMgr::SaveRanking()
         return;
 
     FILE* pFile = nullptr;
-    _wfopen_s(&pFile, L"Ranking.txt", L"wt");
-    assert(pFile);
+    const std::wstring path = std::wstring(CPathMgr::GetInst()->GetResourcePath()) + L"Ranking.txt";
+    _wfopen_s(&pFile, path.c_str(), L"wt");
+    if (!pFile) return;
 
     fwprintf(pFile, L"[Ranking_Count]\n");
     fwprintf(pFile, L"%d\n\n", (int)m_vecGameRankings.size());

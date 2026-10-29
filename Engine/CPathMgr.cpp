@@ -2,8 +2,8 @@
 #include "CPathMgr.h"
 
 #include "CCore.h"
+#include <filesystem>
 CPathMgr::CPathMgr()
-	: m_szContentPath{}
 {
     
 }
@@ -14,34 +14,25 @@ CPathMgr::~CPathMgr()
 
 void CPathMgr::init()
 {
-	GetCurrentDirectory(255, m_szContentPath); // 실행파일이 있는 디렉토리 자동으로 찾아주는 메크로 
-    
-	int iLen = (int)wcslen(m_szContentPath);
-
-	for (int i = iLen - 1; i >= 0; --i)
+	std::vector<wchar_t> path(32768);
+	DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+	if (length == 0 || length >= path.size())
 	{
-		if ('\\' == m_szContentPath[i])
-		{
-			m_szContentPath[i] = '\0';
-			break;
-		}
+		MessageBoxW(nullptr, L"Unable to determine the executable path.", L"Path error", MB_OK | MB_ICONERROR);
+		std::abort();
 	}
-
-	wcscat_s(m_szContentPath, 255, L"\\Resource\\content\\");
-	// 상위폴더로
-
-	// + Resource\\content\\
-
-
-
-	//SetWindowText(CCore::GetInst()->GetMainHwnd(), m_szContentPath);
+	const auto executableDir = std::filesystem::path(path.data()).parent_path();
+	const auto resourceDir = executableDir.filename() == L"Resource"
+		? executableDir : executableDir.parent_path() / L"Resource";
+	m_resourcePath = resourceDir.wstring() + L"\\";
+	m_contentPath = (resourceDir / L"content").wstring() + L"\\";
 }
 
 wstring CPathMgr::GetRelativePath(const wchar_t* _filepath)
 {
     wstring strFilePath = _filepath;
 
-    size_t iAbsLen = wcslen(m_szContentPath);
+    size_t iAbsLen = m_contentPath.length();
     size_t iFullLen = strFilePath.length();
 
     wstring strRelativePaht = strFilePath.substr(iAbsLen,iFullLen);

@@ -16,8 +16,9 @@ CStageHUD::CStageHUD()
     // m_fontPath += L"font\\BMDOHYEON_ttf.ttf";
 
     // 폰트를 현재 프로세스에 등록
-    AddFontResourceEx(L"font\\BMHANNAPro.ttf", FR_PRIVATE, nullptr);
-    AddFontResourceEx(L"font\\BMHANNAAir.ttf", FR_PRIVATE, nullptr);
+    const std::wstring fontDir = std::wstring(CPathMgr::GetInst()->GetContentPath()) + L"font\\";
+    AddFontResourceEx((fontDir + L"BMHANNAPro.ttf").c_str(), FR_PRIVATE, nullptr);
+    AddFontResourceEx((fontDir + L"BMHANNAAir_ttf.ttf").c_str(), FR_PRIVATE, nullptr);
 
     m_hLabelFont = CreateFont(
         -15,            // height (픽셀 기준, 숫자를 키우면 글자가 커짐)
@@ -55,8 +56,9 @@ CStageHUD::~CStageHUD()
 {
     DeleteObject(m_hLabelFont);
     DeleteObject(m_hValueFont);
-    RemoveFontResourceEx(L"font\\BMHANNAPro.ttf", FR_PRIVATE, nullptr);
-    RemoveFontResourceEx(L"font\\BMHANNAAir.ttf", FR_PRIVATE, nullptr);
+    const std::wstring fontDir = std::wstring(CPathMgr::GetInst()->GetContentPath()) + L"font\\";
+    RemoveFontResourceEx((fontDir + L"BMHANNAPro.ttf").c_str(), FR_PRIVATE, nullptr);
+    RemoveFontResourceEx((fontDir + L"BMHANNAAir_ttf.ttf").c_str(), FR_PRIVATE, nullptr);
 }
 
 void CStageHUD::update()
