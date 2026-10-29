@@ -27,10 +27,10 @@ void CPathMgr::init()
 		}
 	}
 
-	wcscat_s(m_szContentPath, 255, L"\\bin\\content\\");
+	wcscat_s(m_szContentPath, 255, L"\\Resource\\content\\");
 	// 상위폴더로
 
-	// + bin\\content\\
+	// + Resource\\content\\
 
 
 

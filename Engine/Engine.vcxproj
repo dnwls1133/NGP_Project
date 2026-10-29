@@ -76,7 +76,7 @@
     <OutDir>$(SolutionDir)Output\bin_debug\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(SolutionDir)Output\bin\</OutDir>
+    <OutDir>$(SolutionDir)Output\Resource\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
