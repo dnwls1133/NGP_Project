@@ -450,3 +450,6 @@ FodyWeavers.xsd
 
 # Debug output
 /Output/bin_debug/
+
+# Local project documentation
+/docs/
