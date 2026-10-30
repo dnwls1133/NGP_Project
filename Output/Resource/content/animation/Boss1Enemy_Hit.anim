@@ -3,7 +3,7 @@ Boss1Enemy_Hit
 [Texture_Name]
 Boss1Enemy_Hit
 [Textur_ Path]
-texture\Enemies\Boss1_Enemy_Hit.png
+texture\Enemies\Boss1_Enemy_Move.png
 [Frame_Count]
 60
 [Frame_Index]

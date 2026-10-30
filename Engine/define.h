@@ -152,8 +152,7 @@ enum class MON_TYPE
     NORMAL4,
     NORMAL5,
     NORMAL6,
-    RARE,
+    BOSS,
     EPIC,
     EPIC2,
-    BOSS,
 };

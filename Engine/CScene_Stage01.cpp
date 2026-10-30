@@ -29,6 +29,7 @@
 
 #include "CStageCard.h"
 #include "CStageHUD.h"
+#include "CAnimator.h"
 
 CScene_Stage01::CScene_Stage01()
     :m_bClear(false)
@@ -237,6 +238,15 @@ void CScene_Stage01::render(HDC _dc)
 }
 void CScene_Stage01::Enter()
 {
+    // Warm the shared texture cache before combat, using the actual animation assets.
+    // Only temporary playback objects are destroyed; CResMgr retains the textures.
+    {
+        CAnimator preload;
+        preload.LoadAnimation(L"animation\\Boss1Enemy_Move.anim");
+        preload.LoadAnimation(L"animation\\Boss1Enemy_Hit.anim");
+        preload.LoadAnimation(L"animation\\Boss1Enemy_Dead.anim");
+    }
+
     CRankMgr::GetInst()->CurrentRanking.Score = 0;
 
     m_pClearCard = nullptr;
@@ -514,7 +524,7 @@ void CScene_Stage01::InitEvents()
 
 
 
-    m_vEvents.push_back({ 130.f,MON_TYPE::RARE,MISSILE_PTRN::PTRN1,Vec2(vBackPos.x,  (float)rBackrect.top - 200.f),Vec2((float)vBackPos.x, (float)rBackrect.bottom / 2.f - 300.f),Vec2((float)vBackPos.x, -400.f) });
+    m_vEvents.push_back({ 10.f,MON_TYPE::BOSS,MISSILE_PTRN::PTRN1,Vec2(vBackPos.x,  (float)rBackrect.top - 200.f),Vec2((float)vBackPos.x, (float)rBackrect.bottom / 2.f - 300.f),Vec2((float)vBackPos.x, -400.f) });
 
 }
 

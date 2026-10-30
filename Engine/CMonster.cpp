@@ -72,7 +72,7 @@ CMonster::CMonster()
         // //Animation 저장
         // GetAnimator()->FindAnimation(L"E1Enemy_Hit")->Save(L"animation\\E1Enemy_Hit.anim");
 
-        // m_pTex = CResMgr::GetInst()->LoadTexture(L"Boss1Enemy_Hit", L"texture\\Enemies\\Boss1_Enemy_Hit.png");
+        // m_pTex = CResMgr::GetInst()->LoadTexture(L"Boss1Enemy_Hit", L"texture\\Enemies\\Boss1_Enemy_Move.png");
         // GetAnimator()->CreateAnimation(L"Boss1Enemy_Hit", m_pTex, Vec2(0.f, 0.f), Vec2(400.f, 400.f), Vec2(400.f, 0.f), 0.05f, 60);
         // //Animation 저장
         // GetAnimator()->FindAnimation(L"Boss1Enemy_Hit")->Save(L"animation\\Boss1Enemy_Hit.anim");
@@ -199,7 +199,7 @@ void CMonster::OnCollisionEnter(CCollider* _pOther)
             GetAnimator()->Play(L"N4Enemy_Hit", true);
         }
         break;
-        case MON_TYPE::RARE:
+        case MON_TYPE::BOSS:
         {
             GetAnimator()->LoadAnimation(L"animation\\Boss1Enemy_Hit.anim");
             GetAnimator()->Play(L"Boss1Enemy_Hit", true);
@@ -217,12 +217,7 @@ void CMonster::OnCollisionEnter(CCollider* _pOther)
             GetAnimator()->Play(L"E2Enemy_Hit", true);
         }
         break;
-        case MON_TYPE::BOSS:
-        {
-           // GetAnimator()->LoadAnimation(L"animation\\N2Enemy_Hit.anim");
-           // GetAnimator()->Play(L"N2Enemy_Hit", true);
-        }
-        break;
+        
         default:
             break;
         }
@@ -277,7 +272,7 @@ void CMonster::SetAnim(MON_TYPE eType)
         GetAnimator()->Play(L"N4Enemy_Move", true);
     }
         break;
-    case MON_TYPE::RARE:
+    case MON_TYPE::BOSS:
     {
         GetAnimator()->LoadAnimation(L"animation\\Boss1Enemy_Move.anim");
         GetAnimator()->Play(L"Boss1Enemy_Move", true);
@@ -295,12 +290,6 @@ void CMonster::SetAnim(MON_TYPE eType)
         GetAnimator()->Play(L"E2Enemy_Move", true);
     }
     break;
-    case MON_TYPE::BOSS:
-    {
-        GetAnimator()->LoadAnimation(L"animation\\N2Enemy_Move.anim");
-        GetAnimator()->Play(L"N2Enemy_Move", true);
-    }
-        break;
     default:
         break;
     }

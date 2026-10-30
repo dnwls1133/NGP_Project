@@ -115,17 +115,13 @@ void CIdleState::update()
             ChangeAIState(GetAi(), MON_STATE::PATROL4);
         }
         break;
-        case MON_TYPE::RARE:
+        case MON_TYPE::BOSS:
         {
             GetMonster()->SetDestPos(Vec2(vBackPos.x + 100.f, vBackPos.y - 200.f));
             ChangeAIState(GetAi(), MON_STATE::MBOSS0);
         }
         break;
-        case MON_TYPE::BOSS:
-        {
-
-        }
-        break;
+      
         }
         
         

@@ -182,10 +182,10 @@ CMonster* CMonFactory::CreateMonster(MON_TYPE _eType, MISSILE_PTRN _eMType,Vec2 
         pMon->SetAI(pAI);
     }
     break;
-    case MON_TYPE::RARE:
+    case MON_TYPE::BOSS:
     {
         pMon = new CMonster;
-        pMon->SetAnim(MON_TYPE::RARE);
+        pMon->SetAnim(MON_TYPE::BOSS);
         pMon->SetName(L"Monster");
         pMon->SetPos(_vPos);
         pMon->SetScale(Vec2(150.f, 150.f));
@@ -200,7 +200,7 @@ CMonster* CMonFactory::CreateMonster(MON_TYPE _eType, MISSILE_PTRN _eMType,Vec2 
         info.fSpeed = 100.f;
         info.vDestPos = _vDPos;
         info.ePattern = _eMType;
-        info.eMType = MON_TYPE::RARE;
+        info.eMType = MON_TYPE::BOSS;
         info.vExitPos = _vEPos;
         pMon->SetMonInfo(info);
 
@@ -278,11 +278,7 @@ CMonster* CMonFactory::CreateMonster(MON_TYPE _eType, MISSILE_PTRN _eMType,Vec2 
         pMon->SetAI(pAI);
     }
     break;
-    case MON_TYPE::BOSS:
-    {
-        pMon->SetName(L"Monster");
-    }
-        break;
+    
     default:
         break;
     }

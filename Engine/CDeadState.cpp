@@ -29,7 +29,7 @@ void CDeadState::update()
     m_fAdt += fDT;
     switch (GetMonster()->GetInfo().eMType)
     {
-    case MON_TYPE::RARE:
+    case MON_TYPE::BOSS:
     {
         Vec2 vPos = GetMonster()->GetPos();
         if (1.0f + fDT >= m_fAdt && m_fAdt > 1.0f)
@@ -153,7 +153,7 @@ void CDeadState::Enter()
         GetMonster()->GetAnimator()->Play(L"N34Enemy_Dead", false);
     }
     break;
-    case MON_TYPE::RARE:
+    case MON_TYPE::BOSS:
     {
         CTexture* m_pTex = CResMgr::GetInst()->LoadTexture(L"Boss1Enemy_Dead", L"texture\\Enemies\\Boss1_Enemy_Dead.png");
         GetMonster()->GetAnimator()->CreateAnimation(L"Boss1Enemy_Dead", m_pTex, Vec2(0.f, 0.f), Vec2(400.f, 400.f), Vec2(400.f, 0.f), 0.1f, 50);
@@ -184,18 +184,13 @@ void CDeadState::Enter()
         GetMonster()->GetAnimator()->Play(L"E2Enemy_Dead", false);
     }
     break;
-    case MON_TYPE::BOSS:
-    {
-         GetMonster()->GetAnimator()->LoadAnimation(L"animation\\N2Enemy_Dead.anim");
-         GetMonster()->GetAnimator()->Play(L"N2Enemy_Dead", false);
-    }
-    break;
+   
     }
 }
 
 void CDeadState::Exit()
 {
-    if (GetMonster()->GetInfo().eMType == MON_TYPE::RARE)
+    if (GetMonster()->GetInfo().eMType == MON_TYPE::BOSS)
     {
         CScene_Stage01* curscene = (CScene_Stage01*)CSceneMgr::GetInst()->GetCurScene();
         curscene->Clear();

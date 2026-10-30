@@ -1,0 +1,488 @@
+[Animation_Name]
+N1Enemy_Hit
+[Texture_Name]
+N1Enemy_Hit
+[Textur_ Path]
+texture\Enemies\normal1H_enemy_Hit.png
+[Frame_Count]
+40
+[Frame_Index]
+0
+[Left_Top]
+0 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+1
+[Left_Top]
+400 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+2
+[Left_Top]
+800 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+3
+[Left_Top]
+1200 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+4
+[Left_Top]
+1600 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+5
+[Left_Top]
+2000 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+6
+[Left_Top]
+2400 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+7
+[Left_Top]
+2800 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+8
+[Left_Top]
+3200 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+9
+[Left_Top]
+3600 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+10
+[Left_Top]
+4000 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+11
+[Left_Top]
+4400 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+12
+[Left_Top]
+4800 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+13
+[Left_Top]
+5200 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+14
+[Left_Top]
+5600 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+15
+[Left_Top]
+6000 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+16
+[Left_Top]
+6400 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+17
+[Left_Top]
+6800 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+18
+[Left_Top]
+7200 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+19
+[Left_Top]
+7600 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+20
+[Left_Top]
+8000 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+21
+[Left_Top]
+8400 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+22
+[Left_Top]
+8800 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+23
+[Left_Top]
+9200 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+24
+[Left_Top]
+9600 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+25
+[Left_Top]
+10000 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+26
+[Left_Top]
+10400 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+27
+[Left_Top]
+10800 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+28
+[Left_Top]
+11200 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+29
+[Left_Top]
+11600 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+30
+[Left_Top]
+12000 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+31
+[Left_Top]
+12400 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+32
+[Left_Top]
+12800 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+33
+[Left_Top]
+13200 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+34
+[Left_Top]
+13600 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+35
+[Left_Top]
+14000 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+36
+[Left_Top]
+14400 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+37
+[Left_Top]
+14800 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+38
+[Left_Top]
+15200 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+
+[Frame_Index]
+39
+[Left_Top]
+15600 0
+[Slice_Size]
+400 400
+[Offset]
+0 0
+[Duration]
+0.050000
+
+

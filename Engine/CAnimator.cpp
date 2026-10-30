@@ -32,11 +32,18 @@ void CAnimator::CreateAnimation(const wstring& _strName, CTexture* _pTex
 
 void CAnimator::LoadAnimation(const wstring& _strRelativePath)
 {
+    if (m_loadedAnimationPaths.find(_strRelativePath) != m_loadedAnimationPaths.end())
+        return;
+
     CAnimation* pAnim = new CAnimation;
     pAnim->Load(_strRelativePath);
 
     pAnim->m_pAnimator = this;
-    m_mapAnim.insert(make_pair(pAnim->GetName(), pAnim));
+    const wstring name = pAnim->GetName();
+    const auto result = m_mapAnim.emplace(name, pAnim);
+    if (!result.second)
+        delete pAnim;
+    m_loadedAnimationPaths.emplace(_strRelativePath, name);
 
 }
 

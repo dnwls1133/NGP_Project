@@ -9,6 +9,7 @@ class CAnimator
 {
 private:
 	map<wstring, CAnimation*>	m_mapAnim;		// 모든 Animation
+	map<wstring, wstring> m_loadedAnimationPaths;
 	CAnimation*					m_pCurAnim;		// 현재 재생중인 Animation
 	CObject*					m_pOwner;		// Animator 소유 오브젝트
 	bool						m_bRepeat;		// 반복재생 여부
