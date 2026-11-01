@@ -219,6 +219,7 @@
     <ClInclude Include="CTile.h" />
     <ClInclude Include="CTimeMgr.h" />
     <ClInclude Include="CTitleBackground.h" />
+    <ClInclude Include="CTitleMenu.hpp" />
     <ClInclude Include="CTitleLogo.h" />
     <ClInclude Include="CTraceState.h" />
     <ClInclude Include="CUI.h" />

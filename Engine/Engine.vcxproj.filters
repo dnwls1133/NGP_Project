@@ -365,6 +365,7 @@
       <Filter>Engine\05.Scene\Scene_Menuel</Filter>
     </ClInclude>
     <ClInclude Include="CStageCard.h" />
+    <ClInclude Include="CTitleMenu.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Engine.rc">

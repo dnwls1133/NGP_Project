@@ -8,12 +8,16 @@ private:
     CUI*                m_pParentUI;
     Vec2                m_vFinalPos;
 
+    bool                m_bActive = true;
     bool                m_bCamAffected; // UI 카메라 영향유무
     bool                m_bMouseOn;     // UI 위에 마우스가 있는지
     bool                m_bPMouseOn;    // UI 위에 마우스가 있는지 과거 정보
     bool                m_bLbtnDown;    // UI 위에서 LBTN이 눌렸는지
 public:
    
+    bool IsActive() const { return m_bActive; }
+    void SetActive(bool active);
+
     Vec2 GetFinalPos() { return m_vFinalPos; }
     CUI* GetParent() { return m_pParentUI; }
     bool IsMouseOn() { return m_bMouseOn; }
@@ -28,11 +32,13 @@ public:
     virtual void finalupdate();
     virtual void render(HDC _dc);
 
+protected:
+    virtual void ResetMouseState();
+    void render_child(HDC _dc);
+
 private:
     void update_child();
     void finalupdate_child();
-    void render_child(HDC _dc);
-
     void MouseOnCheck();
 
 public:
