@@ -167,6 +167,9 @@
     <Filter Include="Engine\05.Scene\Scene_Menuel">
       <UniqueIdentifier>{c20f090b-466a-4624-ac0b-389b9b2f0408}</UniqueIdentifier>
     </Filter>
+    <Filter Include="shared">
+      <UniqueIdentifier>{af5377ec-5d8b-493e-b2ad-45fff3d05570}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CCore.h">
@@ -365,6 +368,12 @@
       <Filter>Engine\05.Scene\Scene_Menuel</Filter>
     </ClInclude>
     <ClInclude Include="CStageCard.h" />
+    <ClInclude Include="..\shared\protocol\ProtocolTypes.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="..\shared\protocol\PacketCodec.h">
+      <Filter>shared</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Engine.rc">
@@ -559,5 +568,8 @@
     <ClCompile Include="CStageHUD.cpp" />
     <ClCompile Include="CStageCard.cpp" />
     <ClCompile Include="pch.cpp" />
+    <ClCompile Include="..\shared\protocol\PacketCodec.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
