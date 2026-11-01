@@ -49,13 +49,16 @@ void FScanf(char* _pOutBuff, FILE* _pFile)
     int i = 0;
     while (true)
     {
-        char c = (char)getc(_pFile);
-        if (c == '\n')
+        int ch = getc(_pFile);
+
+        if (ch == '\r') continue;
+
+        if (ch == '\n' || ch == EOF)
         {
             _pOutBuff[i++] = '\0';
             break;
         }
-        _pOutBuff[i++] = c;
+        _pOutBuff[i++] = (char)ch;
     }
 }
 
