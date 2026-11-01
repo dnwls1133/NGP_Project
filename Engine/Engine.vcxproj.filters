@@ -368,6 +368,7 @@
       <Filter>Engine\05.Scene\Scene_Menuel</Filter>
     </ClInclude>
     <ClInclude Include="CStageCard.h" />
+    <ClInclude Include="CTitleMenu.hpp" />
     <ClInclude Include="..\shared\protocol\ProtocolTypes.h">
       <Filter>shared</Filter>
     </ClInclude>

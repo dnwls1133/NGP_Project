@@ -10,32 +10,36 @@ class CTitleBackground;
 class CSound;
 
 class CBtnUI;
+class CMenuItem;
+class CTitleMenu;
 
 class CScene_Title :
     public CScene
 {
 public:
-    CScene_Title();
-    virtual ~CScene_Title() override;
+    CScene_Title() = default;
+    ~CScene_Title() override = default;
 
-    virtual void Enter() override;
-    virtual void update() override;
-    virtual void Exit() override;
+    void Enter() override;
+    void update() override;
+    void Exit() override;
 
 private:
-    // void mChangeToIntro();
-    // void mChangeToTitle();
-
-    CTitleBackground* m_pBackground;    // 배경
-
-    CSound* m_pTitleTheme;
-
-    enum class EState
+    enum class EState : unsigned char
     {
         None,
         Intro,
         Title,
     };
 
+    void CreateMenus();
+
     EState m_CurrentState;
+
+    CTitleBackground* m_pBackground;
+
+    CSound* m_pTitleTheme;
+
+    CTitleMenu* m_pFirstMenu = nullptr;
+    CTitleMenu* m_pSecondMenu = nullptr;
 };

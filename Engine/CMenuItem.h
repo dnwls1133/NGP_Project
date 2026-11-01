@@ -20,6 +20,9 @@ public:
 
     virtual void render(HDC canvas_) override;
 
+protected:
+    void ResetMouseState() override;
+
 private:
     bool m_bHoverFlag = false;
     bool m_bClickedFlag = false;

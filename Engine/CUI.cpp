@@ -11,14 +11,18 @@ CUI::CUI(bool _bCamAff)
 	: m_pParentUI(nullptr)
 	, m_bCamAffected(_bCamAff)
 	, m_bMouseOn(false)
+	, m_bPMouseOn(false)
+	, m_bLbtnDown(false)
 {
 }
 
 CUI::CUI(const CUI& _origin)
 	: CObject(_origin)
 	  ,m_pParentUI(nullptr)
+	 ,m_bActive(_origin.m_bActive)
 	 ,m_bCamAffected(_origin.m_bCamAffected)
 	 ,m_bMouseOn(false)
+	 ,m_bPMouseOn(false)
 	 ,m_bLbtnDown(false)
 {
 	// 자식 UI에대한 깊은 복사가 필요하다
@@ -33,14 +37,50 @@ CUI::~CUI()
 {
 	Safe_Delete_Vec(m_veChildUI);
 }
+void CUI::SetActive(bool active)
+{
+    if (m_bActive == active)
+    {
+        return;
+    }
+    m_bActive = active;
+    if (!active)
+    {
+        ResetMouseState();
+    }
+}
+
+void CUI::ResetMouseState()
+{
+    if (m_bMouseOn || m_bPMouseOn)
+    {
+        MouseOff();
+    }
+    m_bMouseOn = false;
+    m_bPMouseOn = false;
+    m_bLbtnDown = false;
+    for (CUI* child : m_veChildUI)
+    {
+        child->ResetMouseState();
+    }
+}
+
 void CUI::update()
 {
+    if (!m_bActive)
+    {
+        return;
+    }
 	// child update
 	update_child();
 }
 
 void CUI::finalupdate()
 {
+    if (!m_bActive)
+    {
+        return;
+    }
 	CObject::finalupdate();
 
 	// UI 의 최종 좌표를 구한다.
@@ -107,7 +147,10 @@ void CUI::update_child()
 {
 	for (size_t i = 0; i < m_veChildUI.size(); ++i)
 	{
-		m_veChildUI[i]->update();
+        if (m_veChildUI[i]->IsActive())
+        {
+            m_veChildUI[i]->update();
+        }
 	}
 }
 
@@ -115,7 +158,10 @@ void CUI::finalupdate_child()
 {
 	for (size_t i = 0; i < m_veChildUI.size(); ++i)
 	{
-		m_veChildUI[i]->finalupdate();
+        if (m_veChildUI[i]->IsActive())
+        {
+            m_veChildUI[i]->finalupdate();
+        }
 	}
 }
 
@@ -123,7 +169,10 @@ void CUI::render_child(HDC _dc)
 {
 	for (size_t i = 0; i < m_veChildUI.size(); ++i)
 	{
-		m_veChildUI[i]->render(_dc);
+        if (m_veChildUI[i]->IsActive())
+        {
+            m_veChildUI[i]->render(_dc);
+        }
 	}
 }
 
