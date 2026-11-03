@@ -52,6 +52,61 @@ namespace transport
         return ioctlsocket(sock, FIONBIO, &enabled) != SOCKET_ERROR;
     }
 
+    
+    IoResult ConnectTcp(SOCKET sock, const sockaddr_in& destination, int timeoutMs)
+    {
+        if (sock == INVALID_SOCKET || destination.sin_family != AF_INET || timeoutMs <= 0)
+            return { IoStatus::Error, 0, WSAEINVAL };
+
+        if (!SetNonBlocking(sock))
+            return { IoStatus::Error, 0, WSAGetLastError() };
+
+        const int result = connect(sock, reinterpret_cast<const sockaddr*>(&destination), sizeof(destination));
+
+        // 즉시 연결
+        if (result == 0)
+            return { IoStatus::Success, 0, 0 };
+
+        const int error = WSAGetLastError();
+
+        // 비블로킹 연결 진행 중이 아닌 실제 오류면
+        if (error != WSAEWOULDBLOCK)
+            return { IoStatus::Error, 0, error };
+
+        fd_set writeSet;
+        fd_set errorSet;
+
+        FD_ZERO(&writeSet);
+        FD_ZERO(&errorSet);
+        FD_SET(sock, &writeSet);
+        FD_SET(sock, &errorSet);
+
+        timeval timeout{};
+        timeout.tv_sec = timeoutMs / 1000;
+        timeout.tv_usec = (timeoutMs % 1000) * 1000;
+
+        // 연결 완료 또는 실패 대기
+        const int selected = select(0, nullptr, &writeSet, &errorSet, &timeout);
+
+        if (selected == SOCKET_ERROR)
+            return { IoStatus::Error, 0, WSAGetLastError() };
+
+        if (selected == 0)
+            return { IoStatus::Error, 0, WSAETIMEDOUT };
+
+        // 준비 상태만으로 성공을 판단X, 최종 연결 오류를 확인 필요
+        int socketError = 0;
+        int optionSize = sizeof(socketError);
+
+        if (getsockopt(sock, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&socketError), &optionSize) == SOCKET_ERROR)
+            return { IoStatus::Error, 0, WSAGetLastError() };
+
+        if (socketError != 0)
+            return { IoStatus::Error, 0, socketError };
+
+        return { IoStatus::Success, 0, 0 };
+    }
+
     bool WaitForSockets(SOCKET tcpSocket, SOCKET udpSocket, bool watchTcpWrite, bool watchUdpWrite, int timeoutMs, SocketReady& ready)
     {
         ready = {};

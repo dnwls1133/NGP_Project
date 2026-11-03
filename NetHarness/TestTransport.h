@@ -76,6 +76,10 @@ namespace transport
 
     bool SetNonBlocking(SOCKET sock);
 
+    // 소켓을 비블로킹으로 설정하고 제한 시간 내 TCP 연결을 시도
+    // 소켓 생성과 종료는 호출자가 담당
+    IoResult ConnectTcp(SOCKET sock, const sockaddr_in& destination, int timeoutMs = 5000);
+
     bool WaitForSockets(SOCKET tcpSocket, SOCKET udpSocket, bool watchTcpWrite, bool watchUdpWrite, int timeoutMs, SocketReady& ready);
 
     IoResult SendTcp(SOCKET sock, const char* data, int size);
