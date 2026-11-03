@@ -10,13 +10,14 @@
 #include "ClientTest.h"
 #include "MessageTest.h"
 #include "ScriptedPeer.h"
+#include "TcpFramingTest.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
 namespace
 {
-    constexpr unsigned short TCP_PORT = 9000;
-    constexpr unsigned short UDP_PORT = 9001;
+    constexpr unsigned short TCP_PORT = 40000;
+    constexpr unsigned short UDP_PORT = 40001;
 
     struct Options
     {
@@ -32,11 +33,26 @@ namespace
     void PrintUsage()
     {
         std::cout
+            << "Usage:\n"
+            << "  NetHarness.exe host [--count N]\n"
+            << "  NetHarness.exe client\n"
+            << "\n"
+            << "Reject test:\n"
+            << "  NetHarness.exe host --reject\n"
+            << "  NetHarness.exe client --expect-reject\n"
+            << "\n"
+            << "N: 1.." << message_test::MAX_REPEATS << "\n";
+
+        std::cout
             << "\nScripted peer:\n"
             << "  NetHarness.exe peer-host close\n"
             << "  NetHarness.exe peer-host silent\n"
             << "  NetHarness.exe peer-client close\n"
             << "  NetHarness.exe peer-client silent\n";
+
+        std::cout
+            << "\nTCP framing unit test (no sockets):\n"
+            << "  NetHarness.exe framing-test\n";
     }
 
     bool ParseCount(std::string_view text, std::uint32_t& out)
@@ -186,6 +202,9 @@ int main(int argc, char* argv[])
         PrintUsage();
         return 0;
     }
+
+    if (argc == 2 && std::string_view(argv[1]) == "framing-test")
+        return RunTcpFramingTests() ? 0 : 1;
 
     Options options;
 

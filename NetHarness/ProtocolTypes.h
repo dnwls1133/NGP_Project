@@ -112,8 +112,7 @@ namespace protocol
 
         std::uint16_t flags = FLAGS_NONE;
 
-        std::uint32_t totalBytes =
-            static_cast<std::uint32_t>(HEADER_BYTES);
+        std::uint32_t totalBytes = static_cast<std::uint32_t>(HEADER_BYTES);
 
         std::uint32_t sessionId = 0;
         std::uint32_t roundId = 1;
