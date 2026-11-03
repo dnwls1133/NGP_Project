@@ -134,6 +134,7 @@
     <ClCompile Include="MessageTest.cpp" />
     <ClCompile Include="NetHarness.cpp" />
     <ClCompile Include="PacketCodec.cpp" />
+    <ClCompile Include="ScriptedPeer.cpp" />
     <ClCompile Include="TestTransport.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -143,6 +144,7 @@
     <ClInclude Include="MessageTest.h" />
     <ClInclude Include="PacketCodec.h" />
     <ClInclude Include="ProtocolTypes.h" />
+    <ClInclude Include="ScriptedPeer.h" />
     <ClInclude Include="TestControl.h" />
     <ClInclude Include="TestTransport.h" />
   </ItemGroup>
