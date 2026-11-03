@@ -114,7 +114,7 @@ CUI* CUIMgr::GetFocusedUI()
 
 	for (; iter != vecUI.end(); ++iter)
 	{
-		if(((CUI*)*iter)->IsMouseOn())
+		if (((CUI*)*iter)->IsActive() && ((CUI*)*iter)->IsMouseOn())
 		{
 			targetiter = iter;
 		}
@@ -161,6 +161,11 @@ CUI* CUIMgr::GetTargetedUI(CUI* _pParentUI)
 		queue.pop_front();
 
 		// 큐에서 꺼내온 UI 가 TargetUI 인지 확인
+        if (!pUI->IsActive())
+        {
+            continue;
+        }
+
 		if (pUI->IsMouseOn())
 		{
 			if (nullptr != pTargetUI)

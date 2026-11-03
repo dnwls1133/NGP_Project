@@ -26,6 +26,16 @@ CMenuItem::CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_)
     m_pClickSound = CResMgr::GetInst()->LoadSound(L"Button Hover", L"sound\\SE\\SE_MenuClick.mp3");
 }
 
+void CMenuItem::ResetMouseState()
+{
+    if (m_bClickedFlag)
+    {
+        MouseLbtnDown();
+    }
+    MouseOff();
+    CUI::ResetMouseState();
+}
+
 void CMenuItem::MouseOn()
 {
     if (m_bHoverFlag)
