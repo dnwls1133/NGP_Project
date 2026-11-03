@@ -8,7 +8,7 @@ namespace protocol
     namespace
     {
         // =====================================================================
-        // [1] ByteWriter: C++ 구조체의 숫자들을 네트워크 표준인 Big-Endian(상위 바이트부터)
+        // [1-A] ByteWriter: C++ 구조체의 숫자들을 네트워크 표준인 Big-Endian(상위 바이트부터)
         //     순서로 쪼개서 std::vector<uint8_t> 배열에 차곡차곡 쌓아주는 도구입니다.
         //     (Winsock의 htons / htonl 역할 + 버퍼에 push_back 하는 역할을 동시에 수행)
         // =====================================================================
@@ -63,6 +63,75 @@ namespace protocol
                 WriteI32(v.x);
                 WriteI32(v.y);
             }
+        };
+
+        // =====================================================================
+        // [1-B] ByteReader (11/03 추가): 수신한 Big-Endian 바이트 배열에서
+        //       앞에서부터 순서대로 숫자를 꺼내 원래 C++ 정수로 조립하는 언박싱 도구입니다.
+        //       (Winsock의 ntohs / ntohl 역할 + 버퍼에서 pop_front 하는 역할을 동시에 수행)
+        // =====================================================================
+        struct ByteReader
+        {
+            std::span<const std::uint8_t> bytes;
+            std::size_t offset = 0; // 현재 읽고 있는 위치
+
+            // 아직 읽지 않고 남아 있는 바이트 수를 반환한다.
+            std::size_t Remaining() const noexcept
+            {
+                return bytes.size() - offset;
+            }
+
+            // 1바이트 부호 없는 정수를 꺼내고 offset을 1칸 이동한다.
+            std::uint8_t ReadU8() noexcept
+            {
+                return bytes[offset++];
+            }
+
+            // 2바이트 Big-Endian 바이트를 합쳐서 uint16_t로 복원한다. (ntohs와 동일)
+            std::uint16_t ReadU16() noexcept
+            {
+                const std::uint16_t hi = static_cast<std::uint16_t>(bytes[offset++]);
+                const std::uint16_t lo = static_cast<std::uint16_t>(bytes[offset++]);
+                return static_cast<std::uint16_t>((hi << 8) | lo);
+            }
+
+            // 4바이트 Big-Endian 바이트를 합쳐서 uint32_t로 복원한다. (ntohl과 동일)
+            std::uint32_t ReadU32() noexcept
+            {
+                const std::uint32_t b0 = static_cast<std::uint32_t>(bytes[offset++]);
+                const std::uint32_t b1 = static_cast<std::uint32_t>(bytes[offset++]);
+                const std::uint32_t b2 = static_cast<std::uint32_t>(bytes[offset++]);
+                const std::uint32_t b3 = static_cast<std::uint32_t>(bytes[offset++]);
+                return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
+            }
+
+            // 4바이트 Big-Endian 바이트를 부호 있는 int32_t로 복원한다.
+            std::int32_t ReadI32() noexcept
+            {
+                return static_cast<std::int32_t>(ReadU32());
+            }
+
+            // 8바이트 Big-Endian 바이트를 합쳐서 uint64_t로 복원한다.
+            std::uint64_t ReadU64() noexcept
+            {
+                std::uint64_t value = 0;
+                for (int i = 0; i < 8; ++i) {
+                    value = (value << 8) | static_cast<std::uint64_t>(bytes[offset++]);
+                }
+                return value;
+            }
+
+            // 2D 고정소수점 좌표/속도(x,y 각각 4바이트 씩 총 8바이트)를 복원한다.
+            FixedVec2 ReadVec2() noexcept
+            {
+                FixedVec2 v{};
+                v.x = ReadI32();
+                v.y = ReadI32();
+                return v;
+            }
+
+
+
         };
 
         // =====================================================================
@@ -531,10 +600,423 @@ namespace protocol
             w.WriteU16(p.reserved1);
             return CodecError::NONE;
         }
+
+        // =========================================================================
+        // [5] 19종 메시지 본문(payload) 역질렬화 함수 (DecodeMessagePayload, 11/03 추가)
+        // EncodePayload와 정반대로, 먼저 본문 바이트 길이가 정확한지 확인(INVALID_LENGTH)한 뒤,
+        // ByteReader로 값을 꺼내고 필드 범위를 검사(INVALID_FIELD)합니다.
+        CodecError DecodeMessagePayload(
+            MessageType type,
+            ByteReader& r,
+            MessagePayload& outPayload
+        )
+        {
+            switch (type)
+            {
+            case MessageType::JOIN:
+            {
+                // JOIN은 본문이 0바이트여야 합니다.
+                if (r.Remaining() != 0) return CodecError::INVALID_LENGTH;
+
+                outPayload = JoinPayload{};
+                return CodecError::NONE;
+            }
+
+            case MessageType::ACCEPT:
+            {
+                if (r.Remaining() != 12) return CodecError::INVALID_LENGTH;
+
+                AcceptPayload p{};
+                p.assignedPlayerId = r.ReadU8();
+                p.maxPlayers = r.ReadU8();
+                p.reserved = r.ReadU16();
+                p.udpToken = r.ReadU64();
+
+                if (!IsValidPlayerSlot(p.assignedPlayerId)
+                    || p.maxPlayers != MAX_PROTOCOL_PLAYERS
+                    || p.reserved != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::REJECT:
+            {
+                if (r.Remaining() != 4) return CodecError::INVALID_LENGTH;
+
+                RejectPayload p{};
+                p.reason = static_cast<RejectReason>(r.ReadU8());
+                p.reserved0 = r.ReadU8();
+                p.reserved1 = r.ReadU16();
+
+                if (!IsValidRejectReason(p.reason)
+                    || p.reserved0 != 0
+                    || p.reserved1 != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+
+            }
+
+            case MessageType::READY:
+            {
+                if (r.Remaining() != 4) return CodecError::INVALID_LENGTH;
+
+                ReadyPayload p{};
+                p.playerId = r.ReadU8();
+                p.isReady = r.ReadU8();
+                p.reserved = r.ReadU16();
+
+                if (!IsValidPlayerSlot(p.playerId)
+                    || !IsValidBoolU8(p.isReady)
+                    || p.reserved != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::ROOM_STATE:
+            {
+                if (r.Remaining() != 8) return CodecError::INVALID_LENGTH;
+
+                RoomStatePayload p{};
+                for (auto& slot : p.slots) {
+                    slot.playerId = r.ReadU8();
+                    slot.connected = r.ReadU8();
+                    slot.ready = r.ReadU8();
+                    slot.udpRegistered = r.ReadU8();
+
+                    if (!IsValidPlayerSlot(slot.playerId)
+                        || !IsValidBoolU8(slot.connected)
+                        || !IsValidBoolU8(slot.ready)
+                        || !IsValidBoolU8(slot.udpRegistered))
+                    {
+                        return CodecError::INVALID_FIELD;
+                    }
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::LOAD:
+            {
+                if (r.Remaining() != 4) return CodecError::INVALID_LENGTH;
+
+                LoadPayload p{};
+                p.stageId = r.ReadU16();
+                p.reserved = r.ReadU16();
+
+                if (p.stageId == 0 || p.reserved != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::LOADED:
+            {
+                if (r.Remaining() != 4) return CodecError::INVALID_LENGTH;
+                LoadedPayload p{};
+                p.playerId = r.ReadU8();
+                p.reserved0 = r.ReadU8();
+                p.reserved1 = r.ReadU16();
+
+                if (!IsValidPlayerSlot(p.playerId)
+                    || p.reserved0 != 0
+                    || p.reserved1 != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+
+            }
+
+            case MessageType::START:
+            {
+                if (r.Remaining() != 12) return CodecError::INVALID_LENGTH;
+
+                StartPayload p{};
+                p.startHostTick = r.ReadU32();
+                p.simRateHz = r.ReadU16();
+                p.stateRateHz = r.ReadU16();
+                p.inputRateHz = r.ReadU16();
+                p.reserved = r.ReadU16();
+
+                if (p.simRateHz == 0
+                    || p.stateRateHz == 0
+                    || p.inputRateHz == 0
+                    || p.reserved != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::UDP_REGISTER:
+            {
+                if (r.Remaining() != 12) return CodecError::INVALID_LENGTH;
+                UdpRegisterPayload p{};
+                p.playerId = r.ReadU8();
+                p.reserved0 = r.ReadU8();
+                p.reserved1 = r.ReadU16();
+                p.udpToken = r.ReadU64();
+                if (!IsValidPlayerSlot(p.playerId)
+                    || p.reserved0 != 0
+                    || p.reserved1 != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::UDP_ACK:
+            {
+                if (r.Remaining() != 4) return CodecError::INVALID_LENGTH;
+                UdpAckPayload p{};
+                p.playerId = r.ReadU8();
+                p.registered = r.ReadU8();
+                p.reserved = r.ReadU16();
+                if (!IsValidPlayerSlot(p.playerId)
+                    || !IsValidBoolU8(p.registered)
+                    || p.reserved != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::PLAYER_INPUT:
+            {
+                if (r.Remaining() != 8) return CodecError::INVALID_LENGTH;
+                PlayerInputPayload p{};
+                p.playerId = r.ReadU8();
+                p.moveBits = r.ReadU8();
+                p.fireHeld = r.ReadU8();
+                p.reserved = r.ReadU8();
+                p.inputSequence = r.ReadU32();
+                if (!IsValidPlayerSlot(p.playerId)
+                    || (p.moveBits & ~MoveBit::ALL_VALID) != 0
+                    || !IsValidBoolU8(p.fireHeld)
+                    || p.reserved != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::STATE_SNAPSHOT:
+            {
+                // 스냅샷 본문은 최소 8바이트 이상이어야 합니다.
+                if (r.Remaining() < SNAPSHOT_HEADER_BYTES) return CodecError::INVALID_LENGTH;
+
+                StateSnapshotPayload p{};
+                p.snapshotTick = r.ReadU32();
+                p.partIndex = r.ReadU8();
+                p.partCount = r.ReadU8();
+                const std::uint16_t objectCount = r.ReadU16();
+
+                // 남은 바이트 수가 (객체 개수 * 32바이트)와 정확히 일치하는지 확인
+                const std::size_t expectedObjectBytes =
+                    static_cast<std::size_t>(objectCount) * OBJECT_STATE_RECORD_BYTES;
+
+                if (r.Remaining() != expectedObjectBytes) return CodecError::INVALID_LENGTH;
+
+                if (objectCount > MAX_SNAPSHOT_OBJECTS_PER_PACKET) return CodecError::TOO_LARGE;
+
+                if (p.partCount == 0 || p.partIndex >= p.partCount) return CodecError::INVALID_FIELD;
+
+                p.objects.resize(objectCount);
+                for (std::uint16_t i = 0; i < objectCount; ++i) {
+                    ObjectStateRecord& obj = p.objects[i];
+                    obj.objectId = r.ReadU32();
+                    obj.kind = static_cast<NetObjectKind>(r.ReadU8());
+                    obj.subType = r.ReadU8();
+                    obj.alive = r.ReadU8();
+                    obj.fsmState = r.ReadU8();
+                    obj.pos = r.ReadVec2();
+                    obj.vel = r.ReadVec2();
+                    obj.hp = r.ReadI32();
+                    obj.maxHp = r.ReadI32();
+
+                    if (obj.objectId == 0
+                        || !IsValidNetObjectKind(obj.kind)
+                        || !IsValidBoolU8(obj.alive))
+                    {
+                        return CodecError::INVALID_FIELD;
+                    }
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::SPAWN:
+            {
+                if (r.Remaining() != 36) return CodecError::INVALID_LENGTH;
+
+                SpawnPayload p{};
+                p.eventId = r.ReadU32();
+                p.objectId = r.ReadU32();
+                p.kind = static_cast<NetObjectKind>(r.ReadU8());
+                p.subType = r.ReadU8();
+                p.ownerPlayerId = r.ReadU8();
+                p.patternType = r.ReadU8();
+                p.pos = r.ReadVec2();
+                p.vel = r.ReadVec2();
+                p.hp = r.ReadI32();
+                p.damage = r.ReadI32();
+
+                if (p.eventId == 0
+                    || p.objectId == 0
+                    || !IsValidNetObjectKind(p.kind)
+                    || !IsValidOptionalPlayerSlot(p.ownerPlayerId))
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::DESPAWN:
+            {
+                if (r.Remaining() != 12) return CodecError::INVALID_LENGTH;
+
+                DespawnPayload p{};
+                p.eventId = r.ReadU32();
+                p.objectId = r.ReadU32();
+                p.reason = static_cast<DespawnReason>(r.ReadU8());
+                p.reserved0 = r.ReadU8();
+                p.reserved1 = r.ReadU16();
+
+                if (p.eventId == 0
+                    || p.objectId == 0
+                    || !IsValidDespawnReason(p.reason)
+                    || p.reserved0 != 0
+                    || p.reserved1 != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+
+            }
+
+            case MessageType::COMBAT_EVENT:
+            {
+                if (r.Remaining() != 28) return CodecError::INVALID_LENGTH;
+
+                CombatEventPayload p{};
+                p.eventId = r.ReadU32();
+                p.kind = static_cast<CombatEventKind>(r.ReadU8());
+                p.instigatorPlayerId = r.ReadU8();
+                p.updatedPlayerLevel = r.ReadU8();
+                p.reserved = r.ReadU8();
+                p.sourceObjectId = r.ReadU32();
+                p.targetObjectId = r.ReadU32();
+                p.confirmedHp = r.ReadI32();
+                p.scoreDelta = r.ReadI32();
+                p.teamScore = r.ReadU32();
+
+                if (p.eventId == 0
+                    || !IsValidCombatEventKind(p.kind)
+                    || !IsValidOptionalPlayerSlot(p.instigatorPlayerId)
+                    || p.updatedPlayerLevel > 5
+                    || p.reserved != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::RESULT:
+            {
+                if (r.Remaining() != 12) return CodecError::INVALID_LENGTH;
+
+                ResultPayload p{};
+                p.eventId = r.ReadU32();
+                p.outcome = static_cast<MatchOutcome>(r.ReadU8());
+                p.reserved0 = r.ReadU8();
+                p.reserved1 = r.ReadU16();
+                p.finalTeamScore = r.ReadU32();
+
+                if (p.eventId == 0
+                    || !IsValidMatchOutcome(p.outcome)
+                    || p.reserved0 != 0
+                    || p.reserved1 != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::HEARTBEAT:
+            {
+                if (r.Remaining() != 0) return CodecError::INVALID_LENGTH;
+                outPayload = HeartbeatPayload{};
+                return CodecError::NONE;
+            }
+
+            case MessageType::LEAVE:
+            {
+                if (r.Remaining() != 4) return CodecError::INVALID_LENGTH;
+                LeavePayload p{};
+                p.playerId = r.ReadU8();
+                p.reason = static_cast<DisconnectReason>(r.ReadU8());
+                p.reserved = r.ReadU16();
+                if (!IsValidPlayerSlot(p.playerId)
+                    || !IsValidDisconnectReason(p.reason)
+                    || p.reserved != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            case MessageType::END:
+            {
+                if (r.Remaining() != 4) return CodecError::INVALID_LENGTH;
+                EndPayload p{};
+                p.reason = static_cast<DisconnectReason>(r.ReadU8());
+                p.reserved0 = r.ReadU8();
+                p.reserved1 = r.ReadU16();
+                if (!IsValidDisconnectReason(p.reason)
+                    || p.reserved0 != 0
+                    || p.reserved1 != 0)
+                {
+                    return CodecError::INVALID_FIELD;
+                }
+                outPayload = p;
+                return CodecError::NONE;
+            }
+
+            default:
+                return CodecError::UNKNOWN_TYPE;
+            }
+
+        }
+
+
     }
 
+    
+
     // =========================================================================
-    // [5] CPacketCodec 공개 멤버 함수 구현
+    // [6] CPacketCodec 공개 멤버 함수 구현
     // =========================================================================
 
     // 32바이트 패킷 헤더만 검증하고 Big-Endian 바이트 배열로 직렬화합니다.
@@ -567,15 +1049,36 @@ namespace protocol
         return CodecError::NONE;
     }
 
-    // (11/03 구현 예정) 바이트 배열에서 32바이트 헤더를 읽어오는 함수
+    // (11/03 구현 ) 바이트 배열에서 32바이트 헤더를 읽고 검증한다.
+    // 실패 시 호출자의 out은 변경하지 않는다.
     CodecError CPacketCodec::DecodeHeader(
         std::span<const std::uint8_t> frame,
         PacketHeader& out)
     {
-        (void)frame;
-        (void)out;
-        // 11/03 작업에서 구현한다.
-        return CodecError::UNSUPPORTED_MESSAGE;
+        // 1순위: 입력 바이트가 32바이트 미만이면 즉시 TRUNCATED 반환
+        if (frame.size() < HEADER_BYTES) return CodecError::TRUNCATED;
+
+        // 임시 구조체(parsed)에 먼저 32바이트 읽어 들입니다.
+        ByteReader reader{ frame.subspan(0, HEADER_BYTES) };
+        PacketHeader parsed{};
+        parsed.magic = reader.ReadU16();
+        parsed.version = reader.ReadU16();
+        parsed.type = static_cast<MessageType>(reader.ReadU16());
+        parsed.flags = reader.ReadU16();
+        parsed.totalBytes = reader.ReadU32();
+        parsed.sessionId = reader.ReadU32();
+        parsed.roundId = reader.ReadU32();
+        parsed.sequence = reader.ReadU32();
+        parsed.hostTick = reader.ReadU32();
+        parsed.reserved = reader.ReadU32();
+    
+        // 2~9순위: 헤더 필드 유효성 검사
+        const CodecError err = ValidateHeaderFields(parsed);
+        if (err != CodecError::NONE) return err;
+
+        // 모든 검사를 통과했을 때만 out에 복사
+        out = parsed;
+        return CodecError::NONE;
     }
 
     // 메시지 전체(헤더 32B + 본문 NB)를 검증하고 하나의 Big-Endian 바이트 배열로 직렬화합니다.
@@ -632,14 +1135,56 @@ namespace protocol
         return CodecError::NONE;
     }
 
-    // (11/03~11/04 구현 예정) 바이트 배열을 Message 구조체로 복원하는 함수
+    // (11/03구현) 단일 프레임 바이트 배열을 검증하고 Message 구조체로 복원합니다.
+    // 중간에 어떤 에러가 발생하더라도 호출자의 out은 절대 변경되지 않습니다.
     CodecError CPacketCodec::Decode(
         std::span<const std::uint8_t> frame,
         Message& out)
     {
-        (void)frame;
-        (void)out;
-        // 11/03~11/04 작업에서 구현한다.
-        return CodecError::UNSUPPORTED_MESSAGE;
+        // 1단계: 앞 32바이트 헤더 역직렬화 및 기본 검증
+        if (frame.size() < HEADER_BYTES) return CodecError::TRUNCATED;
+
+        ByteReader headerreader{ frame.subspan(0, HEADER_BYTES) };
+        PacketHeader parsedHeader{};
+        parsedHeader.magic = headerreader.ReadU16();
+        parsedHeader.version = headerreader.ReadU16();
+        parsedHeader.type = static_cast<MessageType>(headerreader.ReadU16());
+        parsedHeader.flags = headerreader.ReadU16();
+        parsedHeader.totalBytes = headerreader.ReadU32();
+        parsedHeader.sessionId = headerreader.ReadU32();
+        parsedHeader.roundId = headerreader.ReadU32();
+        parsedHeader.sequence = headerreader.ReadU32();
+        parsedHeader.hostTick = headerreader.ReadU32();
+        parsedHeader.reserved = headerreader.ReadU32();
+
+        // PROTOCOL_V1.md 4절의 우선순위에 맞춰 헤더와 프레임 길이검사
+        if (parsedHeader.magic != MAGIC) return CodecError::BAD_MAGIC;
+        if (parsedHeader.version != VERSION) return CodecError::UNSUPPORTED_VERSION;
+        const auto rawType = static_cast<std::uint16_t>(parsedHeader.type);
+        if (!IsValidMessageTypeValue(rawType)) return CodecError::UNKNOWN_TYPE;
+        if (parsedHeader.flags != FLAGS_NONE) return CodecError::INVALID_FLAGS;
+        if (parsedHeader.reserved != RESERVED_VALUE) return CodecError::INVALID_RESERVED;
+        if (parsedHeader.totalBytes < HEADER_BYTES) return CodecError::INVALID_LENGTH;
+        const std::size_t maxBytes = MaxMessageBytesFor(parsedHeader.type);
+        if (parsedHeader.totalBytes > maxBytes || frame.size() > maxBytes) return CodecError::TOO_LARGE;
+
+        if (parsedHeader.totalBytes != frame.size()) return CodecError::INVALID_LENGTH;
+        if (parsedHeader.roundId != 1) return CodecError::INVALID_FIELD;
+        if (parsedHeader.type == MessageType::JOIN && parsedHeader.sessionId != 0) return CodecError::INVALID_FIELD;
+
+        // 2단계: 32바이트 이후의 본문(Payload) 바이트 역직렬화 및 범위 검증
+        ByteReader bodyReader{ frame.subspan(HEADER_BYTES) };
+        MessagePayload parsedPayload{};
+        const CodecError bodyErr = DecodeMessagePayload(
+            parsedHeader.type,
+            bodyReader,
+            parsedPayload);
+
+        if (bodyErr != CodecError::NONE) return bodyErr;
+
+        // 3단계: 헤더와 본문이 모두 100% 정상일 때만 호출자의 out에 최종 결과를 옮겨 담습니다.
+        out.header = parsedHeader;
+        out.payload = std::move(parsedPayload);
+        return CodecError::NONE;
     }
 }

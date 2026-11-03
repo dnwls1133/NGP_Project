@@ -196,6 +196,53 @@ namespace
             fixtures::VALID_SPAWN_BYTES, decoded);
         Check(decSpawnErr == CodecError::NONE && decoded == validSpawn,
             "Decode: Fixed 68-byte SPAWN matches expected fields", counters);
+        // 왕복(Encode -> Decode) 검증: STATE_SNAPSHOT, COMBAT_EVENT
+        {
+            Message combatMsg{};
+            combatMsg.header.type = MessageType::COMBAT_EVENT;
+            combatMsg.header.totalBytes = 60;
+            combatMsg.header.sessionId = 1000;
+            combatMsg.header.roundId = 1;
+            combatMsg.header.sequence = 25;
+            combatMsg.header.hostTick = 450;
+
+            CombatEventPayload combat{};
+            combat.eventId = 9;
+            combat.kind = CombatEventKind::DAMAGE_APPLIED;
+            combat.instigatorPlayerId = 0;
+            combat.updatedPlayerLevel = 2;
+            combat.sourceObjectId = 101;
+            combat.targetObjectId = 202;
+            combat.confirmedHp = 35;
+            combat.scoreDelta = 100;
+            combat.teamScore = 1500;
+            combatMsg.payload = combat;
+
+            std::vector<std::uint8_t> wire;
+            Message roundTripOut{};
+            Check(CPacketCodec::Encode(combatMsg, wire) == CodecError::NONE
+                && CPacketCodec::Decode(wire, roundTripOut) == CodecError::NONE
+                && roundTripOut == combatMsg,
+                "Decode: COMBAT_EVENT round-trip preserves all header and payload fields",
+                counters);
+
+        }
+
+        // 본문 필드 오류 시 부분 결과 노출 방지 (헤더는 정상이나 본문 moveBits가 잘못된 경우 out 보존
+        {
+            auto badBodyBytes = std::vector<std::uint8_t>(
+                fixtures::VALID_PLAYER_INPUT_BYTES.begin(),
+                fixtures::VALID_PLAYER_INPUT_BYTES.end());
+            badBodyBytes[33] = 0x80; // 허용되지 않는 moveBits 주입
+
+            Message out = validJoin;
+            Check(CPacketCodec::Decode(badBodyBytes, out) == CodecError::INVALID_FIELD
+                && out == validJoin,
+                "Decode: Body validation failure does not expose partial header to out",
+                counters);
+        }
+
+
         // 단축 입력: 길이 0~31 모두 TRUNCATED
         bool allTruncatedRejected = true;
         for (std::size_t len = 0; len < HEADER_BYTES; ++len)
