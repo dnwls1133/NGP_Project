@@ -7,6 +7,9 @@
 #include <cstdint>
 #include <iostream>
 #include <vector>
+#include <chrono>
+#include <iterator>
+#include <string>
 
 namespace
 {
@@ -14,6 +17,10 @@ namespace
     using protocol::CodecError;
     using protocol::Message;
     using protocol::MessageType;
+    using Clock = std::chrono::steady_clock;
+
+    constexpr int NETWORK_TIMEOUT_MS = 10000;
+    constexpr int ACCEPT_TIMEOUT_MS = 60000;
 
     struct Fixture
     {
@@ -33,6 +40,26 @@ namespace
     {
         int passed = 0;
         int failed = 0;
+    };
+
+    struct TestSocket
+    {
+        SOCKET value = INVALID_SOCKET;
+
+        TestSocket() = default;
+        TestSocket(const TestSocket&) = delete;
+        TestSocket& operator=(const TestSocket&) = delete;
+
+        ~TestSocket()
+        {
+            transport::CloseSocket(value);
+        }
+    };
+
+    struct NetworkCase
+    {
+        const char* name;
+        std::vector<Step> steps;
     };
 
     Bytes Slice(const Bytes& bytes, std::size_t offset, std::size_t count)
@@ -166,6 +193,396 @@ namespace
         std::cout << "[PASS] " << name << "\n";
         ++counters.passed;
     }
+
+    bool WaitReady(SOCKET sock, bool writing, Clock::time_point deadline)
+    {
+        while (Clock::now() < deadline)
+        {
+            transport::SocketReady ready{};
+
+            if (!transport::WaitForSockets(sock, INVALID_SOCKET, writing, false, 50, ready))
+            {
+                std::cerr << "[NETWORK] select error=" << WSAGetLastError() << "\n";
+                return false;
+            }
+
+            if (writing ? ready.tcpWritable : ready.tcpReadable)
+                return true;
+        }
+
+        std::cerr << "[NETWORK] Timeout\n";
+        return false;
+    }
+
+    bool OpenNetworkSocket(bool host, unsigned short port, TestSocket& connection)
+    {
+        if (host)
+        {
+            TestSocket listener;
+            listener.value = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+            if (listener.value == INVALID_SOCKET)
+                return false;
+
+            sockaddr_in address{};
+            address.sin_family = AF_INET;
+            address.sin_addr.s_addr = htonl(INADDR_ANY);
+            address.sin_port = htons(port);
+
+            if (bind(listener.value, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR)
+                return false;
+
+            if (listen(listener.value, 1) == SOCKET_ERROR)
+                return false;
+
+            if (!transport::SetNonBlocking(listener.value))
+                return false;
+
+            std::cout
+                << "[HOST] TCP port: " << port << "\n"
+                << "Client 대기 중... (최대 60초)\n";
+
+            const auto deadline = Clock::now() + std::chrono::milliseconds(ACCEPT_TIMEOUT_MS);
+
+            if (!WaitReady(listener.value, false, deadline))
+                return false;
+
+            connection.value = accept(listener.value, nullptr, nullptr);
+
+            if (connection.value == INVALID_SOCKET)
+                return false;
+
+            if (!transport::SetNonBlocking(connection.value))
+                return false;
+
+            std::cout << "[HOST] Client 연결 완료\n";
+            return true;
+        }
+
+        std::string ip;
+        std::cout << "Host IP를 입력해 주십시오: ";
+
+        if (!(std::cin >> ip))
+            return false;
+
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(port);
+
+        if (inet_pton(AF_INET, ip.c_str(), &address.sin_addr) != 1)
+        {
+            std::cerr << "[CLIENT] 잘못된 IPv4 주소\n";
+            return false;
+        }
+
+        connection.value = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+        if (connection.value == INVALID_SOCKET)
+            return false;
+
+        const auto result = transport::ConnectTcp(connection.value, address, NETWORK_TIMEOUT_MS);
+
+        if (result.status != transport::IoStatus::Success)
+        {
+            std::cerr << "[CLIENT] Connect error=" << result.errorCode << "\n";
+            return false;
+        }
+
+        std::cout << "[CLIENT] Host 연결 완료\n";
+        return true;
+    }
+
+    bool TransferExact(SOCKET sock, char* data, std::size_t size, bool sending)
+    {
+        const auto deadline = Clock::now() + std::chrono::milliseconds(NETWORK_TIMEOUT_MS);
+        std::size_t offset = 0;
+
+        while (offset < size)
+        {
+            if (!WaitReady(sock, sending, deadline))
+                return false;
+
+            const int remaining = static_cast<int>(size - offset);
+
+            const auto result = sending
+                ? transport::SendTcp(sock, data + offset, remaining)
+                : transport::ReceiveTcp(sock, data + offset, remaining);
+
+            if (result.status == transport::IoStatus::WouldBlock)
+                continue;
+
+            if (result.status != transport::IoStatus::Success || result.bytes <= 0)
+            {
+                std::cerr
+                    << "[NETWORK] " << (sending ? "Send" : "Receive")
+                    << " failed, status=" << static_cast<int>(result.status)
+                    << ", socketError=" << result.errorCode << "\n";
+
+                return false;
+            }
+
+            offset += static_cast<std::size_t>(result.bytes);
+        }
+
+        return true;
+    }
+
+    bool SendStepBytes(SOCKET sock, const Bytes& bytes)
+    {
+        // TransferExact의 공용 인터페이스에 맞춘 송신용 복사본.
+        Bytes copy = bytes;
+
+        return TransferExact(sock, reinterpret_cast<char*>(copy.data()), copy.size(), true);
+    }
+
+    bool SendStepResult(SOCKET sock, bool passed)
+    {
+        char result = passed ? 1 : 0;
+        return TransferExact(sock, &result, 1, true);
+    }
+
+    bool ReceiveStepResult(SOCKET sock)
+    {
+        char result = 0;
+
+        if (!TransferExact(sock, &result, 1, false))
+            return false;
+
+        if (result != 1)
+        {
+            std::cerr << "[FAIL] 상대방의 복원 검증 실패\n";
+            return false;
+        }
+
+        return true;
+    }
+
+    std::size_t CountBufferedBytes(const transport::TcpState& state)
+    {
+        std::size_t size = state.partialFrame.size();
+
+        for (const auto& message : state.received)
+            size += message.header.totalBytes;
+
+        return size;
+    }
+
+    bool ReceiveStepBytes(SOCKET sock, transport::TcpState& state, std::size_t inputSize, transport::MessageResult& result)
+    {
+        result = {};
+
+        const std::size_t target = CountBufferedBytes(state) + inputSize;
+        const auto deadline = Clock::now() + std::chrono::milliseconds(NETWORK_TIMEOUT_MS);
+
+        while (CountBufferedBytes(state) < target)
+        {
+            if (!WaitReady(sock, false, deadline))
+                return false;
+
+            result = transport::ReceiveTcpMessages(sock, state);
+
+            if (result.status == transport::IoStatus::WouldBlock)
+                continue;
+
+            // 코덱 오류도 검증 필요
+            // 결과 보존 후 CheckStep에서 예상한 오류인지 비교
+            if (result.status == transport::IoStatus::Error && result.socketError == 0 && result.codecError != CodecError::NONE)
+                return true;
+
+            // 소켓 오류 or 예상하지 않은 연결 종료 -> 수신 실패
+            if (result.status != transport::IoStatus::Success)
+            {
+                std::cerr
+                    << "[NETWORK] Receive failed"
+                    << ", status=" << static_cast<int>(result.status)
+                    << ", socketError=" << result.socketError
+                    << ", codecError=" << static_cast<int>(result.codecError)
+                    << "\n";
+
+                return false;
+            }
+        }
+
+        if (CountBufferedBytes(state) != target)
+        {
+            std::cerr << "[FAIL] 예상한 수신 바이트 수와 다름\n";
+            return false;
+        }
+
+        return true;
+    }
+
+    std::vector<NetworkCase> BuildNetworkCases(const Fixture& a, const Fixture& b, const Fixture& c)
+    {
+        std::vector<NetworkCase> cases;
+
+        cases.push_back({
+            "N01 Single frame",
+            {
+                { a.bytes, { a.message }, {} }
+            }
+            });
+
+        cases.push_back({
+            "N02 Split header",
+            {
+                { Slice(c.bytes, 0, 10), {}, Slice(c.bytes, 0, 10) },
+                { Slice(c.bytes, 10, 34), { c.message }, {} }
+            }
+            });
+
+        cases.push_back({
+            "N03 Header boundary",
+            {
+                { Slice(c.bytes, 0, 32), {}, Slice(c.bytes, 0, 32) },
+                { Slice(c.bytes, 32, 12), { c.message }, {} }
+            }
+            });
+
+        cases.push_back({
+            "N04 Split body",
+            {
+                { Slice(c.bytes, 0, 37), {}, Slice(c.bytes, 0, 37) },
+                { Slice(c.bytes, 37, 7), { c.message }, {} }
+            }
+            });
+
+        NetworkCase byteCase{ "N05 One byte at a time", {} };
+
+        for (std::size_t i = 0; i < c.bytes.size(); ++i)
+        {
+            Step step;
+            step.input = Slice(c.bytes, i, 1);
+
+            if (i + 1 == c.bytes.size())
+                step.expectedMessages.push_back(c.message);
+            else
+                step.expectedPartial = Slice(c.bytes, 0, i + 1);
+
+            byteCase.steps.push_back(std::move(step));
+        }
+
+        cases.push_back(std::move(byteCase));
+
+        cases.push_back({
+            "N06 Multiple frames",
+            {
+                { Concat({ a.bytes, b.bytes, c.bytes }), { a.message, b.message, c.message }, {} }
+            }
+            });
+
+        cases.push_back({
+            "N07 Complete plus partial",
+            {
+                { Concat({ a.bytes, Slice(c.bytes, 0, 9) }), { a.message }, Slice(c.bytes, 0, 9) },
+                { Slice(c.bytes, 9, 35), { a.message, c.message }, {} }
+            }
+            });
+
+        cases.push_back({
+            "N08 Tail plus next frame",
+            {
+                { Slice(c.bytes, 0, 40), {}, Slice(c.bytes, 0, 40) },
+                { Concat({ Slice(c.bytes, 40, 4), b.bytes }), { c.message, b.message }, {} }
+            }
+            });
+
+        cases.push_back({
+            "N09 Header-only frame",
+            {
+                { Slice(a.bytes, 0, 31), {}, Slice(a.bytes, 0, 31) },
+                { Slice(a.bytes, 31, 1), { a.message }, {} }
+            }
+            });
+
+        const Bytes shortLength = ChangeTotalBytes(a.bytes, 31);
+        cases.push_back({
+            "N10 Reject short length",
+            {
+                { shortLength, {}, shortLength, CodecError::INVALID_LENGTH }
+            }
+            });
+
+        const Bytes oversized = ChangeTotalBytes(a.bytes, 65537);
+        cases.push_back({
+            "N11 Reject oversized length",
+            {
+                { oversized, {}, oversized, CodecError::TOO_LARGE }
+            }
+            });
+
+        return cases;
+    }
+
+    bool RunNetworkDirection(SOCKET sock, bool sending, const char* direction, const std::vector<NetworkCase>& cases)
+    {
+        std::cout
+            << "\n=== " << direction << " ===\n"
+            << "Local role: " << (sending ? "sender" : "receiver") << "\n";
+
+        std::size_t passedCases = 0;
+
+        for (const auto& test : cases)
+        {
+            // 매번 새로운 프레이밍 상태로 시작
+            transport::TcpState state;
+
+            std::cout << "[TEST] " << test.name << "\n";
+
+            for (std::size_t i = 0; i < test.steps.size(); ++i)
+            {
+                const auto& step = test.steps[i];
+
+                if (sending)
+                {
+                    if (!SendStepBytes(sock, step.input))
+                        return false;
+
+                    // 검증 완료 후 다음 조각을 보내기
+                    if (!ReceiveStepResult(sock))
+                    {
+                        std::cerr << "[FAIL] " << test.name << ", step=" << i + 1 << "\n";
+                        return false;
+                    }
+                }
+                else
+                {
+                    transport::MessageResult result{};
+
+                    const bool received = ReceiveStepBytes(sock, state, step.input.size(), result);
+                    const bool matched = received && CheckStep(state, result, step);
+
+                    if (!SendStepResult(sock, matched))
+                        return false;
+
+                    if (!matched)
+                    {
+                        std::cerr << "[FAIL] " << test.name << ", step=" << i + 1 << "\n";
+                        return false;
+                    }
+
+                    std::cout
+                        << "  step=" << i + 1
+                        << ", messages=" << state.received.size()
+                        << ", partial=" << state.partialFrame.size()
+                        << " PASS\n";
+                }
+            }
+
+            ++passedCases;
+
+            std::cout
+                << "[PASS] " << test.name
+                << (sending ? " (receiver confirmed)" : " (locally verified)")
+                << "\n";
+        }
+
+        std::cout
+            << "[" << direction << "] passed=" << passedCases
+            << " failed=0\n";
+
+        return true;
+    }
 }
 
 bool RunTcpFramingTests()
@@ -183,94 +600,17 @@ bool RunTcpFramingTests()
 
     Counters counters;
 
-    // F01: 정상 메시지 한 개
-    RunCase("F01 Single frame", { { a.bytes, { a.message }, {} } }, counters);
+    const auto cases = BuildNetworkCases(a, b, c);
 
-    // F02: 헤더 중간에서 분할
-    RunCase("F02 Split header", {
-        { Slice(c.bytes, 0, 10), {}, Slice(c.bytes, 0, 10) },
-        { Slice(c.bytes, 10, 34), { c.message }, {} }
-        }, counters);
+    for (const auto& test : cases)
+        RunCase(test.name, test.steps, counters);
 
-    // F03: 헤더와 본문 경계에서 분할
-    RunCase("F03 Header boundary", {
-        { Slice(c.bytes, 0, 32), {}, Slice(c.bytes, 0, 32) },
-        { Slice(c.bytes, 32, 12), { c.message }, {} }
-        }, counters);
-
-    // F04: 본문 중간에서 분할
-    RunCase("F04 Split body", {
-        { Slice(c.bytes, 0, 37), {}, Slice(c.bytes, 0, 37) },
-        { Slice(c.bytes, 37, 7), { c.message }, {} }
-        }, counters);
-
-    // F05: 한 바이트씩 전달
-    std::vector<Step> byteSteps;
-
-    for (std::size_t i = 0; i < c.bytes.size(); ++i)
-    {
-        Step step;
-        step.input = Slice(c.bytes, i, 1);
-
-        if (i + 1 == c.bytes.size())
-            step.expectedMessages.push_back(c.message);
-        else
-            step.expectedPartial = Slice(c.bytes, 0, i + 1);
-
-        byteSteps.push_back(std::move(step));
-    }
-
-    RunCase("F05 One byte at a time", byteSteps, counters);
-
-    // F06: 본문 없는 메시지의 마지막 헤더 바이트
-    RunCase("F06 Header-only frame", {
-        { Slice(a.bytes, 0, 31), {}, Slice(a.bytes, 0, 31) },
-        { Slice(a.bytes, 31, 1), { a.message }, {} }
-        }, counters);
-
-    // F07: 여러 메시지가 한 번에 도착
-    RunCase("F07 Multiple frames", {
-        { Concat({ a.bytes, b.bytes, c.bytes }),
-          { a.message, b.message, c.message }, {} }
-        }, counters);
-
-    // F08: 완성 메시지와 다음 메시지 일부가 함께 도착
-    RunCase("F08 Complete plus partial", {
-        { Concat({ a.bytes, Slice(c.bytes, 0, 9) }),
-          { a.message }, Slice(c.bytes, 0, 9) },
-
-        { Slice(c.bytes, 9, 35),
-          { a.message, c.message }, {} }
-        }, counters);
-
-    // F09: 이전 메시지의 끝과 다음 메시지가 함께 도착
-    RunCase("F09 Tail plus next frame", {
-        { Slice(c.bytes, 0, 40), {}, Slice(c.bytes, 0, 40) },
-
-        { Concat({ Slice(c.bytes, 40, 4), b.bytes }),
-          { c.message, b.message }, {} }
-        }, counters);
-
-    // F10: 빈 입력이 기존 누적 상태를 변경하지 않음
-    RunCase("F10 Empty input", {
+    // 빈 입력의 상태 보존은 함수 단위로 확인한다.
+    RunCase("U12 Empty input", {
         { {}, {}, {} },
         { Slice(c.bytes, 0, 10), {}, Slice(c.bytes, 0, 10) },
         { {}, {}, Slice(c.bytes, 0, 10) },
         { Slice(c.bytes, 10, 34), { c.message }, {} }
-        }, counters);
-
-    // F11: 전체 길이가 헤더 크기보다 작음
-    const Bytes shortLength = ChangeTotalBytes(a.bytes, 31);
-
-    RunCase("F11 Reject short length", {
-        { shortLength, {}, shortLength, CodecError::INVALID_LENGTH }
-        }, counters);
-
-    // F12: 최대 TCP 프레임 크기 초과
-    const Bytes oversized = ChangeTotalBytes(a.bytes, 65537);
-
-    RunCase("F12 Reject oversized length", {
-        { oversized, {}, oversized, CodecError::TOO_LARGE }
         }, counters);
 
     std::cout
@@ -279,4 +619,51 @@ bool RunTcpFramingTests()
         << " failed=" << counters.failed << "\n";
 
     return counters.failed == 0;
+}
+
+bool RunTcpFramingNetworkTests(bool host, unsigned short port)
+{
+    Fixture a;
+    Fixture b;
+    Fixture c;
+
+    if (!PrepareFixtures(a, b, c))
+        return false;
+
+    const auto cases = BuildNetworkCases(a, b, c);
+
+    TestSocket connection;
+
+    if (!OpenNetworkSocket(host, port, connection))
+    {
+        std::cerr << "[FAIL] TCP 연결 준비 실패\n";
+        return false;
+    }
+
+    // 서로 프레이밍 시험 모드 확인
+    char hello[] = { 'F', 'S', '0', '2' };
+    char peerHello[4]{};
+
+    if (!TransferExact(connection.value, hello, sizeof(hello), true))
+        return false;
+
+    if (!TransferExact(connection.value, peerHello, sizeof(peerHello), false))
+        return false;
+
+    if (!std::equal(std::begin(hello), std::end(hello), std::begin(peerHello)))
+    {
+        std::cerr << "[FAIL] 시험 모드 또는 버전 불일치\n";
+        return false;
+    }
+
+    // 1단계: Host 송신, Client 검증
+    if (!RunNetworkDirection(connection.value, host, "Host -> Client", cases))
+        return false;
+
+    // 2단계: Client 송신, Host 검증
+    if (!RunNetworkDirection(connection.value, !host, "Client -> Host", cases))
+        return false;
+
+    std::cout << "\n[SUITE] PASS\n";
+    return true;
 }

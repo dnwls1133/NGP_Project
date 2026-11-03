@@ -53,6 +53,11 @@ namespace
         std::cout
             << "\nTCP framing unit test (no sockets):\n"
             << "  NetHarness.exe framing-test\n";
+
+        std::cout
+            << "\nTCP framing network test:\n"
+            << "  NetHarness.exe framing-host\n"
+            << "  NetHarness.exe framing-client\n";
     }
 
     bool ParseCount(std::string_view text, std::uint32_t& out)
@@ -197,14 +202,42 @@ namespace
 
 int main(int argc, char* argv[])
 {
-    if (argc == 2 && std::string_view(argv[1]) == "--help")
+    if (argc == 2)
     {
-        PrintUsage();
-        return 0;
-    }
+        const std::string_view mode = argv[1];
 
-    if (argc == 2 && std::string_view(argv[1]) == "framing-test")
-        return RunTcpFramingTests() ? 0 : 1;
+        if (mode == "framing-host" || mode == "framing-client")
+        {
+            WSADATA wsaData{};
+            const int startupError = WSAStartup(MAKEWORD(2, 2), &wsaData);
+
+            if (startupError != 0)
+            {
+                std::cerr << "WSAStartup failed: " << startupError << "\n";
+                return 1;
+            }
+
+            const bool passed = RunTcpFramingNetworkTests(mode == "framing-host", TCP_PORT);
+
+            if (WSACleanup() == SOCKET_ERROR)
+            {
+                std::cerr << "WSACleanup failed: " << WSAGetLastError() << "\n";
+                return 1;
+            }
+
+            if (!passed)
+                std::cerr << "[SUITE] FAIL\n";
+
+            return passed ? 0 : 1;
+        }
+        else if (mode == "--help")
+        {
+            PrintUsage();
+            return 0;
+        }
+        else if (mode == "framing-test")
+            return RunTcpFramingTests() ? 0 : 1;
+    }
 
     Options options;
 
