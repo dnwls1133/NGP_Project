@@ -164,6 +164,13 @@ void CScene_Title::CreateMenus()
         CResMgr::GetInst()->LoadTexture(L"OpenRoom_Hover", L"texture\\Menu Items\\Open Room\\Sprite_Label_OpenRoom_1.png"));
     openRoomButton->SetPos(Vec2(290.0f, 520.0f));
     openRoomButton->SetScale(Vec2(210.0f, 70.0f));
+    openRoomButton->SetClickedCallBack(
+        [](DWORD_PTR, DWORD_PTR) {
+            lobbyMode = LOBBY_MODE::HOST;
+            ChangeScene(SCENE_TYPE::LOBBY);
+        },
+        (DWORD_PTR)0, (DWORD_PTR)0
+    );
     m_pSecondMenu->AddChild(openRoomButton);
 
     auto enterRoomButton = new CMenuItem(
@@ -171,6 +178,13 @@ void CScene_Title::CreateMenus()
         CResMgr::GetInst()->LoadTexture(L"EnterRoom_Hover", L"texture\\Menu Items\\Enter Room\\Sprite_Label_EnterRoom_1.png"));
     enterRoomButton->SetPos(Vec2(290.0f, 600.0f));
     enterRoomButton->SetScale(Vec2(210.0f, 70.0f));
+    enterRoomButton->SetClickedCallBack(
+        [](DWORD_PTR, DWORD_PTR) {
+            lobbyMode = LOBBY_MODE::GUEST;
+            ChangeScene(SCENE_TYPE::LOBBY);
+        },
+        (DWORD_PTR)0, (DWORD_PTR)0
+    );
     m_pSecondMenu->AddChild(enterRoomButton);
 
     auto backButton = new CMenuItem(
