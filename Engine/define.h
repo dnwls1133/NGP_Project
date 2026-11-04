@@ -2,6 +2,18 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <tchar.h>
+
+extern TCHAR curAddressStr[256];
+extern int curAddressStrIndex;
+
+enum class LOBBY_MODE
+{
+    HOST,
+    GUEST
+};
+
+extern LOBBY_MODE lobbyMode;
 
 using PlayerId = std::uint8_t;
 constexpr std::size_t MAX_PLAYERS = 2;
@@ -62,7 +74,8 @@ enum class SCENE_TYPE
 	STAGE_01,
 	STAGE_02,
     CREDITS,
-	END,
+    LOBBY,
+    END,
 };
 
 enum class BRUSH_TYPE

@@ -1,12 +1,14 @@
 ﻿#include "pch.h"
 #include "CSceneMgr.h"
-#include "CScene_Title.h"
-#include "CScene_Ranking.h"
-#include "CScene_Start.h"
-#include "CScene_Tool.h"
-#include "CScene_Stage01.h"
-#include "CScene_Manual.h"
+
 #include "CScene_Credits.h"
+#include "CScene_Lobby.h"
+#include "CScene_Manual.h"
+#include "CScene_Ranking.h"
+#include "CScene_Stage01.h"
+#include "CScene_Start.h"
+#include "CScene_Title.h"
+#include "CScene_Tool.h"
 
 CSceneMgr::CSceneMgr()
 	: m_arrScene{}
@@ -43,6 +45,9 @@ void CSceneMgr::init()
 
 	m_arrScene[static_cast<UINT>(SCENE_TYPE::START)] = new CScene_Start;
 	m_arrScene[static_cast<UINT>(SCENE_TYPE::START)]->SetName(L"Start Scene");
+
+    m_arrScene[static_cast<UINT>(SCENE_TYPE::LOBBY)] = new CScene_Lobby;
+    m_arrScene[static_cast<UINT>(SCENE_TYPE::LOBBY)]->SetName(L"Lobby Scene");
 
     m_arrScene[static_cast<UINT>(SCENE_TYPE::STAGE_01)] = new CScene_Stage01;
     m_arrScene[static_cast<UINT>(SCENE_TYPE::STAGE_01)]->SetName(L"Stage01 Scene");
