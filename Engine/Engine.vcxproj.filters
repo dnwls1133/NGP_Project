@@ -381,6 +381,7 @@
     <ClInclude Include="CScene_Lobby.h">
       <Filter>Engine\05.Scene\Scene_Lobby</Filter>
     </ClInclude>
+    <ClInclude Include="CLoadingBackground.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Engine.rc">
@@ -581,5 +582,6 @@
     <ClCompile Include="CScene_Lobby.cpp">
       <Filter>Engine\05.Scene\Scene_Lobby</Filter>
     </ClCompile>
+    <ClCompile Include="CLoadingBackground.cpp" />
   </ItemGroup>
 </Project>
