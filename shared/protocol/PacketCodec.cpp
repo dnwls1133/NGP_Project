@@ -213,9 +213,66 @@ namespace protocol
         }
 
         // =====================================================================
-        // [3] 공통 헤더(32바이트) 유효성 검사 함수
+        // [3] 메시지 종류별 규격 길이(totalBytes) 및 공통 헤더(32바이트) 유효성 검사
         //     PROTOCOL_V1.md 4절에 정의된 판정 우선순위 순서대로 헤더의 각 필드를 검사합니다.
         // =====================================================================
+
+        // 해당 메시지 종류(type)가 가질 수 있는 정상 전체 바이트 길이(totalBytes)인지 확인합니다.
+
+        constexpr bool IsValidTotalBytesForType(MessageType type, std::uint32_t
+            totalBytes) noexcept
+        {
+            switch (type)
+            {
+            case MessageType::JOIN:
+            case MessageType::HEARTBEAT:
+                return totalBytes == 32;
+
+            case MessageType::REJECT:
+            case MessageType::READY:
+            case MessageType::LOAD:
+            case MessageType::LOADED:
+            case MessageType::UDP_ACK:
+            case MessageType::LEAVE:
+            case MessageType::END:
+                return totalBytes == 36;
+
+            case MessageType::ROOM_STATE:
+            case MessageType::PLAYER_INPUT:
+                return totalBytes == 40;
+
+            case MessageType::ACCEPT:
+            case MessageType::START:
+            case MessageType::UDP_REGISTER:
+            case MessageType::DESPAWN:
+            case MessageType::RESULT:
+                return totalBytes == 44;
+
+            case MessageType::COMBAT_EVENT:
+                return totalBytes == 60;
+
+            case MessageType::SPAWN:
+                return totalBytes == 68;
+
+            case MessageType::STATE_SNAPSHOT:
+            {
+                // 스냅샷은 최소 40B(헤더 32B + 스냅샷 헤더 8B) 이상이고,
+                // (totalBytes - 40)이 객체 레코드 크기(32B)로 나누어떨어져야 합니다.
+                constexpr std::uint32_t minSnapshotBytes =
+                    static_cast<std::uint32_t>(HEADER_BYTES + SNAPSHOT_HEADER_BYTES);
+                if (totalBytes < minSnapshotBytes)
+                    return false;
+                const std::uint32_t objectBytes = totalBytes - minSnapshotBytes;
+                return (objectBytes % OBJECT_STATE_RECORD_BYTES) == 0
+                    && (objectBytes / OBJECT_STATE_RECORD_BYTES)
+                    <= MAX_SNAPSHOT_OBJECTS_PER_PACKET;
+            }
+
+            default:
+                return false;
+            }
+        }
+
         CodecError ValidateHeaderFields(const PacketHeader& header) noexcept
         {
             // 1순위: 매직 넘버가 0x5653("VS")인지 확인
@@ -247,11 +304,15 @@ namespace protocol
             if (header.totalBytes > MaxMessageBytesFor(header.type))
                 return CodecError::TOO_LARGE;
 
-            // 8순위: 단일 스테이지(Stage01) 규칙상 roundId가 1인지 확인
+            // 8순위 (11/04 추가): 메시지 종류별 고정/가변 규격 길이와 totalBytes가 일치하는지 확인
+            if (!IsValidTotalBytesForType(header.type, header.totalBytes))
+                return CodecError::INVALID_LENGTH;  
+
+            // 9순위: 단일 스테이지(Stage01) 규칙상 roundId가 1인지 확인
             if (header.roundId != 1)
                 return CodecError::INVALID_FIELD;
 
-            // 9순위: 처음 접속 요청하는 JOIN 메시지는 아직 세션 발급 전이므로 sessionId가 0이어야 함
+            // 10순위: 처음 접속 요청하는 JOIN 메시지는 아직 세션 발급 전이므로 sessionId가 0이어야 함
             if (header.type == MessageType::JOIN && header.sessionId != 0)
                 return CodecError::INVALID_FIELD;
 
@@ -1169,6 +1230,7 @@ namespace protocol
         if (parsedHeader.totalBytes > maxBytes || frame.size() > maxBytes) return CodecError::TOO_LARGE;
 
         if (parsedHeader.totalBytes != frame.size()) return CodecError::INVALID_LENGTH;
+        if (!IsValidTotalBytesForType(parsedHeader.type, parsedHeader.totalBytes)) return CodecError::INVALID_LENGTH;
         if (parsedHeader.roundId != 1) return CodecError::INVALID_FIELD;
         if (parsedHeader.type == MessageType::JOIN && parsedHeader.sessionId != 0) return CodecError::INVALID_FIELD;
 
