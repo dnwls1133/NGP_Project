@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <array>
 #include <utility>
+#include <limits>
 
 #pragma comment(lib, "Ws2_32.lib")
 
 namespace
 {
+
     transport::IoResult SocketErrorResult()
     {
         const int error = WSAGetLastError();
@@ -50,6 +52,61 @@ namespace transport
     {
         u_long enabled = 1;
         return ioctlsocket(sock, FIONBIO, &enabled) != SOCKET_ERROR;
+    }
+
+    
+    IoResult ConnectTcp(SOCKET sock, const sockaddr_in& destination, int timeoutMs)
+    {
+        if (sock == INVALID_SOCKET || destination.sin_family != AF_INET || timeoutMs <= 0)
+            return { IoStatus::Error, 0, WSAEINVAL };
+
+        if (!SetNonBlocking(sock))
+            return { IoStatus::Error, 0, WSAGetLastError() };
+
+        const int result = connect(sock, reinterpret_cast<const sockaddr*>(&destination), sizeof(destination));
+
+        // 즉시 연결
+        if (result == 0)
+            return { IoStatus::Success, 0, 0 };
+
+        const int error = WSAGetLastError();
+
+        // 비블로킹 연결 진행 중이 아닌 실제 오류면
+        if (error != WSAEWOULDBLOCK)
+            return { IoStatus::Error, 0, error };
+
+        fd_set writeSet;
+        fd_set errorSet;
+
+        FD_ZERO(&writeSet);
+        FD_ZERO(&errorSet);
+        FD_SET(sock, &writeSet);
+        FD_SET(sock, &errorSet);
+
+        timeval timeout{};
+        timeout.tv_sec = timeoutMs / 1000;
+        timeout.tv_usec = (timeoutMs % 1000) * 1000;
+
+        // 연결 완료 또는 실패 대기
+        const int selected = select(0, nullptr, &writeSet, &errorSet, &timeout);
+
+        if (selected == SOCKET_ERROR)
+            return { IoStatus::Error, 0, WSAGetLastError() };
+
+        if (selected == 0)
+            return { IoStatus::Error, 0, WSAETIMEDOUT };
+
+        // 준비 상태만으로 성공을 판단X, 최종 연결 오류를 확인 필요
+        int socketError = 0;
+        int optionSize = sizeof(socketError);
+
+        if (getsockopt(sock, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&socketError), &optionSize) == SOCKET_ERROR)
+            return { IoStatus::Error, 0, WSAGetLastError() };
+
+        if (socketError != 0)
+            return { IoStatus::Error, 0, socketError };
+
+        return { IoStatus::Success, 0, 0 };
     }
 
     bool WaitForSockets(SOCKET tcpSocket, SOCKET udpSocket, bool watchTcpWrite, bool watchUdpWrite, int timeoutMs, SocketReady& ready)
@@ -234,19 +291,34 @@ namespace transport
 
         return {};
     }
-    MessageResult FlushTcpSend(SOCKET sock, TcpState& state)
+
+    MessageResult FlushTcpSend(SOCKET sock, TcpState& state, const TcpSendFunction& sendFunction)
     {
         if (state.sendQueue.empty())
             return {};
 
         const auto& frame = state.sendQueue.front();
 
-        const auto result = SendTcp(sock, reinterpret_cast<const char*>(frame.data() + state.sendOffset), static_cast<int>(frame.size() - state.sendOffset));
+        if (!sendFunction || state.sendOffset >= frame.size())
+            return TransportFailure(WSAEINVAL);
 
+        const std::size_t remaining = frame.size() - state.sendOffset;
+
+        if (remaining > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
+            return TransportFailure(WSAEMSGSIZE);
+
+        const char* data = reinterpret_cast<const char*>(frame.data() + state.sendOffset);
+        const auto result = sendFunction(sock, data, static_cast<int>(remaining));
+
+        // WouldBlock·오류·연결 종료에서는 큐와 오프셋을 변경하면 안됨
         if (result.status != IoStatus::Success)
             return FromIoResult(result);
 
-        state.sendOffset += result.bytes;
+        // 정상 송신이면 양수 바이트 처리
+        if (result.bytes <= 0 || static_cast<std::size_t>(result.bytes) > remaining)
+            return TransportFailure(WSAEINVAL);
+
+        state.sendOffset += static_cast<std::size_t>(result.bytes);
 
         if (state.sendOffset == frame.size())
         {

@@ -112,59 +112,17 @@ namespace
     {
         std::cout << "[CLIENT] Host 연결 중...\n";
 
-        const int result = connect(client.tcpSocket, reinterpret_cast<const sockaddr*>(&client.hostTcp), sizeof(client.hostTcp));
+        const auto result = transport::ConnectTcp(client.tcpSocket, client.hostTcp, 5000);
 
-        if (result == 0)
+        if (result.status == transport::IoStatus::Success)
             return true;
 
-        const int error = WSAGetLastError();
-
-        if (error != WSAEWOULDBLOCK)
-        {
-            std::cerr << "connect failed: " << error << "\n";
-            return false;
-        }
-
-        fd_set writeSet;
-        fd_set errorSet;
-        FD_ZERO(&writeSet);
-        FD_ZERO(&errorSet);
-        FD_SET(client.tcpSocket, &writeSet);
-        FD_SET(client.tcpSocket, &errorSet);
-
-        timeval timeout{};
-        timeout.tv_sec = 5;
-
-        const int selected = select(0, nullptr, &writeSet, &errorSet, &timeout);
-
-        if (selected == SOCKET_ERROR)
-        {
-            std::cerr << "Connect select failed: " << WSAGetLastError() << "\n";
-            return false;
-        }
-
-        if (selected == 0)
-        {
+        if (result.errorCode == WSAETIMEDOUT)
             std::cerr << "TCP connect timeout\n";
-            return false;
-        }
+        else
+            std::cerr << "TCP connect failed: " << result.errorCode << "\n";
 
-        int socketError = 0;
-        int optionSize = sizeof(socketError);
-
-        if (getsockopt(client.tcpSocket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&socketError), &optionSize) == SOCKET_ERROR)
-        {
-            std::cerr << "getsockopt failed: " << WSAGetLastError() << "\n";
-            return false;
-        }
-
-        if (socketError != 0)
-        {
-            std::cerr << "TCP connect failed: " << socketError << "\n";
-            return false;
-        }
-
-        return true;
+        return false;
     }
 
     void CloseClientSockets(ClientContext& client)

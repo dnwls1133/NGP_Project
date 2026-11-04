@@ -351,6 +351,107 @@ namespace
                 "Decode: 65537-byte TCP message returns TOO_LARGE", counters);
         }
     }
+
+    // 4. 11/04 짧은 헤더·길이·버전·종류·필드 범위 검사 및 최대 크기 경계 시험 묶음
+    void RunValidationAndBoundarySuite(TestCounters& counters)
+    {
+        using namespace protocol;
+
+        const Message sentinelMsg = fixtures::MakeValidPlayerInputMessage();
+        const PacketHeader sentinelHdr = sentinelMsg.header;
+
+        // (1) 31바이트 짧은 헤더 거부 fixture 확인 (DecodeHeader 및 Decod 모두 TRUNCATED)
+        {
+            PacketHeader hdrOut = sentinelHdr;
+            Message msgOut = sentinelMsg;
+            Check(CPacketCodec::DecodeHeader(fixtures::REJECT_TRUNCATED_31_BYTES, hdrOut)
+                == CodecError::TRUNCATED
+                && hdrOut == sentinelHdr
+                && CPacketCodec::Decode(fixtures::REJECT_TRUNCATED_31_BYTES, msgOut)
+                == CodecError::TRUNCATED
+                && msgOut == sentinelMsg, "Boundary1104: 31-byte header fixture rejected with TRUNCATED in DecodeHeader & Decode",
+                counters);
+        }
+
+        // (2) 매직, 미지원 버전(0, 2) 미지원 종류(0,20) 거부 fixture 확인
+        {
+            Message out = sentinelMsg;
+            Check(CPacketCodec::Decode(fixtures::REJECT_BAD_MAGIC_BYTES, out) ==
+            CodecError::BAD_MAGIC
+                && out == sentinelMsg, "Boundary1104: REJECT_BAD_MAGIC_BYTES returns BAD_MAGIC"
+                , counters);
+            Check(CPacketCodec::Decode(fixtures::REJECT_UNSUPPORTED_VERSION_0_BYTES, out) == CodecError::UNSUPPORTED_VERSION
+                && CPacketCodec::Decode(fixtures::REJECT_UNSUPPORTED_VERSION_2_BYTES, out) == CodecError::UNSUPPORTED_VERSION
+                && out == sentinelMsg,
+                "Boundary1104: Version 0 and 2 fixtures return UNSUPPORTED_VERSION", counters);
+            Check(CPacketCodec::Decode(fixtures::REJECT_UNKNOWN_TYPE_0_BYTES, out) == CodecError::UNKNOWN_TYPE
+                && CPacketCodec::Decode(fixtures::REJECT_UNKNOWN_TYPE_20_BYTES, out) == CodecError::UNKNOWN_TYPE
+                && out == sentinelMsg,
+                "Boundary1104: Type 0 and 20 fixtures return UNKNOWN_TYPE", counters);
+
+        }
+
+        // (3) 길이 불일치 거부 fixture 3종 (프레임 길이 불일치 / 메시지별 규격 길이 불일치 / 스냅샷 objectCount 불일치)
+        {
+            Message out = sentinelMsg;
+            PacketHeader hdrOut = sentinelHdr;
+            Check(CPacketCodec::Decode(fixtures::REJECT_TOTAL_BYTES_FRAME_MISMATCH_BYTES, out) == CodecError::INVALID_LENGTH
+                && out == sentinelMsg,
+                "Boundary1104: Header totalBytes(40) != frame size(39) returns INVALID_LENGTH", counters);
+            Check(CPacketCodec::DecodeHeader(fixtures::REJECT_TYPE_LENGTH_MISMATCH_BYTES, hdrOut) == CodecError::INVALID_LENGTH
+                && hdrOut == sentinelHdr
+                && CPacketCodec::Decode(fixtures::REJECT_TYPE_LENGTH_MISMATCH_BYTES, out) == CodecError::INVALID_LENGTH
+                && out == sentinelMsg,
+                "Boundary1104: PLAYER_INPUT with 36-byte length returns INVALID_LENGTH", counters);
+            Check(CPacketCodec::Decode(fixtures::REJECT_SNAPSHOT_OBJECT_COUNT_MISMATCH_BYTES, out) == CodecError::INVALID_LENGTH
+                && out == sentinelMsg,
+                "Boundary1104: STATE_SNAPSHOT objectCount mismatch returns INVALID_LENGTH", counters);
+        }
+
+        // (4) 복합 오류 시 PROTOCOL_V1.md 4절 판정 우선순위 확인
+        //     본문 길이 불일치(10순위 INVALID_LENGTH) + roundId=0(11순위 INVALID_FIELD) 동시 발생 시 INVALID_LENGTH 우선
+        {
+            auto bytes = std::vector<std::uint8_t>(
+                fixtures::REJECT_TYPE_LENGTH_MISMATCH_BYTES.begin(),
+                fixtures::REJECT_TYPE_LENGTH_MISMATCH_BYTES.end());
+            bytes[19] = 0x00; // roundId = 0 (INVALID_FIELD 조건 동시 주입)
+
+            Message out = sentinelMsg;
+            Check(CPacketCodec::Decode(bytes, out) == CodecError::INVALID_LENGTH
+                && out == sentinelMsg,
+                "Boundary1104: Length mismatch takes precedence over roundId=0 (INVALID_LENGTH before INVALID_FIELD)",
+                counters);
+        }
+
+        // (5) UDP / TCP 최대 크기 경계 확인 (1200B vs 1201B, 65536B vs 65537B)
+        {
+            Message out = sentinelMsg;
+
+            // UDP 정확히 1200B 프레임: 크기 상한(TOO_LARGE)은 통과하고 스냅샷 규격 길이
+            // (1200-40=1160은 32의 배수 아님)로 INVALID_LENGTH 판정
+            std::vector<std::uint8_t> udp1200(MAX_UDP_BYTES, 0);
+            udp1200[0] = 0x56; udp1200[1] = 0x53;
+            udp1200[2] = 0x00; udp1200[3] = 0x01;
+            udp1200[4] = 0x00; udp1200[5] = 0x0C; // STATE_SNAPSHOT (UDP)
+            udp1200[8] = 0x00; udp1200[9] = 0x00; udp1200[10] = 0x04; udp1200[11] = 0xB0; // 1200
+            udp1200[19] = 0x01; // roundId = 1
+
+            // TCP 정확히 65536B 프레임: 크기 상한(TOO_LARGE)은 통과하고 SPAWN 규격 길이(68B)
+            // INVALID_LENGTH 판정
+            std::vector<std::uint8_t> tcp65536(MAX_TCP_BYTES, 0);
+            tcp65536[0] = 0x56; tcp65536[1] = 0x53;
+            tcp65536[2] = 0x00; tcp65536[3] = 0x01;
+            tcp65536[4] = 0x00; tcp65536[5] = 0x0D; // SPAWN (TCP)
+            tcp65536[8] = 0x00; tcp65536[9] = 0x01; tcp65536[10] = 0x00; tcp65536[11] = 0x00; // 65536
+            tcp65536[19] = 0x01; // roundId = 1
+
+            Check(CPacketCodec::Decode(udp1200, out) == CodecError::INVALID_LENGTH
+                && CPacketCodec::Decode(tcp65536, out) == CodecError::INVALID_LENGTH
+                && out == sentinelMsg,
+                "Boundary1104: Exact max size (UDP 1200B, TCP 65536B) is not rejected as TOO_LARGE",
+                counters);
+        }
+    }
 }
 
 
@@ -362,6 +463,7 @@ int main()
     RunContractSanityChecks(counters);
     RunEncodeVectorSuite(counters);
     RunDecodeVectorSuite(counters);
+    RunValidationAndBoundarySuite(counters);
 
 
     std::cout << "----------------------------------------------\n";

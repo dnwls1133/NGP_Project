@@ -8,6 +8,7 @@
 #include <deque>
 #include <span>
 #include <vector>
+#include <functional>
 
 #include "PacketCodec.h"
 
@@ -74,7 +75,13 @@ namespace transport
         std::deque<ReceivedDatagram> received;
     };
 
+    using TcpSendFunction = std::function<IoResult(SOCKET, const char*, int)>;
+
     bool SetNonBlocking(SOCKET sock);
+
+    // 소켓을 비블로킹으로 설정하고 제한 시간 내 TCP 연결을 시도
+    // 소켓 생성과 종료는 호출자가 담당
+    IoResult ConnectTcp(SOCKET sock, const sockaddr_in& destination, int timeoutMs = 5000);
 
     bool WaitForSockets(SOCKET tcpSocket, SOCKET udpSocket, bool watchTcpWrite, bool watchUdpWrite, int timeoutMs, SocketReady& ready);
 
@@ -91,7 +98,7 @@ namespace transport
     MessageResult QueueUdpMessage(UdpState& state, const sockaddr_in& destination, const protocol::Message& message);
 
     // 쓰기 가능할 때 호출
-    MessageResult FlushTcpSend(SOCKET sock, TcpState& state);
+    MessageResult FlushTcpSend(SOCKET sock, TcpState& state, const TcpSendFunction& sendFunction = SendTcp);
     MessageResult FlushUdpSend(SOCKET sock, UdpState& state);
 
     // 읽기 가능할 때 호출
