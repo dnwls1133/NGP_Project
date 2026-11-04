@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <array>
 #include <utility>
+#include <limits>
 
 #pragma comment(lib, "Ws2_32.lib")
 
 namespace
 {
+
     transport::IoResult SocketErrorResult()
     {
         const int error = WSAGetLastError();
@@ -289,19 +291,34 @@ namespace transport
 
         return {};
     }
-    MessageResult FlushTcpSend(SOCKET sock, TcpState& state)
+
+    MessageResult FlushTcpSend(SOCKET sock, TcpState& state, const TcpSendFunction& sendFunction)
     {
         if (state.sendQueue.empty())
             return {};
 
         const auto& frame = state.sendQueue.front();
 
-        const auto result = SendTcp(sock, reinterpret_cast<const char*>(frame.data() + state.sendOffset), static_cast<int>(frame.size() - state.sendOffset));
+        if (!sendFunction || state.sendOffset >= frame.size())
+            return TransportFailure(WSAEINVAL);
 
+        const std::size_t remaining = frame.size() - state.sendOffset;
+
+        if (remaining > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
+            return TransportFailure(WSAEMSGSIZE);
+
+        const char* data = reinterpret_cast<const char*>(frame.data() + state.sendOffset);
+        const auto result = sendFunction(sock, data, static_cast<int>(remaining));
+
+        // WouldBlock·오류·연결 종료에서는 큐와 오프셋을 변경하면 안됨
         if (result.status != IoStatus::Success)
             return FromIoResult(result);
 
-        state.sendOffset += result.bytes;
+        // 정상 송신이면 양수 바이트 처리
+        if (result.bytes <= 0 || static_cast<std::size_t>(result.bytes) > remaining)
+            return TransportFailure(WSAEINVAL);
+
+        state.sendOffset += static_cast<std::size_t>(result.bytes);
 
         if (state.sendOffset == frame.size())
         {

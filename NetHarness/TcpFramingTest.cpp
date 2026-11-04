@@ -1,5 +1,6 @@
 ﻿#include "TcpFramingTest.h"
 #include "TestTransport.h"
+#include "TcpTestSupport.h"
 
 #include <initializer_list>
 #include <utility>
@@ -15,23 +16,19 @@ namespace
 {
     using Bytes = std::vector<std::uint8_t>;
     using protocol::CodecError;
-    using protocol::Message;
-    using protocol::MessageType;
-    using Clock = std::chrono::steady_clock;
-
     constexpr int NETWORK_TIMEOUT_MS = 10000;
     constexpr int ACCEPT_TIMEOUT_MS = 60000;
 
     struct Fixture
     {
-        Message message;
+        tcp_test::Message message;
         Bytes bytes;
     };
 
     struct Step
     {
         Bytes input;
-        std::vector<Message> expectedMessages;
+        std::vector<tcp_test::Message> expectedMessages;
         Bytes expectedPartial;
         CodecError expectedError = CodecError::NONE;
     };
@@ -40,20 +37,6 @@ namespace
     {
         int passed = 0;
         int failed = 0;
-    };
-
-    struct TestSocket
-    {
-        SOCKET value = INVALID_SOCKET;
-
-        TestSocket() = default;
-        TestSocket(const TestSocket&) = delete;
-        TestSocket& operator=(const TestSocket&) = delete;
-
-        ~TestSocket()
-        {
-            transport::CloseSocket(value);
-        }
     };
 
     struct NetworkCase
@@ -103,13 +86,13 @@ namespace
     bool PrepareFixtures(Fixture& a, Fixture& b, Fixture& c)
     {
         // A: JOIN 32바이트
-        a.message.header.type = MessageType::JOIN;
+        a.message.header.type = tcp_test::MessageType::JOIN;
         a.message.header.sessionId = 0;
         a.message.header.sequence = 11;
         a.message.payload = protocol::JoinPayload{};
 
         // B: READY 36바이트
-        b.message.header.type = MessageType::READY;
+        b.message.header.type = tcp_test::MessageType::READY;
         b.message.header.sessionId = 1000;
         b.message.header.sequence = 22;
 
@@ -119,7 +102,7 @@ namespace
         b.message.payload = ready;
 
         // C: ACCEPT 44바이트
-        c.message.header.type = MessageType::ACCEPT;
+        c.message.header.type = tcp_test::MessageType::ACCEPT;
         c.message.header.sessionId = 1000;
         c.message.header.sequence = 33;
 
@@ -194,167 +177,12 @@ namespace
         ++counters.passed;
     }
 
-    bool WaitReady(SOCKET sock, bool writing, Clock::time_point deadline)
-    {
-        while (Clock::now() < deadline)
-        {
-            transport::SocketReady ready{};
-
-            if (!transport::WaitForSockets(sock, INVALID_SOCKET, writing, false, 50, ready))
-            {
-                std::cerr << "[NETWORK] select error=" << WSAGetLastError() << "\n";
-                return false;
-            }
-
-            if (writing ? ready.tcpWritable : ready.tcpReadable)
-                return true;
-        }
-
-        std::cerr << "[NETWORK] Timeout\n";
-        return false;
-    }
-
-    bool OpenNetworkSocket(bool host, unsigned short port, TestSocket& connection)
-    {
-        if (host)
-        {
-            TestSocket listener;
-            listener.value = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-            if (listener.value == INVALID_SOCKET)
-                return false;
-
-            sockaddr_in address{};
-            address.sin_family = AF_INET;
-            address.sin_addr.s_addr = htonl(INADDR_ANY);
-            address.sin_port = htons(port);
-
-            if (bind(listener.value, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR)
-                return false;
-
-            if (listen(listener.value, 1) == SOCKET_ERROR)
-                return false;
-
-            if (!transport::SetNonBlocking(listener.value))
-                return false;
-
-            std::cout
-                << "[HOST] TCP port: " << port << "\n"
-                << "Client 대기 중... (최대 60초)\n";
-
-            const auto deadline = Clock::now() + std::chrono::milliseconds(ACCEPT_TIMEOUT_MS);
-
-            if (!WaitReady(listener.value, false, deadline))
-                return false;
-
-            connection.value = accept(listener.value, nullptr, nullptr);
-
-            if (connection.value == INVALID_SOCKET)
-                return false;
-
-            if (!transport::SetNonBlocking(connection.value))
-                return false;
-
-            std::cout << "[HOST] Client 연결 완료\n";
-            return true;
-        }
-
-        std::string ip;
-        std::cout << "Host IP를 입력해 주십시오: ";
-
-        if (!(std::cin >> ip))
-            return false;
-
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_port = htons(port);
-
-        if (inet_pton(AF_INET, ip.c_str(), &address.sin_addr) != 1)
-        {
-            std::cerr << "[CLIENT] 잘못된 IPv4 주소\n";
-            return false;
-        }
-
-        connection.value = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-        if (connection.value == INVALID_SOCKET)
-            return false;
-
-        const auto result = transport::ConnectTcp(connection.value, address, NETWORK_TIMEOUT_MS);
-
-        if (result.status != transport::IoStatus::Success)
-        {
-            std::cerr << "[CLIENT] Connect error=" << result.errorCode << "\n";
-            return false;
-        }
-
-        std::cout << "[CLIENT] Host 연결 완료\n";
-        return true;
-    }
-
-    bool TransferExact(SOCKET sock, char* data, std::size_t size, bool sending)
-    {
-        const auto deadline = Clock::now() + std::chrono::milliseconds(NETWORK_TIMEOUT_MS);
-        std::size_t offset = 0;
-
-        while (offset < size)
-        {
-            if (!WaitReady(sock, sending, deadline))
-                return false;
-
-            const int remaining = static_cast<int>(size - offset);
-
-            const auto result = sending
-                ? transport::SendTcp(sock, data + offset, remaining)
-                : transport::ReceiveTcp(sock, data + offset, remaining);
-
-            if (result.status == transport::IoStatus::WouldBlock)
-                continue;
-
-            if (result.status != transport::IoStatus::Success || result.bytes <= 0)
-            {
-                std::cerr
-                    << "[NETWORK] " << (sending ? "Send" : "Receive")
-                    << " failed, status=" << static_cast<int>(result.status)
-                    << ", socketError=" << result.errorCode << "\n";
-
-                return false;
-            }
-
-            offset += static_cast<std::size_t>(result.bytes);
-        }
-
-        return true;
-    }
-
     bool SendStepBytes(SOCKET sock, const Bytes& bytes)
     {
         // TransferExact의 공용 인터페이스에 맞춘 송신용 복사본.
         Bytes copy = bytes;
 
-        return TransferExact(sock, reinterpret_cast<char*>(copy.data()), copy.size(), true);
-    }
-
-    bool SendStepResult(SOCKET sock, bool passed)
-    {
-        char result = passed ? 1 : 0;
-        return TransferExact(sock, &result, 1, true);
-    }
-
-    bool ReceiveStepResult(SOCKET sock)
-    {
-        char result = 0;
-
-        if (!TransferExact(sock, &result, 1, false))
-            return false;
-
-        if (result != 1)
-        {
-            std::cerr << "[FAIL] 상대방의 복원 검증 실패\n";
-            return false;
-        }
-
-        return true;
+        return tcp_test::TransferExact(sock, reinterpret_cast<char*>(copy.data()), copy.size(), true);
     }
 
     std::size_t CountBufferedBytes(const transport::TcpState& state)
@@ -372,11 +200,11 @@ namespace
         result = {};
 
         const std::size_t target = CountBufferedBytes(state) + inputSize;
-        const auto deadline = Clock::now() + std::chrono::milliseconds(NETWORK_TIMEOUT_MS);
+        const auto deadline = tcp_test::Clock::now() + std::chrono::milliseconds(NETWORK_TIMEOUT_MS);
 
         while (CountBufferedBytes(state) < target)
         {
-            if (!WaitReady(sock, false, deadline))
+            if (!tcp_test::WaitReady(sock, false, deadline))
                 return false;
 
             result = transport::ReceiveTcpMessages(sock, state);
@@ -539,7 +367,7 @@ namespace
                         return false;
 
                     // 검증 완료 후 다음 조각을 보내기
-                    if (!ReceiveStepResult(sock))
+                    if (!tcp_test::ReceiveStepResult(sock))
                     {
                         std::cerr << "[FAIL] " << test.name << ", step=" << i + 1 << "\n";
                         return false;
@@ -552,7 +380,7 @@ namespace
                     const bool received = ReceiveStepBytes(sock, state, step.input.size(), result);
                     const bool matched = received && CheckStep(state, result, step);
 
-                    if (!SendStepResult(sock, matched))
+                    if (!tcp_test::SendStepResult(sock, matched))
                         return false;
 
                     if (!matched)
@@ -632,9 +460,9 @@ bool RunTcpFramingNetworkTests(bool host, unsigned short port)
 
     const auto cases = BuildNetworkCases(a, b, c);
 
-    TestSocket connection;
+    tcp_test::TestSocket connection;
 
-    if (!OpenNetworkSocket(host, port, connection))
+    if (!tcp_test::OpenNetworkSocket(host, port, connection))
     {
         std::cerr << "[FAIL] TCP 연결 준비 실패\n";
         return false;
@@ -644,10 +472,10 @@ bool RunTcpFramingNetworkTests(bool host, unsigned short port)
     char hello[] = { 'F', 'S', '0', '2' };
     char peerHello[4]{};
 
-    if (!TransferExact(connection.value, hello, sizeof(hello), true))
+    if (!tcp_test::TransferExact(connection.value, hello, sizeof(hello), true))
         return false;
 
-    if (!TransferExact(connection.value, peerHello, sizeof(peerHello), false))
+    if (!tcp_test::TransferExact(connection.value, peerHello, sizeof(peerHello), false))
         return false;
 
     if (!std::equal(std::begin(hello), std::end(hello), std::begin(peerHello)))

@@ -136,6 +136,8 @@
     <ClCompile Include="PacketCodec.cpp" />
     <ClCompile Include="ScriptedPeer.cpp" />
     <ClCompile Include="TcpFramingTest.cpp" />
+    <ClCompile Include="TcpSendTest.cpp" />
+    <ClCompile Include="TcpTestSupport.cpp" />
     <ClCompile Include="TestTransport.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -147,6 +149,8 @@
     <ClInclude Include="ProtocolTypes.h" />
     <ClInclude Include="ScriptedPeer.h" />
     <ClInclude Include="TcpFramingTest.h" />
+    <ClInclude Include="TcpSendTest.h" />
+    <ClInclude Include="TcpTestSupport.h" />
     <ClInclude Include="TestControl.h" />
     <ClInclude Include="TestTransport.h" />
   </ItemGroup>

@@ -11,6 +11,7 @@
 #include "MessageTest.h"
 #include "ScriptedPeer.h"
 #include "TcpFramingTest.h"
+#include "TcpSendTest.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -58,19 +59,20 @@ namespace
             << "\nTCP framing network test:\n"
             << "  NetHarness.exe framing-host\n"
             << "  NetHarness.exe framing-client\n";
+
+        std::cout
+            << "\nTCP partial send test:\n"
+            << "  NetHarness.exe send-host\n"
+            << "  NetHarness.exe send-client\n";
     }
 
     bool ParseCount(std::string_view text, std::uint32_t& out)
     {
         std::uint32_t value = 0;
 
-        const auto result = std::from_chars(
-            text.data(),
-            text.data() + text.size(),
-            value);
+        const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
 
-        if (result.ec != std::errc{} || result.ptr != text.data() + text.size() ||
-            value == 0 || value > message_test::MAX_REPEATS)
+        if (result.ec != std::errc{} || result.ptr != text.data() + text.size() || value == 0 || value > message_test::MAX_REPEATS)
         {
             return false;
         }
@@ -206,7 +208,7 @@ int main(int argc, char* argv[])
     {
         const std::string_view mode = argv[1];
 
-        if (mode == "framing-host" || mode == "framing-client")
+        if (mode == "framing-host" || mode == "framing-client" || mode == "send-host" || mode == "send-client")
         {
             WSADATA wsaData{};
             const int startupError = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -217,7 +219,10 @@ int main(int argc, char* argv[])
                 return 1;
             }
 
-            const bool passed = RunTcpFramingNetworkTests(mode == "framing-host", TCP_PORT);
+            const bool sendTest = mode == "send-host" || mode == "send-client";
+            const bool host = mode == "framing-host" || mode == "send-host";
+
+            const bool passed = sendTest ? RunTcpSendTests(host, TCP_PORT) : RunTcpFramingNetworkTests(host, TCP_PORT);
 
             if (WSACleanup() == SOCKET_ERROR)
             {

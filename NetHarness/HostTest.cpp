@@ -2,6 +2,7 @@
 #include "TestTransport.h"
 #include "MessageTest.h"
 #include "TestControl.h"
+#include "TcpTestSupport.h"
 
 #include <conio.h>
 #include <chrono>
@@ -67,22 +68,8 @@ namespace
 
     bool CreateHostSockets(HostContext& host, unsigned short tcpPort, unsigned short udpPort)
     {
-        host.listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-        if (host.listenSocket == INVALID_SOCKET)
-        {
-            std::cerr << "TCP socket failed: " << WSAGetLastError() << "\n";
+        if (!tcp_test::CreateListener(host.listenSocket, tcpPort))
             return false;
-        }
-
-        if (!BindSocket(host.listenSocket, tcpPort))
-            return false;
-
-        if (listen(host.listenSocket, 1) == SOCKET_ERROR)
-        {
-            std::cerr << "listen failed: " << WSAGetLastError() << "\n";
-            return false;
-        }
 
         host.udpSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
