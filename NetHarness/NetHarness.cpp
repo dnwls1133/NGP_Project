@@ -12,6 +12,7 @@
 #include "ScriptedPeer.h"
 #include "TcpFramingTest.h"
 #include "TcpSendTest.h"
+#include "NetworkMgrTest.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -64,6 +65,12 @@ namespace
             << "\nTCP partial send test:\n"
             << "  NetHarness.exe send-host\n"
             << "  NetHarness.exe send-client\n";
+
+        std::cout
+            << "\nCNetworkMgr Test:\n"
+            << "  NetHarness.exe mgr-host\n"
+            << "  NetHarness.exe mgr-client <ip>\n";
+            
     }
 
     bool ParseCount(std::string_view text, std::uint32_t& out)
@@ -204,9 +211,17 @@ namespace
 
 int main(int argc, char* argv[])
 {
+    if (argc == 2 && std::string_view(argv[1]) == "mgr-host")
+        return network_mgr_test::Run(true, "", TCP_PORT, UDP_PORT) ? 0 : 1;
+
+    if (argc == 3 && std::string_view(argv[1]) == "mgr-client")
+        return network_mgr_test::Run(false, argv[2], TCP_PORT, UDP_PORT) ? 0 : 1;
+
     if (argc == 2)
     {
         const std::string_view mode = argv[1];
+
+        
 
         if (mode == "framing-host" || mode == "framing-client" || mode == "send-host" || mode == "send-client")
         {

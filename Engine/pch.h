@@ -1,6 +1,8 @@
 ﻿#pragma once
 #pragma comment(lib, "winmm.lib")
 #pragma warning(disable: 4819)
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <Windows.h>
 
 #include <atlimage.h>

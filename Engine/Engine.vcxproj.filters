@@ -173,6 +173,9 @@
     <Filter Include="Engine\05.Scene\Scene_Lobby">
       <UniqueIdentifier>{71f1982d-227b-496f-9949-9b6a62640946}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\03.Manager\NetworkMgr">
+      <UniqueIdentifier>{b90720ae-8b77-48d4-b20c-8433a4f1f780}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CCore.h">
@@ -381,6 +384,15 @@
     <ClInclude Include="CScene_Lobby.h">
       <Filter>Engine\05.Scene\Scene_Lobby</Filter>
     </ClInclude>
+    <ClInclude Include="CNetworkMgr.h">
+      <Filter>Engine\03.Manager\NetworkMgr</Filter>
+    </ClInclude>
+    <ClInclude Include="Common.h">
+      <Filter>Engine\01.Header</Filter>
+    </ClInclude>
+    <ClInclude Include="NetworkTypes.h">
+      <Filter>Engine\01.Header</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Engine.rc">
@@ -580,6 +592,9 @@
     </ClCompile>
     <ClCompile Include="CScene_Lobby.cpp">
       <Filter>Engine\05.Scene\Scene_Lobby</Filter>
+    </ClCompile>
+    <ClCompile Include="CNetworkMgr.cpp">
+      <Filter>Engine\03.Manager\NetworkMgr</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

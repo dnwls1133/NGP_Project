@@ -27,9 +27,6 @@
     <ClCompile Include="TestTransport.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
-    <ClCompile Include="PacketCodec.cpp">
-      <Filter>소스 파일</Filter>
-    </ClCompile>
     <ClCompile Include="MessageTest.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
@@ -45,6 +42,15 @@
     <ClCompile Include="TcpTestSupport.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="..\Engine\CNetworkMgr.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shared\protocol\PacketCodec.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="NetworkMgrTest.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="HostTest.h">
@@ -57,9 +63,6 @@
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="Common.h">
-      <Filter>헤더 파일</Filter>
-    </ClInclude>
-    <ClInclude Include="PacketCodec.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="ProtocolTypes.h">
@@ -81,6 +84,15 @@
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="TcpTestSupport.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\CNetworkMgr.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="..\shared\protocol\PacketCodec.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="NetworkMgrTest.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
   </ItemGroup>

@@ -183,6 +183,8 @@
     <ClInclude Include="CEenemi0.h" />
     <ClInclude Include="CEventMgr.h" />
     <ClInclude Include="CExposion.h" />
+    <ClInclude Include="CNetworkMgr.h" />
+    <ClInclude Include="Common.h" />
     <ClInclude Include="CRankMgr.h" />
     <ClInclude Include="CIdleState.h" />
     <ClInclude Include="CItem.h" />
@@ -231,6 +233,7 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="func.h" />
     <ClInclude Include="MissileMgr.h" />
+    <ClInclude Include="NetworkTypes.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="CScene_Lobby.h" />
@@ -263,6 +266,7 @@
     <ClCompile Include="CEenemi0.cpp" />
     <ClCompile Include="CEventMgr.cpp" />
     <ClCompile Include="CExposion.cpp" />
+    <ClCompile Include="CNetworkMgr.cpp" />
     <ClCompile Include="CRankMgr.cpp" />
     <ClCompile Include="CIdleState.cpp" />
     <ClCompile Include="CItem.cpp" />

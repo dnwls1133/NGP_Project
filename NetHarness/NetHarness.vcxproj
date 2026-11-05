@@ -129,11 +129,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\Engine\CNetworkMgr.cpp" />
+    <ClCompile Include="..\shared\protocol\PacketCodec.cpp" />
     <ClCompile Include="ClientTest.cpp" />
     <ClCompile Include="HostTest.cpp" />
     <ClCompile Include="MessageTest.cpp" />
     <ClCompile Include="NetHarness.cpp" />
-    <ClCompile Include="PacketCodec.cpp" />
+    <ClCompile Include="NetworkMgrTest.cpp" />
     <ClCompile Include="ScriptedPeer.cpp" />
     <ClCompile Include="TcpFramingTest.cpp" />
     <ClCompile Include="TcpSendTest.cpp" />
@@ -141,11 +143,13 @@
     <ClCompile Include="TestTransport.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\Engine\CNetworkMgr.h" />
+    <ClInclude Include="..\shared\protocol\PacketCodec.h" />
     <ClInclude Include="ClientTest.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="HostTest.h" />
     <ClInclude Include="MessageTest.h" />
-    <ClInclude Include="PacketCodec.h" />
+    <ClInclude Include="NetworkMgrTest.h" />
     <ClInclude Include="ProtocolTypes.h" />
     <ClInclude Include="ScriptedPeer.h" />
     <ClInclude Include="TcpFramingTest.h" />
