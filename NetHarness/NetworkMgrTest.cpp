@@ -12,6 +12,51 @@
 #include <utility>
 #include <vector>
 
+namespace network
+{
+    struct SnapshotBatchTestAccess
+    {
+        template<typename Test>
+        static bool WithConnectedHost(Test&& test)
+        {
+            CNetworkMgr mgr;
+            mgr.config.role = NetworkRole::Host;
+            mgr.netState.store(NetworkState::Connected);
+
+            sockaddr_in peer{};
+            peer.sin_family = AF_INET;
+            peer.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            peer.sin_port = htons(40001);
+
+            if (mgr.SetUdpPeer(peer) != NetworkResult::Success)
+                return false;
+
+            return std::forward<Test>(test)(mgr);
+        }
+
+        static std::optional<net::SnapshotBatch> PeekPending(CNetworkMgr& mgr)
+        {
+            std::lock_guard lock(mgr.sendMutex);
+
+            if (!mgr.pendingSnapshotBatch)
+                return std::nullopt;
+
+            return mgr.pendingSnapshotBatch->batch;
+        }
+
+        static std::optional<net::SnapshotBatch> TakePending(CNetworkMgr& mgr)
+        {
+            std::lock_guard lock(mgr.sendMutex);
+            auto pending = mgr.TakePendingSnapshotBatchLocked();
+
+            if (!pending)
+                return std::nullopt;
+
+            return std::move(pending->batch);
+        }
+    };
+}
+
 namespace network_mgr_test
 {
     namespace
@@ -320,6 +365,37 @@ namespace network_mgr_test
             std::cout << "[PASS] received=" << expectedSequence - 1 << '\n';
             return true;
         }
+
+        net::SnapshotBatch MakeSnapshotBatch(std::uint32_t tick)
+        {
+            constexpr std::uint32_t SESSION_ID = 1000;
+            constexpr std::uint8_t PART_COUNT = 2;
+            constexpr auto TOTAL_BYTES = static_cast<std::uint32_t>(protocol::HEADER_BYTES + protocol::SNAPSHOT_HEADER_BYTES + protocol::OBJECT_STATE_RECORD_BYTES);
+
+            net::SnapshotBatch batch;
+
+            for (std::uint8_t index = 0; index < PART_COUNT; ++index)
+            {
+                protocol::ObjectStateRecord object{};
+                object.objectId = static_cast<std::uint32_t>(index) + 1;
+                object.pos.x = static_cast<std::int32_t>(tick * 100 + index);
+                object.hp = 100;
+                object.maxHp = 100;
+
+                protocol::StateSnapshotPayload payload{};
+                payload.snapshotTick = tick;
+                payload.partIndex = index;
+                payload.partCount = PART_COUNT;
+                payload.objects.push_back(object);
+
+                auto message = MakeMessage(MessageType::STATE_SNAPSHOT, std::move(payload), TOTAL_BYTES, SESSION_ID, tick * PART_COUNT + index);
+                message.header.hostTick = tick;
+
+                batch.parts.push_back(std::move(message));
+            }
+
+            return batch;
+        }
     }
 
     bool RunReceiveOverflow(unsigned short tcpPort, unsigned short udpPort)
@@ -432,6 +508,58 @@ namespace network_mgr_test
 
         if (passed)
             std::cout << "[SUITE] PASS\n";
+
+        return passed;
+    }
+
+    bool RunSnapshotBatchTest()
+    {
+        using Access = network::SnapshotBatchTestAccess;
+
+        const auto batchA = MakeSnapshotBatch(10);
+        const auto batchB = MakeSnapshotBatch(11);
+        const auto batchC = MakeSnapshotBatch(12);
+
+        const auto pendingMatches = [](CNetworkMgr& mgr, const net::SnapshotBatch& expected)
+            {
+                const auto pending = Access::PeekPending(mgr);
+                return pending && *pending == expected;
+            };
+
+        const bool b01 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
+            {
+                return mgr.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
+                    && pendingMatches(mgr, batchA);
+            });
+
+        const bool b02 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
+            {
+                return mgr.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
+                    && mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::ReplacedPending
+                    && pendingMatches(mgr, batchB);
+            });
+
+        const bool b03 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
+            {
+                if (mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued)
+                    return false;
+
+                const auto inFlight = Access::TakePending(mgr);
+                if (!inFlight || *inFlight != batchA || Access::PeekPending(mgr))
+                    return false;
+
+                return mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::Queued
+                    && mgr.EnqueueSnapshotBatch(batchC) == net::SendResult::ReplacedPending
+                    && *inFlight == batchA
+                    && pendingMatches(mgr, batchC);
+            });
+
+        std::cout << (b01 ? "[PASS]" : "[FAIL]") << " B01 Initial batch queued\n";
+        std::cout << (b02 ? "[PASS]" : "[FAIL]") << " B02 Pending batch replaced\n";
+        std::cout << (b03 ? "[PASS]" : "[FAIL]") << " B03 In-flight batch preserved\n";
+
+        const bool passed = b01 && b02 && b03;
+        std::cout << (passed ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");
 
         return passed;
     }

@@ -73,7 +73,8 @@ namespace
             << "  NetHarness.exe mgr-stop-test\n"
             << "  NetHarness.exe mgr-overflow-test\n"
             << "  NetHarness.exe mgr-queue-host\n"
-            << "  NetHarness.exe mgr-queue-client <ip>\n";
+            << "  NetHarness.exe mgr-queue-client <ip>\n"
+            << "  NetHarness.exe mgr-batch-test\n";
     }
 
     bool ParseCount(std::string_view text, std::uint32_t& out)
@@ -232,11 +233,14 @@ int main(int argc, char* argv[])
     if (argc == 3 && std::string_view(argv[1]) == "mgr-queue-client")
         return network_mgr_test::RunQueueTest(false, argv[2], TCP_PORT, UDP_PORT) ? 0 : 1;
 
+    if (argc == 2 && std::string_view(argv[1]) == "mgr-batch-test")
+        return network_mgr_test::RunSnapshotBatchTest() ? 0 : 1;
+
     if (argc == 2)
     {
         const std::string_view mode = argv[1];
 
-        
+
 
         if (mode == "framing-host" || mode == "framing-client" || mode == "send-host" || mode == "send-client")
         {

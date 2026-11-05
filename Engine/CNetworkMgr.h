@@ -5,28 +5,10 @@
 #include <atomic>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <thread>
+#include <unordered_map>
 #include <vector>
-
-
-//송신:
-//protocol::Message
-//    → Encode
-//    → 인코딩된 바이트를 송신 큐에 등록
-//    → TCP 또는 UDP 송신
-//
-//TCP 수신:
-//바이트 누적
-//    → 32바이트 확보
-//    → DecodeHeader로 헤더 검증·전체 길이 확인
-//    → 전체 길이만큼 누적
-//    → Decode
-//    → 수신 큐에 등록
-//
-//UDP 수신:
-//데이터그램 하나 수신
-//    → Decode
-//    → 송신자 주소와 함께 수신 큐에 등록
 
 namespace network
 {
@@ -44,26 +26,43 @@ namespace network
         std::vector<std::uint8_t> bytes;
     };
 
-    class CNetworkMgr
+    class CNetworkMgr : public net::ISendSink
     {
         SINGLE(CNetworkMgr)
 
     private:
+        friend struct SnapshotBatchTestAccess;
+
+        struct PendingSnapshotBatch
+        {
+            sockaddr_in destination{};
+            net::SnapshotBatch batch;
+        };
+
+        struct ActiveSnapshotBatch
+        {
+            PendingSnapshotBatch pending;
+            std::size_t nextPart = 0;
+            std::vector<std::uint8_t> encodedPart;
+        };
+
         bool initialized = false;
 
         // [메인 ↔ 통신 스레드 공유 데이터]
-        std::deque<SendRequest> sendRequestQueue;       // 송신 요청 큐
-        sockaddr_in udpPeerAddress{};                   // sendMutex로 보호
-        std::deque<ReceivedMessage> recvQueue;          // 수신 메시지 큐
-        std::deque<NetworkEvent> networkEventQueue;     // 네트워크 이벤트 큐
+        std::deque<SendRequest> sendRequestQueue;                                   // 송신 요청 큐
+        sockaddr_in udpPeerAddress{};                                               // sendMutex로 보호
+        std::optional<PendingSnapshotBatch> pendingSnapshotBatch;                   // sendMutex로 보호
+        std::unordered_map<std::uint32_t, std::uint32_t> lastSnapshotTickBySession; // 세션별 마지막 수락 틱, 너무 오래된 틱 방지
+        std::deque<ReceivedMessage> recvQueue;                                       // 수신 메시지 큐
+        std::deque<NetworkEvent> networkEventQueue;                                  // 네트워크 이벤트 큐
 
         std::mutex sendMutex;                                           // sendRequestQueue 보호용
         std::mutex receiveMutex;                                        // recvQueue, networkEventQueue 보호용
 
         std::atomic<bool> stopRequested{ false };                       // 중지 요청 플래그
         std::atomic<NetworkState> netState{ NetworkState::Stopped };    // 현재 상태 : 접속 대기 / 연결 중 / 연결됨 / 종료
-        std::atomic<bool> receiveOverflow{ false };
-        bool receiveOverflowReported = false; // receiveMutex로 보호
+        std::atomic<bool> receiveOverflow{ false };                     // 수신 큐 포화 발생 여부
+        bool receiveOverflowReported = false;                           // receiveMutex로 보호
 
         std::thread transportThread;                                    // 통신 스레드
 
@@ -81,7 +80,7 @@ namespace network
 
         std::deque<PendingDatagram> udpSendQueue;           // UDP 인코딩된 송신 큐
 
-        static constexpr std::size_t MAX_SEND_REQUESTS = 1024;
+        static constexpr std::size_t MAX_SEND_REQUESTS = net::MAX_SEND_QUEUE_ENTRIES;
 
     public:
         void Shutdown();
@@ -92,7 +91,8 @@ namespace network
         NetworkResult SendTcp(const protocol::Message& message);
         NetworkResult SendUdp(const sockaddr_in& destination, const protocol::Message& message);
         NetworkResult SendUdp(const protocol::Message& message);
-        net::SendResult EnqueueSend(net::Channel channel, const protocol::Message& message);
+        net::SendResult EnqueueSend(net::Channel channel, const protocol::Message& message) override;
+        net::SendResult EnqueueSnapshotBatch(const net::SnapshotBatch& batch) override;
 
         // Host의 메인 스레드에서 세션과 토큰을 검증한 뒤 호출
         NetworkResult SetUdpPeer(const sockaddr_in& address);
@@ -108,6 +108,7 @@ namespace network
         void FlushTcpSend();
         void ReceiveTcp();
         void FlushUdpSend();
+        void FlushSnapshotBatch(ActiveSnapshotBatch& active);
         void ReceiveUdp();
 
         void PushEvent(const NetworkEvent& event);
@@ -116,6 +117,8 @@ namespace network
         bool IsReceiveQueueFullLocked() const;
         NetworkResult EnqueueSendRequest(SendRequest request);
         void StopWithTcpError( int socketError, protocol::CodecError codecError = protocol::CodecError::NONE);
+
+        std::optional<PendingSnapshotBatch> TakePendingSnapshotBatchLocked();
     };
 
 }

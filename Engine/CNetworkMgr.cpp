@@ -221,6 +221,49 @@ namespace network
         }
     }
 
+    net::SendResult CNetworkMgr::EnqueueSnapshotBatch(const net::SnapshotBatch& batch)
+    {
+        if (netState.load() != NetworkState::Connected || stopRequested.load())
+            return net::SendResult::NotRunning;
+
+        try
+        {
+            const auto validation = net::ValidateSnapshotBatch(batch);
+            if (validation != net::SendResult::Queued)
+                return validation;
+
+            PendingSnapshotBatch request{ {}, batch };
+            const auto& header = request.batch.parts.front().header;
+
+            std::lock_guard lock(sendMutex);
+
+            if (netState.load() != NetworkState::Connected || stopRequested.load())
+                return net::SendResult::NotRunning;
+
+            if (config.role != NetworkRole::Host || udpPeerAddress.sin_family != AF_INET)
+                return net::SendResult::InvalidRequest;
+
+            const auto last = lastSnapshotTickBySession.find(header.sessionId);
+            if (last != lastSnapshotTickBySession.end() && header.hostTick <= last->second)
+                return net::SendResult::StaleBatch;
+
+            if (sendRequestQueue.size() + request.batch.parts.size() > MAX_SEND_REQUESTS)
+                return net::SendResult::QueueFull;
+
+            request.destination = udpPeerAddress;
+            const bool replaced = pendingSnapshotBatch.has_value();
+            // 맵 삽입에서 할당이 실패하면 기존 대기 배치는 그대로 유지된다.
+            lastSnapshotTickBySession.insert_or_assign(header.sessionId, header.hostTick);
+            pendingSnapshotBatch = std::move(request);
+
+            return replaced ? net::SendResult::ReplacedPending : net::SendResult::Queued;
+        }
+        catch (const std::bad_alloc&)
+        {
+            return net::SendResult::NoMemory;
+        }
+    }
+
     NetworkResult CNetworkMgr::SetUdpPeer(const sockaddr_in& address)
     {
         if (config.role != NetworkRole::Host || address.sin_family != AF_INET ||
@@ -372,12 +415,21 @@ namespace network
             }
 
             std::deque<SendRequest> requests;
+            std::optional<ActiveSnapshotBatch> activeSnapshot;
 
             while (!stopRequested.load())
             {
                 {
                     std::lock_guard lock(sendMutex);
                     requests.swap(sendRequestQueue);
+
+                    if (!activeSnapshot)
+                    {
+                        auto pending = TakePendingSnapshotBatchLocked();
+
+                        if (pending)
+                            activeSnapshot.emplace(ActiveSnapshotBatch{ std::move(*pending), 0, {} });
+                    }
                 }
 
                 for (const auto& request : requests)
@@ -423,7 +475,7 @@ namespace network
 
                 FD_SET(udpSO, &readSet);
 
-                if (!udpSendQueue.empty())
+                if (!udpSendQueue.empty() || activeSnapshot)
                     FD_SET(udpSO, &writeSet);
 
                 if (state == NetworkState::Listening)
@@ -533,6 +585,13 @@ namespace network
 
                 if (FD_ISSET(udpSO, &readSet))
                     ReceiveUdp();
+
+                if (!stopRequested.load() && activeSnapshot && FD_ISSET(udpSO, &writeSet))
+                {
+                    FlushSnapshotBatch(*activeSnapshot);
+                    if (activeSnapshot->nextPart == activeSnapshot->pending.batch.parts.size())
+                        activeSnapshot.reset();
+                }
             }
             };
         run();
@@ -541,6 +600,8 @@ namespace network
             std::lock_guard lock(sendMutex);
             stopRequested.store(true);
             sendRequestQueue.clear();
+            pendingSnapshotBatch.reset();
+            lastSnapshotTickBySession.clear();
         }
 
         closeSocket(listenSO_tcp);
@@ -715,6 +776,46 @@ namespace network
             stopRequested.store(true);
     }
 
+    void CNetworkMgr::FlushSnapshotBatch(ActiveSnapshotBatch& active)
+    {
+        constexpr std::size_t MAX_PARTS_PER_ITERATION = 8;
+        const auto& parts = active.pending.batch.parts;
+        const auto& destination = active.pending.destination;
+
+        for (std::size_t sentParts = 0; sentParts < MAX_PARTS_PER_ITERATION &&
+            active.nextPart < parts.size() && !stopRequested.load(); ++sentParts)
+        {
+            if (active.encodedPart.empty())
+            {
+                const auto error = protocol::CPacketCodec::Encode(parts[active.nextPart], active.encodedPart);
+                if (error != protocol::CodecError::NONE)
+                {
+                    PushEvent(NetworkEvent{ NetworkEventType::Error, destination, 0, error });
+                    stopRequested.store(true);
+                    return;
+                }
+            }
+
+            const int size = static_cast<int>(active.encodedPart.size());
+            const int sent = sendto(udpSO, reinterpret_cast<const char*>(active.encodedPart.data()),
+                size, 0, reinterpret_cast<const sockaddr*>(&destination), sizeof(destination));
+
+            if (sent != size)
+            {
+                const int error = sent == SOCKET_ERROR ? WSAGetLastError() : WSAEMSGSIZE;
+                if (error != WSAEWOULDBLOCK)
+                {
+                    PushEvent(NetworkEvent{ NetworkEventType::Error, destination, error });
+                    stopRequested.store(true);
+                }
+                return;
+            }
+
+            ++active.nextPart;
+            active.encodedPart.clear();
+        }
+    }
+
     void CNetworkMgr::ReceiveUdp()
     {
         std::array<std::uint8_t, protocol::MAX_UDP_BYTES + 1> buffer{};
@@ -805,7 +906,8 @@ namespace network
         if (netState.load() != NetworkState::Connected || stopRequested.load())
             return NetworkResult::NotConnected;
 
-        if (sendRequestQueue.size() >= MAX_SEND_REQUESTS)
+        const std::size_t pendingParts = pendingSnapshotBatch ? pendingSnapshotBatch->batch.parts.size() : 0;
+        if (sendRequestQueue.size() + pendingParts >= MAX_SEND_REQUESTS)
             return NetworkResult::QueueFull;
 
         sendRequestQueue.push_back(std::move(request));
@@ -818,5 +920,10 @@ namespace network
         PushEvent(NetworkEvent{ NetworkEventType::Error, peerTcpAddress, socketError, codecError });
 
         stopRequested.store(true);
+    }
+
+    std::optional<CNetworkMgr::PendingSnapshotBatch> CNetworkMgr::TakePendingSnapshotBatchLocked()
+    {
+        return std::exchange(pendingSnapshotBatch, std::nullopt);
     }
 }
