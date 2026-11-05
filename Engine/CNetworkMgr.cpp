@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 #include "CNetworkMgr.h"
 #include "Common.h"
+#include "../net/SendContract.h"
 #include "../shared/protocol/PacketCodec.h"
 
 #include <array>
@@ -8,6 +9,8 @@
 #include <utility>
 #include <iostream>
 #include <chrono>
+#include <exception>
+#include <new>
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -23,7 +26,7 @@ namespace network
     NetworkResult CNetworkMgr::Start(const NetworkConfig& config)
     {
         // 1. 이미 시작됐는지 확인
-        if (netState.load() != NetworkState::Stopped || initialized || transportThread != nullptr)
+        if (netState.load() != NetworkState::Stopped || initialized || transportThread.joinable())
             return NetworkResult::AlreadyRunning;
 
         // 2. 포트·역할·Client IP 검사
@@ -36,6 +39,7 @@ namespace network
             return NetworkResult::InvalidArgument;
         }
 
+        sockaddr_in initialUdpPeer{};
         if (config.role == NetworkRole::Client)
         {
             if (config.connectTimeoutMs <= 0)
@@ -44,6 +48,10 @@ namespace network
             in_addr address{};
             if (inet_pton(AF_INET, config.hostIp.c_str(), &address) != 1)
                 return NetworkResult::InvalidArgument;
+
+            initialUdpPeer.sin_family = AF_INET;
+            initialUdpPeer.sin_port = htons(config.udpPort);
+            initialUdpPeer.sin_addr = address;
         }
 
         netState.store(NetworkState::Starting);
@@ -59,39 +67,34 @@ namespace network
         }
         initialized = true;
 
-        // 4. this->config에 설정 복사
-        this->config = config;
-
-        // 5. 중지 플래그 해제
-        stopRequested.store(false);
-
-        // 6. 통신 스레드 생성
-        //    생성 실패 시 WSACleanup 등 시작 과정 정리
+        try
         {
-            std::lock_guard lock(queueMutex);
-            recvQueue.clear();
-            networkEventQueue.clear();
+            this->config = config;
+            stopRequested.store(false);
+
+            {
+                std::lock_guard lock(sendMutex);
+                udpPeerAddress = initialUdpPeer;
+            }
+
+            {
+                std::lock_guard lock(receiveMutex);
+                recvQueue.clear();
+                networkEventQueue.clear();
+                receiveOverflow.store(false);
+                receiveOverflowReported = false;
+            }
+
+            transportThread = std::thread(&CNetworkMgr::NetworkThread, this);
         }
-
-        transportThread = CreateThread(nullptr, 0, ThreadEntry, this, 0, nullptr);
-        if (transportThread == nullptr)
+        catch (const std::exception& error)
         {
-            const DWORD error = GetLastError();
-            std::cerr << "CreateThread failed: " << error << "\n";
-
+            std::cerr << "[NETWORK] Thread startup failed: " << error.what() << '\n';
             Shutdown();
             return NetworkResult::StartupFailed;
         }
 
-        // 7. 시작 요청 성공 반환
         return NetworkResult::Success;
-    }
-
-    DWORD WINAPI CNetworkMgr::ThreadEntry(LPVOID parameter)
-    {
-        auto* manager = static_cast<CNetworkMgr*>(parameter);
-        manager->NetworkThread();
-        return 0;
     }
 
     void CNetworkMgr::Shutdown()
@@ -99,21 +102,15 @@ namespace network
         // Start와 Shutdown은 메인 스레드에서만
         stopRequested.store(true);
 
-        if (transportThread != nullptr)
+        if (transportThread.joinable())
+            transportThread.join();
+
         {
-            const DWORD result = WaitForSingleObject(transportThread, INFINITE);
-
-            if (result != WAIT_OBJECT_0)
-            {
-                std::cerr << "Thread wait failed: " << GetLastError() << "\n";
-                return;
-            }
-
-            CloseHandle(transportThread);
-            transportThread = nullptr;
+            std::lock_guard lock(sendMutex);
+            udpPeerAddress = {};
         }
 
-        // 통신 스레드 종료 전 소켓 정리
+        // 통신 스레드가 소켓을 닫고 반환, Winsock 정리
         if (initialized)
         {
             if (WSACleanup() == SOCKET_ERROR)
@@ -156,18 +153,7 @@ namespace network
         if (protocol::IsUdpMessageType(type))
             return NetworkResult::WrongTransport;
 
-        std::lock_guard lock(queueMutex);
-
-        if (netState.load() != NetworkState::Connected || stopRequested.load())
-            return NetworkResult::NotConnected;
-
-        if (sendRequestQueue.size() >= MAX_SEND_REQUESTS)
-            return NetworkResult::QueueFull;
-
-        // TCP는 이미 연결된 상대에게 보낸다.
-        sendRequestQueue.push_back(SendRequest{ TransportType::TCP, {}, message });
-
-        return NetworkResult::Success;
+        return EnqueueSendRequest(SendRequest{ TransportType::TCP, {}, message });
     }
 
     NetworkResult CNetworkMgr::SendUdp(const sockaddr_in& destination, const protocol::Message& message)
@@ -183,22 +169,78 @@ namespace network
         if (destination.sin_family != AF_INET || destination.sin_port == 0)
             return NetworkResult::InvalidArgument;
 
-        std::lock_guard lock(queueMutex);
+        return EnqueueSendRequest(SendRequest{ TransportType::UDP, destination, message });
+    }
+
+    NetworkResult CNetworkMgr::SendUdp(const protocol::Message& message)
+    {
+        sockaddr_in destination{};
+        {
+            std::lock_guard lock(sendMutex);
+
+            if (netState.load() != NetworkState::Connected || stopRequested.load())
+                return NetworkResult::NotConnected;
+
+            if (udpPeerAddress.sin_family != AF_INET)
+                return NetworkResult::UdpPeerNotSet;
+
+            destination = udpPeerAddress;
+        }
+
+        return SendUdp(destination, message);
+    }
+
+    net::SendResult CNetworkMgr::EnqueueSend(net::Channel channel, const protocol::Message& message)
+    {
+        if (netState.load() != NetworkState::Connected || stopRequested.load())
+            return net::SendResult::NotRunning;
+
+        try
+        {
+            const auto validation = net::ValidateSendRequest(channel, message);
+            if (validation != net::SendResult::Queued)
+                return validation;
+
+            const auto result = channel == net::Channel::Tcp ? SendTcp(message) : SendUdp(message);
+
+            switch (result)
+            {
+            case NetworkResult::Success:
+                return net::SendResult::Queued;
+            case NetworkResult::NotConnected:
+                return net::SendResult::NotRunning;
+            case NetworkResult::QueueFull:
+                return net::SendResult::QueueFull;
+            default:
+                return net::SendResult::InvalidRequest;
+            }
+        }
+        catch (const std::bad_alloc&)
+        {
+            return net::SendResult::NoMemory;
+        }
+    }
+
+    NetworkResult CNetworkMgr::SetUdpPeer(const sockaddr_in& address)
+    {
+        if (config.role != NetworkRole::Host || address.sin_family != AF_INET ||
+            address.sin_port == 0 || address.sin_addr.s_addr == htonl(INADDR_ANY))
+        {
+            return NetworkResult::InvalidArgument;
+        }
+
+        std::lock_guard lock(sendMutex);
 
         if (netState.load() != NetworkState::Connected || stopRequested.load())
             return NetworkResult::NotConnected;
 
-        if (sendRequestQueue.size() >= MAX_SEND_REQUESTS)
-            return NetworkResult::QueueFull;
-
-        sendRequestQueue.push_back(SendRequest{ TransportType::UDP, destination, message });
-
+        udpPeerAddress = address;
         return NetworkResult::Success;
     }
 
     bool CNetworkMgr::TryReceive(ReceivedMessage& out)
     {
-        std::lock_guard lock(queueMutex);
+        std::lock_guard lock(receiveMutex);
 
         if (recvQueue.empty())
             return false;
@@ -211,14 +253,20 @@ namespace network
 
     bool CNetworkMgr::TryPopEvent(NetworkEvent& out)
     {
-        std::lock_guard lock(queueMutex);
+        std::lock_guard lock(receiveMutex);
 
-        if (networkEventQueue.empty())
+        if (!networkEventQueue.empty())
+        {
+            out = std::move(networkEventQueue.front());
+            networkEventQueue.pop_front();
+            return true;
+        }
+
+        if (!receiveOverflow.load() || receiveOverflowReported)
             return false;
 
-        out = std::move(networkEventQueue.front());
-        networkEventQueue.pop_front();
-
+        out = NetworkEvent{ NetworkEventType::Error, {}, WSAENOBUFS };
+        receiveOverflowReported = true;
         return true;
     }
 
@@ -328,7 +376,7 @@ namespace network
             while (!stopRequested.load())
             {
                 {
-                    std::lock_guard lock(queueMutex);
+                    std::lock_guard lock(sendMutex);
                     requests.swap(sendRequestQueue);
                 }
 
@@ -486,11 +534,11 @@ namespace network
                 if (FD_ISSET(udpSO, &readSet))
                     ReceiveUdp();
             }
-        };
+            };
         run();
 
         {
-            std::lock_guard lock(queueMutex);
+            std::lock_guard lock(sendMutex);
             stopRequested.store(true);
             sendRequestQueue.clear();
         }
@@ -513,16 +561,11 @@ namespace network
         if (tcpSendQueue.empty())
             return;
 
-        const auto stopWithError = [this](int error) {
-            PushEvent(NetworkEvent{ NetworkEventType::Error, peerTcpAddress, error });
-            stopRequested.store(true);
-            };
-
         const auto& frame = tcpSendQueue.front();
 
         if (tcpSendOffset >= frame.size())
         {
-            stopWithError(WSAEINVAL);
+            StopWithTcpError(WSAEINVAL);
             return;
         }
 
@@ -535,14 +578,14 @@ namespace network
             const int error = WSAGetLastError();
 
             if (error != WSAEWOULDBLOCK)
-                stopWithError(error);
+                StopWithTcpError(error);
 
             return;
         }
 
         if (sent == 0)
         {
-            stopWithError(WSAEINVAL);
+            StopWithTcpError(WSAEINVAL);
             return;
         }
 
@@ -557,11 +600,6 @@ namespace network
 
     void CNetworkMgr::ReceiveTcp()
     {
-        const auto stopWithError = [this](int socketError, protocol::CodecError codecError = protocol::CodecError::NONE) {
-            PushEvent(NetworkEvent{ NetworkEventType::Error, peerTcpAddress, socketError, codecError });
-            stopRequested.store(true);
-            };
-
         std::array<std::uint8_t, 4096> buffer{};
         const int received = recv(tcpSO, reinterpret_cast<char*>(buffer.data()), static_cast<int>(buffer.size()), 0);
 
@@ -570,7 +608,7 @@ namespace network
             const int error = WSAGetLastError();
 
             if (error != WSAEWOULDBLOCK)
-                stopWithError(error);
+                StopWithTcpError(error);
 
             return;
         }
@@ -612,13 +650,13 @@ namespace network
 
             if (headerError != protocol::CodecError::NONE)
             {
-                stopWithError(0, headerError);
+                StopWithTcpError(0, headerError);
                 return;
             }
 
             if (protocol::IsUdpMessageType(header.type))
             {
-                stopWithError(WSAEPROTOTYPE);
+                StopWithTcpError(WSAEPROTOTYPE);
                 return;
             }
 
@@ -632,14 +670,12 @@ namespace network
 
             if (decodeError != protocol::CodecError::NONE)
             {
-                stopWithError(0, decodeError);
+                StopWithTcpError(0, decodeError);
                 return;
             }
 
-            {
-                std::lock_guard lock(queueMutex);
-                recvQueue.push_back(ReceivedMessage{ TransportType::TCP, peerTcpAddress, std::move(message) });
-            }
+            if (!PushReceived(ReceivedMessage{ TransportType::TCP, peerTcpAddress, std::move(message) }))
+                return;
 
             tcpPartialFrame.clear();
         }
@@ -721,13 +757,66 @@ namespace network
         if (!protocol::IsUdpMessageType(message.header.type))
             return;
 
-        std::lock_guard lock(queueMutex);
-        recvQueue.push_back(ReceivedMessage{ TransportType::UDP, sender, std::move(message) });
+        PushReceived(ReceivedMessage{ TransportType::UDP, sender, std::move(message) });
+    }
+
+    bool CNetworkMgr::IsReceiveQueueFullLocked() const
+    {
+        return recvQueue.size() + networkEventQueue.size() >= net::MAX_RECV_QUEUE_ENTRIES;
     }
 
     void CNetworkMgr::PushEvent(const NetworkEvent& event)
     {
-        std::lock_guard lock(queueMutex);
+        std::lock_guard lock(receiveMutex);
+
+        if (IsReceiveQueueFullLocked())
+        {
+            RequestStopOnReceiveOverflow();
+            return;
+        }
+
         networkEventQueue.push_back(event);
+    }
+
+    bool CNetworkMgr::PushReceived(ReceivedMessage message)
+    {
+        std::lock_guard lock(receiveMutex);
+
+        if (IsReceiveQueueFullLocked())
+        {
+            RequestStopOnReceiveOverflow();
+            return false;
+        }
+
+        recvQueue.push_back(std::move(message));
+        return true;
+    }
+
+    void CNetworkMgr::RequestStopOnReceiveOverflow()
+    {
+        receiveOverflow.store(true);
+        stopRequested.store(true);
+    }
+
+    NetworkResult CNetworkMgr::EnqueueSendRequest(SendRequest request)
+    {
+        std::lock_guard lock(sendMutex);
+
+        if (netState.load() != NetworkState::Connected || stopRequested.load())
+            return NetworkResult::NotConnected;
+
+        if (sendRequestQueue.size() >= MAX_SEND_REQUESTS)
+            return NetworkResult::QueueFull;
+
+        sendRequestQueue.push_back(std::move(request));
+
+        return NetworkResult::Success;
+    }
+
+    void CNetworkMgr::StopWithTcpError(int socketError, protocol::CodecError codecError)
+    {
+        PushEvent(NetworkEvent{ NetworkEventType::Error, peerTcpAddress, socketError, codecError });
+
+        stopRequested.store(true);
     }
 }

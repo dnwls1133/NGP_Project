@@ -1,9 +1,11 @@
 ﻿#pragma once
 #include "NetworkTypes.h"
+#include "../net/SendContract.h"
 
 #include <atomic>
 #include <deque>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 
@@ -51,13 +53,19 @@ namespace network
 
         // [메인 ↔ 통신 스레드 공유 데이터]
         std::deque<SendRequest> sendRequestQueue;       // 송신 요청 큐
+        sockaddr_in udpPeerAddress{};                   // sendMutex로 보호
         std::deque<ReceivedMessage> recvQueue;          // 수신 메시지 큐
         std::deque<NetworkEvent> networkEventQueue;     // 네트워크 이벤트 큐
 
-        std::mutex queueMutex;                                          // 각 공유 큐를 보호할 mutex
+        std::mutex sendMutex;                                           // sendRequestQueue 보호용
+        std::mutex receiveMutex;                                        // recvQueue, networkEventQueue 보호용
+
         std::atomic<bool> stopRequested{ false };                       // 중지 요청 플래그
         std::atomic<NetworkState> netState{ NetworkState::Stopped };    // 현재 상태 : 접속 대기 / 연결 중 / 연결됨 / 종료
-        HANDLE transportThread = nullptr;                               // 통신 스레드
+        std::atomic<bool> receiveOverflow{ false };
+        bool receiveOverflowReported = false; // receiveMutex로 보호
+
+        std::thread transportThread;                                    // 통신 스레드
 
         NetworkConfig config{}; // 실행 전에만 설정, 스레드 종료 전까지 변경하면 안됨
 
@@ -83,14 +91,17 @@ namespace network
 
         NetworkResult SendTcp(const protocol::Message& message);
         NetworkResult SendUdp(const sockaddr_in& destination, const protocol::Message& message);
+        NetworkResult SendUdp(const protocol::Message& message);
+        net::SendResult EnqueueSend(net::Channel channel, const protocol::Message& message);
+
+        // Host의 메인 스레드에서 세션과 토큰을 검증한 뒤 호출
+        NetworkResult SetUdpPeer(const sockaddr_in& address);
 
         bool TryReceive(ReceivedMessage& out);
         bool TryPopEvent(NetworkEvent& out);
 
     private:
         NetworkResult Start(const NetworkConfig& config);
-
-        static DWORD WINAPI ThreadEntry(LPVOID parameter);
 
         void NetworkThread();
 
@@ -100,6 +111,11 @@ namespace network
         void ReceiveUdp();
 
         void PushEvent(const NetworkEvent& event);
+        bool PushReceived(ReceivedMessage message);
+        void RequestStopOnReceiveOverflow();
+        bool IsReceiveQueueFullLocked() const;
+        NetworkResult EnqueueSendRequest(SendRequest request);
+        void StopWithTcpError( int socketError, protocol::CodecError codecError = protocol::CodecError::NONE);
     };
 
 }

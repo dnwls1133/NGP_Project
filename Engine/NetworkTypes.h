@@ -71,6 +71,7 @@ namespace network
         InvalidArgument,
         WrongTransport,
         StartupFailed,
-        QueueFull
+        QueueFull,
+        UdpPeerNotSet
     };
 }
