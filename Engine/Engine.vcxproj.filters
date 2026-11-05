@@ -176,6 +176,9 @@
     <Filter Include="Engine\03.Manager\NetworkMgr">
       <UniqueIdentifier>{b90720ae-8b77-48d4-b20c-8433a4f1f780}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\03.Manager\MissileMgr">
+      <UniqueIdentifier>{327ec44f-ab37-429d-8ac2-425979c6fd9e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CCore.h">
@@ -329,9 +332,6 @@
     <ClInclude Include="CPatorl1State.h">
       <Filter>Engine\08. Module\AI\State\Patrol</Filter>
     </ClInclude>
-    <ClInclude Include="MissileMgr.h">
-      <Filter>Engine\01.Header</Filter>
-    </ClInclude>
     <ClInclude Include="CRunState.h">
       <Filter>Engine\08. Module\AI\State\Run</Filter>
     </ClInclude>
@@ -394,6 +394,9 @@
       <Filter>Engine\01.Header</Filter>
     </ClInclude>
     <ClInclude Include="CLoadingBackground.h" />
+    <ClInclude Include="MissileMgr.h">
+      <Filter>Engine\03.Manager\MissileMgr</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Engine.rc">
@@ -542,9 +545,6 @@
     <ClCompile Include="CPatorl1State.cpp">
       <Filter>Engine\08. Module\AI\State\Patrol</Filter>
     </ClCompile>
-    <ClCompile Include="MissileMgr.cpp">
-      <Filter>Engine\01.Header</Filter>
-    </ClCompile>
     <ClCompile Include="CRunState.cpp">
       <Filter>Engine\08. Module\AI\State\Run</Filter>
     </ClCompile>
@@ -598,5 +598,8 @@
       <Filter>Engine\03.Manager\NetworkMgr</Filter>
     </ClCompile>
     <ClCompile Include="CLoadingBackground.cpp" />
+    <ClCompile Include="MissileMgr.cpp">
+      <Filter>Engine\03.Manager\MissileMgr</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
