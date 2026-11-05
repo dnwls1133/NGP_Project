@@ -69,8 +69,11 @@ namespace
         std::cout
             << "\nCNetworkMgr Test:\n"
             << "  NetHarness.exe mgr-host\n"
-            << "  NetHarness.exe mgr-client <ip>\n";
-            
+            << "  NetHarness.exe mgr-client <ip>\n"
+            << "  NetHarness.exe mgr-stop-test\n"
+            << "  NetHarness.exe mgr-overflow-test\n"
+            << "  NetHarness.exe mgr-queue-host\n"
+            << "  NetHarness.exe mgr-queue-client <ip>\n";
     }
 
     bool ParseCount(std::string_view text, std::uint32_t& out)
@@ -211,11 +214,23 @@ namespace
 
 int main(int argc, char* argv[])
 {
+    if (argc == 2 && std::string_view(argv[1]) == "mgr-overflow-test")
+        return network_mgr_test::RunReceiveOverflow(TCP_PORT, UDP_PORT) ? 0 : 1;
+
+    if (argc == 2 && std::string_view(argv[1]) == "mgr-stop-test")
+        return network_mgr_test::RunListeningShutdown(TCP_PORT, UDP_PORT) ? 0 : 1;
+
     if (argc == 2 && std::string_view(argv[1]) == "mgr-host")
         return network_mgr_test::Run(true, "", TCP_PORT, UDP_PORT) ? 0 : 1;
 
     if (argc == 3 && std::string_view(argv[1]) == "mgr-client")
         return network_mgr_test::Run(false, argv[2], TCP_PORT, UDP_PORT) ? 0 : 1;
+
+    if (argc == 2 && std::string_view(argv[1]) == "mgr-queue-host")
+        return network_mgr_test::RunQueueTest(true, "", TCP_PORT, UDP_PORT) ? 0 : 1;
+
+    if (argc == 3 && std::string_view(argv[1]) == "mgr-queue-client")
+        return network_mgr_test::RunQueueTest(false, argv[2], TCP_PORT, UDP_PORT) ? 0 : 1;
 
     if (argc == 2)
     {
