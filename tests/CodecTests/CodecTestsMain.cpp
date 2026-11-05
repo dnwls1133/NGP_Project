@@ -6,6 +6,7 @@
 
 #include "../../shared/protocol/PacketCodec.h"
 #include "../../shared/protocol/ProtocolTypes.h"
+#include "../../net/SendContract.h"
 #include "fixtures/ProtocolV1Fixtures.h"
 
 namespace
@@ -452,6 +453,294 @@ namespace
                 counters);
         }
     }
+
+    // 5. 11/05 세션/플레이어/틱 필드 타입과 세션 메시지별 구조·경계값 시험 묶음
+    void RunSessionMessageSuite(TestCounters& counters)
+    {
+        using namespace protocol;
+
+        const Message sentinelMsg = fixtures::MakeValidPlayerInputMessage();
+        std::vector<std::uint8_t> wire;
+        Message decoded = sentinelMsg;
+        // (1) 고정 바이트 대조: ACCEPT (44B) 및 START (44B)
+        {
+            const Message validAccept = fixtures::MakeValidAcceptMessage();
+            const std::vector<std::uint8_t> expectedAccept(
+                fixtures::VALID_ACCEPT_BYTES.begin(),
+                fixtures::VALID_ACCEPT_BYTES.end());
+            Check(CPacketCodec::Encode(validAccept, wire) == CodecError::NONE
+                && wire == expectedAccept
+                && CPacketCodec::Decode(fixtures::VALID_ACCEPT_BYTES, decoded) == CodecError::NONE
+                && decoded == validAccept,
+                "Session1105: ACCEPT matches fixed 44-byte fixture in Encode & Decode", counters);
+            const Message validStart = fixtures::MakeValidStartMessage();
+            const std::vector<std::uint8_t> expectedStart(
+                fixtures::VALID_START_BYTES.begin(),
+                fixtures::VALID_START_BYTES.end());
+            Check(CPacketCodec::Encode(validStart, wire) == CodecError::NONE
+                && wire == expectedStart
+                && CPacketCodec::Decode(fixtures::VALID_START_BYTES, decoded) == CodecError::NONE
+                && decoded == validStart,
+                "Session1105: START matches fixed 44-byte fixture in Encode & Decode", counters);
+        }
+        // (2) sessionId 구조 경계값 검사 (JOIN은 0만 허용, 승인 후 메시지는 0 거부 / 비영 허용)
+        //     실제 활성 세션 번호 일치 여부는 CSessionMgr가 담당하고 코덱은 0 여부만 구조 검사함
+        {
+            Message acceptZeroSession = fixtures::MakeValidAcceptMessage();
+            acceptZeroSession.header.sessionId = 0;
+            auto rawAcceptZeroSession = std::vector<std::uint8_t>(
+                fixtures::VALID_ACCEPT_BYTES.begin(),
+                fixtures::VALID_ACCEPT_BYTES.end());
+            rawAcceptZeroSession[12] = 0x00;
+            rawAcceptZeroSession[13] = 0x00;
+            rawAcceptZeroSession[14] = 0x00;
+            rawAcceptZeroSession[15] = 0x00;
+            Message out = sentinelMsg;
+            Check(CPacketCodec::Encode(acceptZeroSession, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Decode(rawAcceptZeroSession, out) == CodecError::INVALID_FIELD
+                && out == sentinelMsg,
+                "Session1105: Non-JOIN session message with sessionId=0 returns INVALID_FIELD",
+                counters);
+            // sessionId 최대 경계값(0xFFFFFFFF)과 hostTick 최대 경계값(0xFFFFFFFF) 왕복 확인
+            Message maxBoundaryStart = fixtures::MakeValidStartMessage();
+            maxBoundaryStart.header.sessionId = 0xFFFFFFFFu;
+            maxBoundaryStart.header.sequence = 0xFFFFFFFFu;
+            maxBoundaryStart.header.hostTick = 0xFFFFFFFFu;
+            std::get<StartPayload>(maxBoundaryStart.payload).startHostTick = 0xFFFFFFFFu;
+            Message roundTrip{};
+            Check(CPacketCodec::Encode(maxBoundaryStart, wire) == CodecError::NONE
+                && CPacketCodec::Decode(wire, roundTrip) == CodecError::NONE
+                && roundTrip == maxBoundaryStart,
+                "Session1105: u32 max boundary (0xFFFFFFFF) preserved for sessionId, sequence, and ticks",
+                counters);
+        }
+        // (3) 로비·세션 생명주기 메시지(REJECT, READY, ROOM_STATE, LOAD, LOADED, HEARTBEAT, LEAVE, END) 왕복 검증
+        {
+            auto checkRoundTrip = [&](Message msg, std::uint32_t expectedBytes) -> bool
+                {
+                    msg.header.totalBytes = expectedBytes;
+                    std::vector<std::uint8_t> bytes;
+                    Message out{};
+                    return CPacketCodec::Encode(msg, bytes) == CodecError::NONE
+                        && bytes.size() == expectedBytes
+                        && CPacketCodec::Decode(bytes, out) == CodecError::NONE
+                        && out == msg;
+                };
+            Message rejectMsg{};
+            rejectMsg.header.type = MessageType::REJECT;
+            rejectMsg.header.sessionId = 0; // 발급 전 거절(sessionId=0) 허용 확인
+            rejectMsg.payload = RejectPayload{ .reason = RejectReason::ROOM_FULL };
+            Message readyMsg{};
+            readyMsg.header.type = MessageType::READY;
+            readyMsg.header.sessionId = 1000;
+            readyMsg.payload = ReadyPayload{ .playerId = 1, .isReady = 1 };
+            Message roomMsg{};
+            roomMsg.header.type = MessageType::ROOM_STATE;
+            roomMsg.header.sessionId = 1000;
+            RoomStatePayload room{};
+            room.slots[0] = RoomSlotState{ .playerId = 0, .connected = 1, .ready = 1, .udpRegistered = 1 };
+            room.slots[1] = RoomSlotState{ .playerId = 1, .connected = 1, .ready = 0, .udpRegistered = 1 };
+            roomMsg.payload = room;
+            Message loadMsg{};
+            loadMsg.header.type = MessageType::LOAD;
+            loadMsg.header.sessionId = 1000;
+            loadMsg.payload = LoadPayload{ .stageId = 1 };
+            Message loadedMsg{};
+            loadedMsg.header.type = MessageType::LOADED;
+            loadedMsg.header.sessionId = 1000;
+            loadedMsg.payload = LoadedPayload{ .playerId = 0 };
+            Message hbMsg{};
+            hbMsg.header.type = MessageType::HEARTBEAT;
+            hbMsg.header.sessionId = 1000;
+            hbMsg.payload = HeartbeatPayload{};
+            Message leaveMsg{};
+            leaveMsg.header.type = MessageType::LEAVE;
+            leaveMsg.header.sessionId = 1000;
+            leaveMsg.payload = LeavePayload{ .playerId = 1, .reason = DisconnectReason::USER_LEFT };
+            Message endMsg{};
+            endMsg.header.type = MessageType::END;
+            endMsg.header.sessionId = 1000;
+            endMsg.payload = EndPayload{ .reason = DisconnectReason::NORMAL };
+            Check(checkRoundTrip(rejectMsg, 36)
+                && checkRoundTrip(readyMsg, 36)
+                && checkRoundTrip(roomMsg, 40)
+                && checkRoundTrip(loadMsg, 36)
+                && checkRoundTrip(loadedMsg, 36)
+                && checkRoundTrip(hbMsg, 32)
+                && checkRoundTrip(leaveMsg, 36)
+                && checkRoundTrip(endMsg, 36),
+                "Session1105: All lobby/session lifecycle messages round-trip with exact sizes",
+                counters);
+        }
+        // (4) 플레이어 슬롯(0, 1 허용 / 2, 0xFF 거부) 및 ROOM_STATE 슬롯 순서 경계 검사
+        {
+            Message badReady{};
+            badReady.header.type = MessageType::READY;
+            badReady.header.sessionId = 1000;
+            badReady.payload = ReadyPayload{ .playerId = 2, .isReady = 1 };
+            Message badReadyInvalidSlot{};
+            badReadyInvalidSlot.header.type = MessageType::READY;
+            badReadyInvalidSlot.header.sessionId = 1000;
+            badReadyInvalidSlot.payload = ReadyPayload{ .playerId = INVALID_PLAYER_SLOT, .isReady = 1 };
+            Message badRoom{};
+            badRoom.header.type = MessageType::ROOM_STATE;
+            badRoom.header.sessionId = 1000;
+            RoomStatePayload swappedRoom{};
+            swappedRoom.slots[0].playerId = 1; // 슬롯 0 자리에 playerId=1이 들어가면 거부되어야 함
+            swappedRoom.slots[1].playerId = 0;
+            badRoom.payload = swappedRoom;
+            Check(CPacketCodec::Encode(badReady, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Encode(badReadyInvalidSlot, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Encode(badRoom, wire) == CodecError::INVALID_FIELD,
+                "Session1105: Out-of-range PlayerSlot (2, 0xFF) and swapped ROOM_STATE slots return INVALID_FIELD",
+                counters);
+        }
+        // (5) LOAD stageId(=1만 허용) 및 START 주기(0Hz 거부) 경계 검사
+        {
+            Message badLoad0{};
+            badLoad0.header.type = MessageType::LOAD;
+            badLoad0.header.sessionId = 1000;
+            badLoad0.payload = LoadPayload{ .stageId = 0 };
+            Message badLoad2{};
+            badLoad2.header.type = MessageType::LOAD;
+            badLoad2.header.sessionId = 1000;
+            badLoad2.payload = LoadPayload{ .stageId = 2 };
+            Message badStartHz = fixtures::MakeValidStartMessage();
+            std::get<StartPayload>(badStartHz.payload).simRateHz = 0;
+            Check(CPacketCodec::Encode(badLoad0, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Encode(badLoad2, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Encode(badStartHz, wire) == CodecError::INVALID_FIELD,
+                "Session1105: LOAD stageId!=1 and START 0Hz rate return INVALID_FIELD",
+                counters);
+        }
+    }
+
+    // 6. 11/05 상태 배치(SnapshotBatch) 구성·소유권·실패 기대 결과 시험 묶음
+    //    (THREAD_QUEUE_BATCH_CONTRACT_1105.md  3~5절 및 9절 804~806 검증)
+    void RunSnapshotBatchContractSuite(TestCounters& counters)
+    {
+        using namespace protocol;
+
+        // 테스트용 정상 스냅샷 조각 생성
+        auto makeSnapshotPart = [](
+            std::uint32_t sessionId,
+            std::uint32_t tick,
+            std::uint8_t partIndex,
+            std::uint8_t partCount,
+            std::initializer_list<ObjectId> objectIds)->Message
+            {
+                Message msg{};
+                msg.header.type = MessageType::STATE_SNAPSHOT;
+                msg.header.sessionId = sessionId;
+                msg.header.roundId = 1;
+                msg.header.sequence = tick;
+                msg.header.hostTick = tick;
+
+                StateSnapshotPayload snap{};
+                snap.snapshotTick = tick;
+                snap.partIndex = partIndex;
+                snap.partCount = partCount;
+                for (ObjectId id : objectIds) {
+                    ObjectStateRecord rec{};
+                    rec.objectId = id;
+                    rec.kind = NetObjectKind::MONSTER;
+                    rec.subType = 0;
+                    rec.alive = 1;
+                    rec.hp = 10;
+                    rec.maxHp = 10;
+                    snap.objects.push_back(rec);
+                }
+                msg.header.totalBytes = static_cast<std::uint32_t>(
+                    HEADER_BYTES + SNAPSHOT_HEADER_BYTES
+                    + snap.objects.size() * OBJECT_STATE_RECORD_BYTES);
+
+                msg.payload = std::move(snap);
+                return msg;
+            };
+
+        // (1) 단건 EnqueueSend 경로 검증: STATE_SNAPSHOT 단건 등록 거부 및 채널 불일치 거부
+        {
+            const Message validInput = fixtures::MakeValidPlayerInputMessage();
+            const Message validJoin = fixtures::MakeValidJoinMessage();
+            const Message singleSnap = makeSnapshotPart(1000, 10, 0, 1, { 1, 2 });
+            Check(net::ValidateSendRequest(net::Channel::Udp, validInput) == net::SendResult::Queued
+                && net::ValidateSendRequest(net::Channel::Tcp, validJoin) == net::SendResult::Queued
+                && net::ValidateSendRequest(net::Channel::Tcp, validInput) == net::SendResult::InvalidRequest
+                && net::ValidateSendRequest(net::Channel::Udp, validJoin) == net::SendResult::InvalidRequest
+                && net::ValidateSendRequest(net::Channel::Udp, singleSnap) == net::SendResult::InvalidRequest,
+                "Batch1105: EnqueueSend rejects STATE_SNAPSHOT and mismatched Tcp/Udp channel with InvalidRequest",
+                counters);
+        }
+        // (2) 정상 배치 검증: 객체 0개(빈 상태 1조각) 배치 및 2조각 분할 배치 통과
+        {
+            net::SnapshotBatch emptyWorldBatch{};
+            emptyWorldBatch.parts.push_back(makeSnapshotPart(1000, 10, 0, 1, {}));
+            net::SnapshotBatch twoPartBatch{};
+            twoPartBatch.parts.push_back(makeSnapshotPart(1000, 11, 0, 2, { 1, 2 }));
+            twoPartBatch.parts.push_back(makeSnapshotPart(1000, 11, 1, 2, { 3, 4 }));
+            Check(net::ValidateSnapshotBatch(emptyWorldBatch) == net::SendResult::Queued
+                && net::ValidateSnapshotBatch(twoPartBatch) == net::SendResult::Queued,
+                "Batch1105: Valid empty-world (N=1) and multi-part (N=2) SnapshotBatch pass validation",
+                counters);
+        }
+        // (3) B04 검증: 두 조각 배치 중 하나의 sessionId만 다르거나 hostTick/snapshotTick 불일치 시 InvalidRequest
+        {
+            net::SnapshotBatch mismatchedSessionBatch{};
+            mismatchedSessionBatch.parts.push_back(makeSnapshotPart(1000, 10, 0, 2, { 1 }));
+            mismatchedSessionBatch.parts.push_back(makeSnapshotPart(2000, 10, 1, 2, { 2 }));
+            net::SnapshotBatch mismatchedTickBatch{};
+            mismatchedTickBatch.parts.push_back(makeSnapshotPart(1000, 10, 0, 2, { 1 }));
+            mismatchedTickBatch.parts.push_back(makeSnapshotPart(1000, 11, 1, 2, { 2 }));
+            net::SnapshotBatch mismatchedPayloadTickBatch{};
+            mismatchedPayloadTickBatch.parts.push_back(makeSnapshotPart(1000, 10, 0, 1, { 1 }));
+            std::get<StateSnapshotPayload>(mismatchedPayloadTickBatch.parts[0].payload).snapshotTick = 9;
+            Check(net::ValidateSnapshotBatch(mismatchedSessionBatch) == net::SendResult::InvalidRequest
+                && net::ValidateSnapshotBatch(mismatchedTickBatch) == net::SendResult::InvalidRequest
+                && net::ValidateSnapshotBatch(mismatchedPayloadTickBatch) == net::SendResult::InvalidRequest,
+                "Batch1105 (B04): Mismatched sessionId or tick across batch parts returns InvalidRequest",
+                counters);
+        }
+        // (4) B05 및 ObjectId 중복 검증: 빈 배치, partIndex 순서 오류, partCount 불일치, 배치 내 동일 ObjectId 중복
+        {
+            net::SnapshotBatch emptyBatch{};
+            net::SnapshotBatch badPartIndexBatch{};
+            badPartIndexBatch.parts.push_back(makeSnapshotPart(1000, 10, 0, 2, { 1 }));
+            badPartIndexBatch.parts.push_back(makeSnapshotPart(1000, 10, 0, 2, { 2 })); // partIndex 중복(0, 0)
+            net::SnapshotBatch badPartCountBatch{};
+            badPartCountBatch.parts.push_back(makeSnapshotPart(1000, 10, 0, 3, { 1 })); // parts.size()=2인데 partCount=3
+            badPartCountBatch.parts.push_back(makeSnapshotPart(1000, 10, 1, 3, { 2 }));
+            net::SnapshotBatch duplicateObjectIdBatch{};
+            duplicateObjectIdBatch.parts.push_back(makeSnapshotPart(1000, 10, 0, 2, { 1, 2 }));
+            duplicateObjectIdBatch.parts.push_back(makeSnapshotPart(1000, 10, 1, 2, { 2, 3 })); // ObjectId 2 중복!
+            Check(net::ValidateSnapshotBatch(emptyBatch) == net::SendResult::InvalidRequest
+                && net::ValidateSnapshotBatch(badPartIndexBatch) == net::SendResult::InvalidRequest
+                && net::ValidateSnapshotBatch(badPartCountBatch) == net::SendResult::InvalidRequest
+                && net::ValidateSnapshotBatch(duplicateObjectIdBatch) == net::SendResult::InvalidRequest,
+                "Batch1105 (B05): Invalid partIndex/partCount or duplicate ObjectId across parts returns InvalidRequest",
+                counters);
+        }
+        // (5) B06 검증: 조각당 객체 37개(> 1,200B) 또는 조각 수 256개(> 255) 초과 시 TooLarge 반환
+        {
+            net::SnapshotBatch over36ObjectsBatch{};
+            Message part37 = makeSnapshotPart(1000, 10, 0, 1, {});
+            auto& objs = std::get<StateSnapshotPayload>(part37.payload).objects;
+            for (ObjectId id = 1; id <= 37; ++id)
+            {
+                objs.push_back(ObjectStateRecord{
+                    .objectId = id,
+                    .kind = NetObjectKind::PROJ_MONSTER,
+                    .alive = 1
+                    });
+            }
+            over36ObjectsBatch.parts.push_back(std::move(part37));
+            net::SnapshotBatch over255PartsBatch{};
+            over255PartsBatch.parts.resize(256, makeSnapshotPart(1000, 10, 0, 1, {}));
+            Check(net::ValidateSnapshotBatch(over36ObjectsBatch) == net::SendResult::TooLarge
+                && net::ValidateSnapshotBatch(over255PartsBatch) == net::SendResult::TooLarge,
+                "Batch1105 (B06): Over 36 objects in a part or 256 parts in a batch returns TooLarge",
+                counters);
+        }
+    }
 }
 
 
@@ -464,7 +753,8 @@ int main()
     RunEncodeVectorSuite(counters);
     RunDecodeVectorSuite(counters);
     RunValidationAndBoundarySuite(counters);
-
+    RunSessionMessageSuite(counters);
+    RunSnapshotBatchContractSuite(counters);
 
     std::cout << "----------------------------------------------\n";
     std::cout << "Passed:  " << counters.passed << '\n';

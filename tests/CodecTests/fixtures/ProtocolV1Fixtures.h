@@ -198,4 +198,83 @@ namespace protocol::fixtures
         0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x03
     };
 
+    // ────────────────────────────────────────────────────────────
+    // 11/05 세션·시작 메시지 고정 바이트 Fixture 모음
+    // ────────────────────────────────────────────────────────────
+
+    // 고정 정상 바이트 4: ACCEPT (44바이트)
+    // sessionId = 1000(0x000003E8), sequence = 1, assignedPlayerId = 1, maxPlayers = 2,
+    // reserved = 0, udpToken = 0x0102030405060708
+    inline constexpr std::array<std::uint8_t, 44> VALID_ACCEPT_BYTES = {
+        // Header (32B): type = ACCEPT(2), totalBytes = 44 (0x2C)
+        0x56, 0x53, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x2C, 0x00, 0x00, 0x03, 0xE8,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // Payload (12B)
+        0x01, 0x02, 0x00, 0x00,
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
+    };
+
+    inline Message MakeValidAcceptMessage()
+    {
+        Message msg{};
+        msg.header.magic = MAGIC;
+        msg.header.version = VERSION;
+        msg.header.type = MessageType::ACCEPT;
+        msg.header.flags = FLAGS_NONE;
+        msg.header.totalBytes = 44;
+        msg.header.sessionId = 1000;
+        msg.header.roundId = 1;
+        msg.header.sequence = 1;
+        msg.header.hostTick = 0;
+        msg.header.reserved = RESERVED_VALUE;
+
+        AcceptPayload accept{};
+        accept.assignedPlayerId = 1;
+        accept.maxPlayers = MAX_PROTOCOL_PLAYERS;
+        accept.reserved = 0;
+        accept.udpToken = 0x0102030405060708ULL;
+        msg.payload = accept;
+        return msg;
+    }
+
+    // 고정 정상 바이트 5: START (44바이트)
+    // sessionId = 1000(0x000003E8), sequence = 5, hostTick = 120(0x78),
+    // startHostTick = 120(0x78), simRateHz = 60(0x003C), stateRateHz = 20(0x0014), inputRateHz = 30(0x001E)
+    inline constexpr std::array<std::uint8_t, 44> VALID_START_BYTES = {
+        // Header (32B): type = START(8), totalBytes = 44 (0x2C)
+        0x56, 0x53, 0x00, 0x01, 0x00, 0x08, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x2C, 0x00, 0x00, 0x03, 0xE8,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x05,
+        0x00, 0x00, 0x00, 0x78, 0x00, 0x00, 0x00, 0x00,
+        // Payload (12B)
+        0x00, 0x00, 0x00, 0x78, // startHostTick = 120
+        0x00, 0x3C,             // simRateHz = 60
+        0x00, 0x14,             // stateRateHz = 20
+        0x00, 0x1E,             // inputRateHz = 30
+        0x00, 0x00              // reserved = 0
+    };
+    inline Message MakeValidStartMessage()
+    {
+        Message msg{};
+        msg.header.magic = MAGIC;
+        msg.header.version = VERSION;
+        msg.header.type = MessageType::START;
+        msg.header.flags = FLAGS_NONE;
+        msg.header.totalBytes = 44;
+        msg.header.sessionId = 1000;
+        msg.header.roundId = 1;
+        msg.header.sequence = 5;
+        msg.header.hostTick = 120;
+        msg.header.reserved = RESERVED_VALUE;
+        StartPayload start{};
+        start.startHostTick = 120;
+        start.simRateHz = 60;
+        start.stateRateHz = 20;
+        start.inputRateHz = 30;
+        start.reserved = 0;
+        msg.payload = start;
+        return msg;
+    }
 }
