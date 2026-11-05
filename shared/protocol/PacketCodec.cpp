@@ -273,6 +273,21 @@ namespace protocol
             }
         }
 
+        // (11/05 추가) 메시지 종류에 따른 헤더 sessionId 구조 규칙을 검사합니다.
+        // - JOIN: 세션 발급 전 요청이므로 반드시 sessionId == 0이어야 합니다.
+        // - REJECT: 발급 전 거절(0) 또는 세션 중 거절 모두 허용 가능합니다.
+        // - 그 외 17종 메시지: 승인 이후 메시지이므로 sessionId != 0이어야 합니다.
+        // (실제 활성 세션 번호와 일치하는지는 CSessionManager에서 검사합니다)
+        constexpr bool IsValidSessionIdForType(MessageType type
+            , std::uint32_t sessionId) noexcept
+        {
+            if (type == MessageType::JOIN)
+                return sessionId == 0;
+            if (type == MessageType::REJECT)
+                return true; // 0 또는 활성 세션 번호 모두 허용
+            return sessionId != 0;
+        }
+
         CodecError ValidateHeaderFields(const PacketHeader& header) noexcept
         {
             // 1순위: 매직 넘버가 0x5653("VS")인지 확인
@@ -312,9 +327,10 @@ namespace protocol
             if (header.roundId != 1)
                 return CodecError::INVALID_FIELD;
 
-            // 10순위: 처음 접속 요청하는 JOIN 메시지는 아직 세션 발급 전이므로 sessionId가 0이어야 함
-            if (header.type == MessageType::JOIN && header.sessionId != 0)
+            // 10순위 (11/05 보강): JOIN은 sessionId==0, 승인 후 메시지는 sessionId!=0 구조 규칙 확인
+            if (!IsValidSessionIdForType(header.type, header.sessionId))
                 return CodecError::INVALID_FIELD;
+
 
             return CodecError::NONE;
         }
@@ -382,16 +398,16 @@ namespace protocol
         // 5. ROOM_STATE: 방 슬롯 2개의 상태 (슬롯당 4B * 2명 = 총 8바이트)
         CodecError EncodePayload(const RoomStatePayload& p, ByteWriter& w)
         {
-            for (const auto& slot : p.slots)
+            for (std::size_t i = 0; i < p.slots.size(); ++i)
             {
-                if (!IsValidPlayerSlot(slot.playerId)
+                const auto& slot = p.slots[i];
+                if (slot.playerId != static_cast<PlayerSlot>(i)
                     || !IsValidBoolU8(slot.connected)
                     || !IsValidBoolU8(slot.ready)
                     || !IsValidBoolU8(slot.udpRegistered))
                 {
                     return CodecError::INVALID_FIELD;
                 }
-
                 w.WriteU8(slot.playerId);
                 w.WriteU8(slot.connected);
                 w.WriteU8(slot.ready);
@@ -403,7 +419,7 @@ namespace protocol
         // 6. LOAD: 스테이지 로딩 지시 (스테이지 번호 2B + 예약 2B = 총 4바이트)
         CodecError EncodePayload(const LoadPayload& p, ByteWriter& w)
         {
-            if (p.stageId == 0 || p.reserved != 0)
+            if (p.stageId != 1 || p.reserved != 0)
                 return CodecError::INVALID_FIELD;
 
             w.WriteU16(p.stageId);
@@ -747,13 +763,15 @@ namespace protocol
                 if (r.Remaining() != 8) return CodecError::INVALID_LENGTH;
 
                 RoomStatePayload p{};
-                for (auto& slot : p.slots) {
+                for (std::size_t i = 0; i < p.slots.size(); ++i)
+                {
+                    auto& slot = p.slots[i];
                     slot.playerId = r.ReadU8();
                     slot.connected = r.ReadU8();
                     slot.ready = r.ReadU8();
                     slot.udpRegistered = r.ReadU8();
 
-                    if (!IsValidPlayerSlot(slot.playerId)
+                    if (slot.playerId != static_cast<PlayerSlot>(i)
                         || !IsValidBoolU8(slot.connected)
                         || !IsValidBoolU8(slot.ready)
                         || !IsValidBoolU8(slot.udpRegistered))
@@ -773,7 +791,7 @@ namespace protocol
                 p.stageId = r.ReadU16();
                 p.reserved = r.ReadU16();
 
-                if (p.stageId == 0 || p.reserved != 0)
+                if (p.stageId != 1 || p.reserved != 0)
                 {
                     return CodecError::INVALID_FIELD;
                 }
@@ -1232,8 +1250,8 @@ namespace protocol
         if (parsedHeader.totalBytes != frame.size()) return CodecError::INVALID_LENGTH;
         if (!IsValidTotalBytesForType(parsedHeader.type, parsedHeader.totalBytes)) return CodecError::INVALID_LENGTH;
         if (parsedHeader.roundId != 1) return CodecError::INVALID_FIELD;
-        if (parsedHeader.type == MessageType::JOIN && parsedHeader.sessionId != 0) return CodecError::INVALID_FIELD;
-
+        if (!IsValidSessionIdForType(parsedHeader.type, parsedHeader.sessionId)) return CodecError::INVALID_FIELD;
+        
         // 2단계: 32바이트 이후의 본문(Payload) 바이트 역직렬화 및 범위 검증
         ByteReader bodyReader{ frame.subspan(HEADER_BYTES) };
         MessagePayload parsedPayload{};

@@ -127,6 +127,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\net\SendContract.h" />
     <ClInclude Include="..\..\shared\protocol\PacketCodec.h" />
     <ClInclude Include="..\..\shared\protocol\ProtocolTypes.h" />
     <ClInclude Include="fixtures\ProtocolV1Fixtures.h" />

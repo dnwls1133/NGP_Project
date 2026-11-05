@@ -1,14 +1,17 @@
-#pragma once
+ï»¿#pragma once
 
 class CScene;
+class CLoadingBackground;
 
-class CSceneMgr // ¾ÀÀ» ÀüÈ¯½ÃÄÑÁÖ´Â ¿ªÈ°
+class CSceneMgr // ì”¬ì„ ì „í™˜ì‹œì¼œì£¼ëŠ” ì—­í™œ
 {
 	SINGLE(CSceneMgr);
 private:
-	CScene*		m_arrScene[(UINT)SCENE_TYPE::END];     // ¸ğµç ¾À ¸ñ·Ï
-	CScene*		m_pCurScene;					       // ÇöÀç ¾À
+	CScene*		m_arrScene[(UINT)SCENE_TYPE::END];     // ëª¨ë“  ì”¬ ëª©ë¡
+	CScene*		m_pCurScene;					       // í˜„ì¬ ì”¬
+    CScene*     m_pNextScene = nullptr;				       // ë‹¤ìŒ ì”¬
 
+    CLoadingBackground* m_pBackground = nullptr;
 
 public:
 	void init();

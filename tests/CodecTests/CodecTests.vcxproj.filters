@@ -24,6 +24,9 @@
     <ClInclude Include="..\..\shared\protocol\ProtocolTypes.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\net\SendContract.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CodecTestsMain.cpp">
