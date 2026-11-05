@@ -184,6 +184,7 @@
     <ClInclude Include="CEventMgr.h" />
     <ClInclude Include="CExposion.h" />
     <ClInclude Include="CNetworkMgr.h" />
+    <ClInclude Include="CSessionMgr.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="CLoadingBackground.h" />
     <ClInclude Include="CRankMgr.h" />
@@ -268,6 +269,7 @@
     <ClCompile Include="CEventMgr.cpp" />
     <ClCompile Include="CExposion.cpp" />
     <ClCompile Include="CNetworkMgr.cpp" />
+    <ClCompile Include="CSessionMgr.cpp" />
     <ClCompile Include="CLoadingBackground.cpp" />
     <ClCompile Include="CRankMgr.cpp" />
     <ClCompile Include="CIdleState.cpp" />

@@ -2,6 +2,7 @@
 
 #include "../Engine/define.h"
 #include "../Engine/CNetworkMgr.h"
+#include "../Engine/CSessionMgr.h"
 #include "../net/SendContract.h"
 #include "TcpTestSupport.h"
 
@@ -230,6 +231,33 @@ namespace network_mgr_test
             return PollResult::Failed;
         }
 
+        bool ExpectNoUdpAck(CNetworkMgr& mgr)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + 1s;
+
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                NetworkEvent event{};
+                if (mgr.TryPopEvent(event))
+                {
+                    UnexpectedEvent(event);
+                    return false;
+                }
+
+                ReceivedMessage received{};
+                if (mgr.TryReceive(received) && received.message.header.type == MessageType::UDP_ACK)
+                {
+                    std::cerr << "[FAIL] Host replied to wrong-token UDP_REGISTER\n";
+                    return false;
+                }
+
+                std::this_thread::sleep_for(5ms);
+            }
+
+            std::cout << "[PASS] No UDP_ACK for wrong token\n";
+            return true;
+        }
+
         bool WaitEvent(CNetworkMgr& mgr, NetworkEventType expected, NetworkEvent& out, const char* step, std::chrono::milliseconds timeout = 5s)
         {
             return WaitFor(step, timeout, [&]
@@ -241,6 +269,30 @@ namespace network_mgr_test
                         return UnexpectedEvent(out);
 
                     return PollResult::Passed;
+                });
+        }
+
+        bool WaitForSessionState(network::CSessionMgr& session, network::SessionState expected, const char* step, std::chrono::milliseconds timeout)
+        {
+            using network::SessionState;
+
+            return WaitFor(step, timeout, [&session, expected]
+                {
+                    session.Update();
+                    const auto state = session.GetState();
+
+                    if (state == expected)
+                        return PollResult::Passed;
+
+                    if (state == SessionState::Failed || state == SessionState::Rejected || state == SessionState::Disconnected)
+                    {
+                        const auto& event = session.GetLastNetworkEvent();
+                        std::cerr << "  sessionState=" << static_cast<int>(state) << ", socketError=" << event.socketError << ", codecError=" << static_cast<int>(event.codecError) << '\n';
+
+                        return PollResult::Failed;
+                    }
+
+                    return PollResult::Pending;
                 });
         }
 
@@ -1069,6 +1121,145 @@ namespace network_mgr_test
 
         return passed;
     }
+
+    bool RunSessionApproval(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort)
+    {
+        using network::SessionState;
+
+        network::CSessionMgr session(*CNetworkMgr::GetInst());
+        const auto started = host
+            ? session.StartHost(tcpPort, udpPort)
+            : session.StartClient(hostIp, tcpPort, udpPort);
+
+        if (!CheckRequest(started, "Start session"))
+            return false;
+
+        bool passed = false;
+
+        if (host)
+        {
+            std::cout << "Waiting for session-client...\n";
+            passed = WaitForSessionState(session, SessionState::UdpRegistered, "Host registered UDP peer", std::chrono::seconds(60));
+
+            if (passed)
+                passed = WaitForSessionState(session, SessionState::Disconnected, "Client disconnected after UDP registration", std::chrono::seconds(5));
+        }
+        else
+            passed = WaitForSessionState(session, SessionState::UdpRegistered, "Client received and verified UDP_ACK", std::chrono::seconds(5));
+
+        session.Stop();
+        std::cout << (passed ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");
+
+        return passed;
+    }
+
+    bool RunSessionBadTokenClient(const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort)
+    {
+        auto& mgr = *CNetworkMgr::GetInst();
+
+        if (!CheckRequest(mgr.StartClient(hostIp, tcpPort, udpPort), "Start bad-token client"))
+            return false;
+
+        const auto runTest = [&]() -> bool
+            {
+                NetworkEvent connected{};
+                if (!WaitEvent(mgr, NetworkEventType::Connected, connected, "Connected"))
+                    return false;
+
+                const protocol::Message join{};
+                if (!CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, join), "Queue JOIN"))
+                    return false;
+
+                std::uint32_t sessionId = 0;
+                protocol::PlayerSlot playerId = protocol::INVALID_PLAYER_SLOT;
+                protocol::UdpToken validToken = 0;
+
+                const auto pollAccept = [&]() -> PollResult
+                    {
+                        NetworkEvent event{};
+                        if (mgr.TryPopEvent(event))
+                            return UnexpectedEvent(event);
+
+                        ReceivedMessage received{};
+                        if (!mgr.TryReceive(received))
+                            return PollResult::Pending;
+
+                        const auto& message = received.message;
+                        const auto* accept = std::get_if<protocol::AcceptPayload>(&message.payload);
+
+                        if (received.transport != TransportType::TCP ||
+                            message.header.type != MessageType::ACCEPT ||
+                            message.header.sessionId == 0 ||
+                            !accept || accept->assignedPlayerId != 1 || accept->udpToken == 0)
+                        {
+                            return PollResult::Failed;
+                        }
+
+                        sessionId = message.header.sessionId;
+                        playerId = accept->assignedPlayerId;
+                        validToken = accept->udpToken;
+                        return PollResult::Passed;
+                    };
+
+                if (!WaitFor("Receive TCP ACCEPT", std::chrono::seconds(5), pollAccept))
+                    return false;
+
+                protocol::UdpRegisterPayload payload{};
+                payload.playerId = playerId;
+                payload.udpToken = validToken == 1 ? 2 : 1;
+
+                auto request = MakeMessage(MessageType::UDP_REGISTER, payload, 44, sessionId, 1);
+
+                if (!CheckQueued(mgr.EnqueueSend(net::Channel::Udp, request), "Queue wrong-token UDP_REGISTER"))
+                    return false;
+
+                if (!ExpectNoUdpAck(mgr))
+                    return false;
+
+                payload.udpToken = validToken;
+                request.payload = payload;
+                request.header.sequence = 2;
+
+                if (!CheckQueued(mgr.EnqueueSend(net::Channel::Udp, request), "Queue valid UDP_REGISTER"))
+                    return false;
+
+                const auto pollAck = [&]() -> PollResult
+                    {
+                        NetworkEvent event{};
+                        if (mgr.TryPopEvent(event))
+                            return UnexpectedEvent(event);
+
+                        ReceivedMessage received{};
+                        if (!mgr.TryReceive(received))
+                            return PollResult::Pending;
+
+                        const auto& message = received.message;
+                        const auto* ack = std::get_if<protocol::UdpAckPayload>(&message.payload);
+
+                        if (received.transport != TransportType::UDP ||
+                            message.header.type != MessageType::UDP_ACK ||
+                            message.header.sessionId != sessionId ||
+                            received.sender.sin_family != AF_INET ||
+                            received.sender.sin_addr.s_addr != connected.peer.sin_addr.s_addr ||
+                            received.sender.sin_port != htons(udpPort) ||
+                            !ack || ack->playerId != playerId || ack->registered != 1)
+                        {
+                            return PollResult::Failed;
+                        }
+
+                        return PollResult::Passed;
+                    };
+
+                return WaitFor("Receive UDP_ACK for valid token", std::chrono::seconds(5), pollAck);
+            };
+
+        const bool passed = runTest();
+        mgr.Shutdown();
+
+        std::cout << (passed ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");
+        return passed;
+    }
+
 
     bool RunListeningShutdown(unsigned short tcpPort, unsigned short udpPort)
     {

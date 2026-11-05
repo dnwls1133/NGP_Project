@@ -51,6 +51,9 @@
     <ClCompile Include="NetworkMgrTest.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="..\Engine\CSessionMgr.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="HostTest.h">
@@ -93,6 +96,9 @@
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="NetworkMgrTest.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\CSessionMgr.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
   </ItemGroup>

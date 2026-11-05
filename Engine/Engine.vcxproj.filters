@@ -179,6 +179,9 @@
     <Filter Include="Engine\03.Manager\MissileMgr">
       <UniqueIdentifier>{327ec44f-ab37-429d-8ac2-425979c6fd9e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\03.Manager\SessionMgr">
+      <UniqueIdentifier>{ed163e65-0cef-4df1-8036-eac8c4dd2aef}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CCore.h">
@@ -397,6 +400,9 @@
     <ClInclude Include="MissileMgr.h">
       <Filter>Engine\03.Manager\MissileMgr</Filter>
     </ClInclude>
+    <ClInclude Include="CSessionMgr.h">
+      <Filter>Engine\03.Manager\SessionMgr</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Engine.rc">
@@ -600,6 +606,9 @@
     <ClCompile Include="CLoadingBackground.cpp" />
     <ClCompile Include="MissileMgr.cpp">
       <Filter>Engine\03.Manager\MissileMgr</Filter>
+    </ClCompile>
+    <ClCompile Include="CSessionMgr.cpp">
+      <Filter>Engine\03.Manager\SessionMgr</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>
