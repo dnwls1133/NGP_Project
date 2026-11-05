@@ -104,6 +104,8 @@ namespace network
         NetworkResult Start(const NetworkConfig& config);
 
         void NetworkThread();
+        void ResetReceiveStateForStart();
+        void ClearPendingSendsLocked();
 
         void FlushTcpSend();
         void ReceiveTcp();

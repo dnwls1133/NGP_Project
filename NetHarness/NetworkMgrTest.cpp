@@ -20,7 +20,14 @@ namespace network
         static bool WithConnectedHost(Test&& test)
         {
             CNetworkMgr mgr;
+            return PrepareConnectedHost(mgr) && std::forward<Test>(test)(mgr);
+        }
+
+        static bool PrepareConnectedHost(CNetworkMgr& mgr)
+        {
             mgr.config.role = NetworkRole::Host;
+            mgr.ResetReceiveStateForStart();
+            mgr.stopRequested.store(false);
             mgr.netState.store(NetworkState::Connected);
 
             sockaddr_in peer{};
@@ -28,10 +35,12 @@ namespace network
             peer.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
             peer.sin_port = htons(40001);
 
-            if (mgr.SetUdpPeer(peer) != NetworkResult::Success)
-                return false;
+            return mgr.SetUdpPeer(peer) == NetworkResult::Success;
+        }
 
-            return std::forward<Test>(test)(mgr);
+        static void RecordReceiveOverflow(CNetworkMgr& mgr)
+        {
+            mgr.RequestStopOnReceiveOverflow();
         }
 
         static std::optional<net::SnapshotBatch> PeekPending(CNetworkMgr& mgr)
@@ -42,6 +51,12 @@ namespace network
                 return std::nullopt;
 
             return mgr.pendingSnapshotBatch->batch;
+        }
+
+        static std::vector<SendRequest> PeekSendRequests(CNetworkMgr& mgr)
+        {
+            std::lock_guard lock(mgr.sendMutex);
+            return { mgr.sendRequestQueue.begin(), mgr.sendRequestQueue.end() };
         }
 
         static std::optional<net::SnapshotBatch> TakePending(CNetworkMgr& mgr)
@@ -366,15 +381,14 @@ namespace network_mgr_test
             return true;
         }
 
-        net::SnapshotBatch MakeSnapshotBatch(std::uint32_t tick)
+        net::SnapshotBatch MakeSnapshotBatch(std::uint32_t tick, std::uint8_t partCount = 2)
         {
             constexpr std::uint32_t SESSION_ID = 1000;
-            constexpr std::uint8_t PART_COUNT = 2;
             constexpr auto TOTAL_BYTES = static_cast<std::uint32_t>(protocol::HEADER_BYTES + protocol::SNAPSHOT_HEADER_BYTES + protocol::OBJECT_STATE_RECORD_BYTES);
 
             net::SnapshotBatch batch;
 
-            for (std::uint8_t index = 0; index < PART_COUNT; ++index)
+            for (std::uint8_t index = 0; index < partCount; ++index)
             {
                 protocol::ObjectStateRecord object{};
                 object.objectId = static_cast<std::uint32_t>(index) + 1;
@@ -385,10 +399,10 @@ namespace network_mgr_test
                 protocol::StateSnapshotPayload payload{};
                 payload.snapshotTick = tick;
                 payload.partIndex = index;
-                payload.partCount = PART_COUNT;
+                payload.partCount = partCount;
                 payload.objects.push_back(object);
 
-                auto message = MakeMessage(MessageType::STATE_SNAPSHOT, std::move(payload), TOTAL_BYTES, SESSION_ID, tick * PART_COUNT + index);
+                auto message = MakeMessage(MessageType::STATE_SNAPSHOT, std::move(payload), TOTAL_BYTES, SESSION_ID, tick * partCount + index);
                 message.header.hostTick = tick;
 
                 batch.parts.push_back(std::move(message));
@@ -554,11 +568,180 @@ namespace network_mgr_test
                     && pendingMatches(mgr, batchC);
             });
 
+        const auto rejectPreservingPending = [&](const net::SnapshotBatch& rejected,
+            net::SendResult expectedResult)
+        {
+            return Access::WithConnectedHost([&](CNetworkMgr& mgr)
+            {
+                return mgr.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
+                    && mgr.EnqueueSnapshotBatch(rejected) == expectedResult
+                    && pendingMatches(mgr, batchA)
+                    && mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::ReplacedPending
+                    && pendingMatches(mgr, batchB);
+            });
+        };
+
+        const auto candidate = MakeSnapshotBatch(20);
+
+        auto mismatchedSession = candidate;
+        ++mismatchedSession.parts[1].header.sessionId;
+        const bool b04 = rejectPreservingPending(mismatchedSession, net::SendResult::InvalidRequest);
+
+        auto duplicatePartIndex = candidate;
+        std::get<protocol::StateSnapshotPayload>(duplicatePartIndex.parts[1].payload).partIndex = 0;
+        const bool duplicateIndexRejected = rejectPreservingPending(
+            duplicatePartIndex, net::SendResult::InvalidRequest);
+
+        auto mismatchedPartCount = candidate;
+        std::get<protocol::StateSnapshotPayload>(mismatchedPartCount.parts[1].payload).partCount = 3;
+        const bool partCountRejected = rejectPreservingPending(
+            mismatchedPartCount, net::SendResult::InvalidRequest);
+        const bool b05 = duplicateIndexRejected && partCountRejected;
+
+        auto oversizedPart = candidate;
+        auto& objects = std::get<protocol::StateSnapshotPayload>(oversizedPart.parts[0].payload).objects;
+        objects.resize(protocol::MAX_SNAPSHOT_OBJECTS_PER_PACKET + 1);
+        for (std::size_t i = 0; i < objects.size(); ++i)
+            objects[i].objectId = static_cast<protocol::ObjectId>(i + 100);
+
+        const bool oversizedPartRejected = rejectPreservingPending(oversizedPart, net::SendResult::TooLarge);
+
+        auto tooManyParts = candidate;
+        tooManyParts.parts.resize(net::MAX_SNAPSHOT_PARTS_PER_BATCH + 1);
+        const bool partLimitRejected = rejectPreservingPending(tooManyParts, net::SendResult::TooLarge);
+        const bool b06 = oversizedPartRejected && partLimitRejected;
+
+        const bool b07 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
+        {
+            if (mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued)
+                return false;
+
+            const auto inFlight = Access::TakePending(mgr);
+            if (!inFlight || *inFlight != batchA)
+                return false;
+
+            return mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::Queued
+                && mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::StaleBatch
+                && pendingMatches(mgr, batchB)
+                && mgr.EnqueueSnapshotBatch(batchA) == net::SendResult::StaleBatch
+                && pendingMatches(mgr, batchB)
+                && *inFlight == batchA;
+        });
+
+        const bool b08 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
+        {
+            const auto first = MakeQueueHeartbeat(1);
+            const auto second = MakeQueueHeartbeat(2);
+
+            if (mgr.EnqueueSend(net::Channel::Tcp, first) != net::SendResult::Queued
+                || mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued
+                || mgr.EnqueueSnapshotBatch(batchB) != net::SendResult::ReplacedPending
+                || mgr.EnqueueSend(net::Channel::Tcp, second) != net::SendResult::Queued
+                || mgr.EnqueueSnapshotBatch(batchC) != net::SendResult::ReplacedPending)
+            {
+                return false;
+            }
+
+            const auto requests = Access::PeekSendRequests(mgr);
+            return requests.size() == 2
+                && requests[0].transport == TransportType::TCP && requests[0].message == first
+                && requests[1].transport == TransportType::TCP && requests[1].message == second
+                && pendingMatches(mgr, batchC);
+        });
+
+        const bool b09 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
+        {
+            if (mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued)
+                return false;
+
+            const auto singleSlots = net::MAX_SEND_QUEUE_ENTRIES - batchA.parts.size();
+            for (std::size_t i = 0; i < singleSlots; ++i)
+            {
+                if (mgr.EnqueueSend(net::Channel::Tcp, MakeQueueHeartbeat(static_cast<std::uint32_t>(i + 1)))
+                    != net::SendResult::Queued)
+                {
+                    return false;
+                }
+            }
+
+            return mgr.EnqueueSend(net::Channel::Tcp, MakeQueueHeartbeat(static_cast<std::uint32_t>(singleSlots + 1)))
+                    == net::SendResult::QueueFull
+                && mgr.EnqueueSnapshotBatch(MakeSnapshotBatch(20, 3)) == net::SendResult::QueueFull
+                && pendingMatches(mgr, batchA)
+                && mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::ReplacedPending
+                && pendingMatches(mgr, batchB)
+                && Access::PeekSendRequests(mgr).size() == singleSlots;
+        });
+
+        const bool b10 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
+        {
+            auto original = batchA;
+            if (mgr.EnqueueSnapshotBatch(original) != net::SendResult::Queued)
+                return false;
+
+            auto& payload = std::get<protocol::StateSnapshotPayload>(original.parts[0].payload);
+            ++payload.objects[0].pos.x;
+
+            return pendingMatches(mgr, batchA);
+        });
+
+        const bool b11 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
+        {
+            if (mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued)
+                return false;
+
+            mgr.Shutdown();
+
+            protocol::PlayerInputPayload payload{};
+            payload.inputSequence = 1;
+            const auto input = MakeMessage(MessageType::PLAYER_INPUT, payload, 40,
+                batchA.parts.front().header.sessionId, 1);
+
+            return mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::NotRunning
+                && mgr.EnqueueSend(net::Channel::Udp, input) == net::SendResult::NotRunning
+                && !Access::PeekPending(mgr)
+                && Access::PeekSendRequests(mgr).empty();
+        });
+
+        const bool b12 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
+        {
+            if (mgr.EnqueueSnapshotBatch(batchC) != net::SendResult::Queued
+                || mgr.EnqueueSend(net::Channel::Tcp, MakeQueueHeartbeat(1)) != net::SendResult::Queued)
+            {
+                return false;
+            }
+
+            Access::RecordReceiveOverflow(mgr);
+            mgr.Shutdown();
+
+            if (!Access::PrepareConnectedHost(mgr))
+                return false;
+
+            NetworkEvent event{};
+            // 같은 ID에 더 낮은 틱을 등록해 이전 수락 기록의 제거를 확인한다.
+            return !mgr.TryPopEvent(event)
+                && Access::PeekSendRequests(mgr).empty()
+                && mgr.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
+                && pendingMatches(mgr, batchA);
+        });
+
         std::cout << (b01 ? "[PASS]" : "[FAIL]") << " B01 Initial batch queued\n";
         std::cout << (b02 ? "[PASS]" : "[FAIL]") << " B02 Pending batch replaced\n";
         std::cout << (b03 ? "[PASS]" : "[FAIL]") << " B03 In-flight batch preserved\n";
 
-        const bool passed = b01 && b02 && b03;
+        std::cout << (b04 ? "[PASS]" : "[FAIL]") << " B04 Mismatched session rejected\n";
+        std::cout << (b05 ? "[PASS]" : "[FAIL]") << " B05 Invalid part index or count rejected\n";
+        std::cout << (b06 ? "[PASS]" : "[FAIL]") << " B06 Batch size limits enforced\n";
+        std::cout << (b07 ? "[PASS]" : "[FAIL]") << " B07 Same and older ticks rejected\n";
+
+        std::cout << (b08 ? "[PASS]" : "[FAIL]") << " B08 TCP requests preserved during batch replacement\n";
+        std::cout << (b09 ? "[PASS]" : "[FAIL]") << " B09 Combined send queue limit enforced\n";
+        std::cout << (b10 ? "[PASS]" : "[FAIL]") << " B10 Queued batch owns its data\n";
+
+        std::cout << (b11 ? "[PASS]" : "[FAIL]") << " B11 Batch and input rejected after shutdown\n";
+        std::cout << (b12 ? "[PASS]" : "[FAIL]") << " B12 Restart clears pending data, ticks and overflow\n";
+
+        const bool passed = b01 && b02 && b03 && b04 && b05 && b06 && b07 && b08 && b09 && b10 && b11 && b12;
         std::cout << (passed ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");
 
         return passed;

@@ -77,13 +77,7 @@ namespace network
                 udpPeerAddress = initialUdpPeer;
             }
 
-            {
-                std::lock_guard lock(receiveMutex);
-                recvQueue.clear();
-                networkEventQueue.clear();
-                receiveOverflow.store(false);
-                receiveOverflowReported = false;
-            }
+            ResetReceiveStateForStart();
 
             transportThread = std::thread(&CNetworkMgr::NetworkThread, this);
         }
@@ -108,6 +102,7 @@ namespace network
         {
             std::lock_guard lock(sendMutex);
             udpPeerAddress = {};
+            ClearPendingSendsLocked();
         }
 
         // 통신 스레드가 소켓을 닫고 반환, Winsock 정리
@@ -120,6 +115,22 @@ namespace network
         }
 
         netState.store(NetworkState::Stopped);
+    }
+
+    void CNetworkMgr::ResetReceiveStateForStart()
+    {
+        std::lock_guard lock(receiveMutex);
+        recvQueue.clear();
+        networkEventQueue.clear();
+        receiveOverflow.store(false);
+        receiveOverflowReported = false;
+    }
+
+    void CNetworkMgr::ClearPendingSendsLocked()
+    {
+        sendRequestQueue.clear();
+        pendingSnapshotBatch.reset();
+        lastSnapshotTickBySession.clear();
     }
 
     NetworkResult CNetworkMgr::StartHost(unsigned short tcpPort, unsigned short udpPort)
@@ -599,9 +610,7 @@ namespace network
         {
             std::lock_guard lock(sendMutex);
             stopRequested.store(true);
-            sendRequestQueue.clear();
-            pendingSnapshotBatch.reset();
-            lastSnapshotTickBySession.clear();
+            ClearPendingSendsLocked();
         }
 
         closeSocket(listenSO_tcp);
