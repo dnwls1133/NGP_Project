@@ -69,6 +69,107 @@ namespace network
 
             return std::move(pending->batch);
         }
+
+        static bool CheckWouldBlockRetry(CNetworkMgr& mgr, const net::SnapshotBatch& batch)
+        {
+            if (batch.parts.size() != 2 || mgr.EnqueueSnapshotBatch(batch) != net::SendResult::Queued)
+                return false;
+
+            std::optional<CNetworkMgr::PendingSnapshotBatch> pending;
+            {
+                std::lock_guard lock(mgr.sendMutex);
+                pending = mgr.TakePendingSnapshotBatchLocked();
+            }
+
+            if (!pending)
+                return false;
+
+            CNetworkMgr::ActiveSnapshotBatch active{ std::move(*pending), 0, {} };
+            std::vector<std::uint8_t> attempts;
+            std::vector<std::uint8_t> sentParts;
+            std::vector<std::uint8_t> blockedBytes;
+
+            const auto sendPart = [&](SOCKET, const sockaddr_in&, const std::vector<std::uint8_t>& bytes) -> int {
+                protocol::Message decoded{};
+                if (protocol::CPacketCodec::Decode(bytes, decoded) != protocol::CodecError::NONE)
+                    return WSAEINVAL;
+
+                const auto* part = std::get_if<protocol::StateSnapshotPayload>(&decoded.payload);
+
+                if (!part || part->partIndex >= batch.parts.size() || decoded != batch.parts[part->partIndex])
+                    return WSAEINVAL;
+
+                attempts.push_back(part->partIndex);
+
+                if (part->partIndex == 1)
+                {
+                    if (blockedBytes.empty())
+                    {
+                        blockedBytes = bytes;
+                        return WSAEWOULDBLOCK;
+                    }
+
+                    if (bytes != blockedBytes)
+                        return WSAEINVAL;
+                }
+
+                sentParts.push_back(part->partIndex);
+                return 0;
+                };
+
+            mgr.FlushSnapshotBatch(active, sendPart);
+
+            if (active.nextPart != 1 || blockedBytes.empty() ||
+                active.encodedPart != blockedBytes || mgr.stopRequested.load() ||
+                attempts != std::vector<std::uint8_t>{ 0, 1 } ||
+                sentParts != std::vector<std::uint8_t>{ 0 })
+            {
+                return false;
+            }
+
+            mgr.FlushSnapshotBatch(active, sendPart);
+
+            NetworkEvent event{};
+
+            return active.nextPart == batch.parts.size() && active.encodedPart.empty()
+                && attempts == std::vector<std::uint8_t>{ 0, 1, 1 }
+            && sentParts == std::vector<std::uint8_t>{ 0, 1 }
+            && !mgr.stopRequested.load() && !mgr.TryPopEvent(event);
+        }
+
+        static void InstallStopTestSender(CNetworkMgr& mgr, bool udp, std::atomic<bool>& paused)
+        {
+            if (udp)
+            {
+                mgr.snapshotSendOverride = [&paused, firstSent = false](SOCKET sock, const sockaddr_in& destination, const std::vector<std::uint8_t>& bytes) mutable -> int {
+                    if (!firstSent)
+                    {
+                        const int error = CNetworkMgr::SendSnapshotPart(sock, destination, bytes);
+                        firstSent = error == 0;
+                        return error;
+                    }
+
+                    paused.store(true);
+                    return WSAEWOULDBLOCK;
+                    };
+                return;
+            }
+
+            mgr.tcpSendOverride = [&mgr, &paused](SOCKET sock, const char* data, int size) -> int {
+                if (mgr.tcpSendOffset == 0)
+                    return send(sock, data, (std::min)(size, 10), 0);
+
+                paused.store(true);
+                WSASetLastError(WSAEWOULDBLOCK);
+                return SOCKET_ERROR;
+                };
+        }
+
+        static void ClearStopTestSender(CNetworkMgr& mgr)
+        {
+            mgr.tcpSendOverride = {};
+            mgr.snapshotSendOverride = {};
+        }
     };
 }
 
@@ -391,6 +492,98 @@ namespace network_mgr_test
 
                 return tcpCount == 2 && udpCount == batch.parts.size() ? PollResult::Passed : PollResult::Pending;
                 });
+        }
+
+        bool RunActiveShutdownCase(CNetworkMgr& mgr, bool udp, unsigned short tcpPort, unsigned short udpPort) {
+            using Access = network::SnapshotBatchTestAccess;
+
+            std::atomic<bool> paused{ false };
+            Access::InstallStopTestSender(mgr, udp, paused);
+
+            const auto exercise = [&]() {
+                NetworkEvent event{};
+
+                if (!CheckRequest(mgr.StartHost(tcpPort, udpPort), "StartHost") || !WaitEvent(mgr, NetworkEventType::Listening, event, "Listening"))
+                    return false;
+
+                tcp_test::TestSocket tcpPeer;
+                tcpPeer.value = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                if (tcpPeer.value == INVALID_SOCKET)
+                    return tcp_test::ReportError("socket(TCP)", WSAGetLastError());
+
+                sockaddr_in host{};
+                host.sin_family = AF_INET;
+                host.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                host.sin_port = htons(tcpPort);
+
+                const auto connected = transport::ConnectTcp(tcpPeer.value, host);
+                if (connected.status != transport::IoStatus::Success)
+                    return tcp_test::ReportError("connect", connected.errorCode);
+
+                if (!WaitEvent(mgr, NetworkEventType::Connected, event, "Connected"))
+                    return false;
+
+                // UDP 시험 첫 조각을 받아줄 로컬 소켓 준비
+                tcp_test::TestSocket udpPeer;
+                if (udp)
+                {
+                    udpPeer.value = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+                    if (udpPeer.value == INVALID_SOCKET)
+                        return tcp_test::ReportError("socket(UDP)", WSAGetLastError());
+
+                    sockaddr_in destination{};
+                    destination.sin_family = AF_INET;
+                    destination.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+                    if (bind(udpPeer.value, reinterpret_cast<const sockaddr*>(&destination), sizeof(destination)) == SOCKET_ERROR)
+                        return tcp_test::ReportError("bind(UDP)", WSAGetLastError());
+
+                    int addressSize = sizeof(destination);
+                    if (getsockname(udpPeer.value, reinterpret_cast<sockaddr*>(&destination), &addressSize) == SOCKET_ERROR)
+                        return tcp_test::ReportError("getsockname(UDP)", WSAGetLastError());
+
+                    if (!CheckRequest(mgr.SetUdpPeer(destination), "Set UDP peer") || !CheckQueued(mgr.EnqueueSnapshotBatch(MakeSnapshotBatch(10, 16)), "Queue batch"))
+                        return false;
+                }
+                else if (!CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, MakeQueueHeartbeat(1)), "Queue TCP heartbeat"))
+                    return false;
+
+                if (!WaitFor(udp ? "UDP parts remain" : "TCP bytes remain", 5s, [&] {
+                    if (mgr.TryPopEvent(event))
+                        return UnexpectedEvent(event);
+
+                    return paused.load() ? PollResult::Passed : PollResult::Pending;
+                    }))
+                {
+                    return false;
+                }
+
+                // 상대 소켓 유지하고 매니저 쪽에서 종료
+                std::cout << "[TEST] Shutdown with pending data" << std::endl;
+                const auto started = std::chrono::steady_clock::now();
+
+                mgr.Shutdown();
+
+                const auto elapsed = std::chrono::steady_clock::now() - started;
+                std::cout << "[PASS] Shutdown returned in " << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << " ms\n";
+                return true;
+                };
+
+            const bool passed = exercise();
+            mgr.Shutdown();
+            Access::ClearStopTestSender(mgr);
+
+            if (!passed)
+                return false;
+
+            if (!CheckRequest(mgr.StartHost(tcpPort, udpPort), "Restart on same ports"))
+                return false;
+
+            NetworkEvent event{};
+            const bool restarted = WaitEvent(mgr, NetworkEventType::Listening, event, "Listening again on the same ports");
+            mgr.Shutdown();
+
+            return restarted;
         }
 
         bool RunRound(CNetworkMgr& mgr, bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, std::uint32_t round, TestMode mode)
@@ -832,7 +1025,12 @@ namespace network_mgr_test
         std::cout << (b11 ? "[PASS]" : "[FAIL]") << " B11 Batch and input rejected after shutdown\n";
         std::cout << (b12 ? "[PASS]" : "[FAIL]") << " B12 Restart clears pending data, ticks and overflow\n";
 
-        const bool passed = b01 && b02 && b03 && b04 && b05 && b06 && b07 && b08 && b09 && b10 && b11 && b12;
+        const bool retryPassed = Access::WithConnectedHost([&](CNetworkMgr& mgr) {
+            return Access::CheckWouldBlockRetry(mgr, batchA);
+            });
+        std::cout << (retryPassed ? "[PASS]" : "[FAIL]") << " UDP WouldBlock retries the same snapshot part\n";
+
+        const bool passed = b01 && b02 && b03 && b04 && b05 && b06 && b07 && b08 && b09 && b10 && b11 && b12 && retryPassed;
         std::cout << (passed ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");
 
         return passed;
@@ -925,6 +1123,28 @@ namespace network_mgr_test
         shutdown("Shutdown after restart");
         std::cout << "[SUITE] PASS\n";
         return true;
+    }
+
+    bool RunActiveShutdown(unsigned short tcpPort, unsigned short udpPort)
+    {
+        WSADATA wsa{};
+        const int error = WSAStartup(MAKEWORD(2, 2), &wsa);
+        if (error != 0)
+            return tcp_test::ReportError("WSAStartup", error);
+
+        auto& mgr = *CNetworkMgr::GetInst();
+
+        std::cout << "=== TCP partial-send shutdown ===\n";
+        const bool tcpPassed = RunActiveShutdownCase(mgr, false, tcpPort, udpPort);
+
+        std::cout << "=== UDP batch-send shutdown ===\n";
+        const bool udpPassed = RunActiveShutdownCase(mgr, true, tcpPort, udpPort);
+
+        WSACleanup();
+
+        const bool passed = tcpPassed && udpPassed;
+        std::cout << (passed ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");
+        return passed;
     }
 
     bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, TestMode mode)

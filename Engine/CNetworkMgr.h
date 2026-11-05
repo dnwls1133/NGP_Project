@@ -9,10 +9,11 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <functional>
 
 namespace network
 {
-    
+
     struct SendRequest
     {
         TransportType transport = TransportType::TCP;
@@ -101,6 +102,13 @@ namespace network
         bool TryPopEvent(NetworkEvent& out);
 
     private:
+        static int SendSnapshotPart(SOCKET socket, const sockaddr_in& destination, const std::vector<std::uint8_t>& bytes);
+
+        using SnapshotSendFunction = std::function<int(SOCKET, const sockaddr_in&, const std::vector<std::uint8_t>&)>;
+
+        std::function<int(SOCKET, const char*, int)> tcpSendOverride;
+        SnapshotSendFunction snapshotSendOverride;
+
         NetworkResult Start(const NetworkConfig& config);
 
         void NetworkThread();
@@ -110,7 +118,7 @@ namespace network
         void FlushTcpSend();
         void ReceiveTcp();
         void FlushUdpSend();
-        void FlushSnapshotBatch(ActiveSnapshotBatch& active);
+        void FlushSnapshotBatch(ActiveSnapshotBatch& active, const SnapshotSendFunction& sendPart = SendSnapshotPart);
         void ReceiveUdp();
 
         void PushEvent(const NetworkEvent& event);
@@ -118,7 +126,7 @@ namespace network
         void RequestStopOnReceiveOverflow();
         bool IsReceiveQueueFullLocked() const;
         NetworkResult EnqueueSendRequest(SendRequest request);
-        void StopWithTcpError( int socketError, protocol::CodecError codecError = protocol::CodecError::NONE);
+        void StopWithTcpError(int socketError, protocol::CodecError codecError = protocol::CodecError::NONE);
 
         std::optional<PendingSnapshotBatch> TakePendingSnapshotBatchLocked();
     };

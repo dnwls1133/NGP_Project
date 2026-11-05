@@ -324,6 +324,17 @@ namespace network
         return true;
     }
 
+    int CNetworkMgr::SendSnapshotPart(SOCKET socket, const sockaddr_in& destination, const std::vector<std::uint8_t>& bytes)
+    {
+        const int size = static_cast<int>(bytes.size());
+        const int sent = sendto(socket, reinterpret_cast<const char*>(bytes.data()), size, 0, reinterpret_cast<const sockaddr*>(&destination), sizeof(destination));
+
+        if (sent == SOCKET_ERROR)
+            return WSAGetLastError();
+
+        return sent == size ? 0 : WSAEMSGSIZE;
+    }
+
     void CNetworkMgr::NetworkThread()
     {
         using Clock = std::chrono::steady_clock;
@@ -599,7 +610,11 @@ namespace network
 
                 if (!stopRequested.load() && activeSnapshot && FD_ISSET(udpSO, &writeSet))
                 {
-                    FlushSnapshotBatch(*activeSnapshot);
+                    if (snapshotSendOverride)
+                        FlushSnapshotBatch(*activeSnapshot, snapshotSendOverride);
+                    else
+                        FlushSnapshotBatch(*activeSnapshot);
+
                     if (activeSnapshot->nextPart == activeSnapshot->pending.batch.parts.size())
                         activeSnapshot.reset();
                 }
@@ -641,7 +656,9 @@ namespace network
 
         const std::size_t remaining = frame.size() - tcpSendOffset;
         const char* data = reinterpret_cast<const char*>(frame.data() + tcpSendOffset);
-        const int sent = send(tcpSO, data, static_cast<int>(remaining), 0);
+
+        const int size = static_cast<int>(remaining);
+        const int sent = tcpSendOverride ? tcpSendOverride(tcpSO, data, size) : send(tcpSO, data, size, 0);
 
         if (sent == SOCKET_ERROR)
         {
@@ -785,7 +802,7 @@ namespace network
             stopRequested.store(true);
     }
 
-    void CNetworkMgr::FlushSnapshotBatch(ActiveSnapshotBatch& active)
+    void CNetworkMgr::FlushSnapshotBatch(ActiveSnapshotBatch& active, const SnapshotSendFunction& sendPart)
     {
         constexpr std::size_t MAX_PARTS_PER_ITERATION = 8;
         const auto& parts = active.pending.batch.parts;
@@ -805,13 +822,9 @@ namespace network
                 }
             }
 
-            const int size = static_cast<int>(active.encodedPart.size());
-            const int sent = sendto(udpSO, reinterpret_cast<const char*>(active.encodedPart.data()),
-                size, 0, reinterpret_cast<const sockaddr*>(&destination), sizeof(destination));
-
-            if (sent != size)
+            const int error = sendPart(udpSO, destination, active.encodedPart);
+            if (error != 0)
             {
-                const int error = sent == SOCKET_ERROR ? WSAGetLastError() : WSAEMSGSIZE;
                 if (error != WSAEWOULDBLOCK)
                 {
                     PushEvent(NetworkEvent{ NetworkEventType::Error, destination, error });
