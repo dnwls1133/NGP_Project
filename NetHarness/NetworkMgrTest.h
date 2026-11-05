@@ -4,7 +4,9 @@
 
 namespace network_mgr_test
 {
-    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort);
+    enum class TestMode { Basic, SnapshotBatch };
+
+    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, TestMode mode = TestMode::Basic);
     bool RunListeningShutdown(unsigned short tcpPort, unsigned short udpPort);
     bool RunReceiveOverflow(unsigned short tcpPort, unsigned short udpPort);
     bool RunQueueTest(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort);

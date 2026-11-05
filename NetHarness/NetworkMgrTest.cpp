@@ -203,95 +203,10 @@ namespace network_mgr_test
             message.payload = std::move(payload);
             return message;
         }
+
         Message MakeQueueHeartbeat(std::uint32_t sequence)
         {
             return MakeMessage(MessageType::HEARTBEAT, protocol::HeartbeatPayload{}, static_cast<std::uint32_t>(protocol::HEADER_BYTES), 1, sequence);
-        }
-
-        bool RunRound(CNetworkMgr& mgr, bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, std::uint32_t round)
-        {
-            const auto started = host
-                ? mgr.StartHost(tcpPort, udpPort)
-                : mgr.StartClient(hostIp, tcpPort, udpPort);
-
-            if (!CheckRequest(started, "Start"))
-                return false;
-
-            NetworkEvent event{};
-
-            if (host && !WaitEvent(mgr, NetworkEventType::Listening, event, "Listening"))
-                return false;
-
-            if (!WaitEvent(mgr, NetworkEventType::Connected, event, "Connected", 60s))
-                return false;
-
-            const sockaddr_in tcpPeer = event.peer;
-            const std::uint32_t sessionId = 1000 + round;
-            const std::uint32_t sequence = round * 10;
-            const protocol::UdpToken token = 0x0102030405060708ULL + round;
-
-            protocol::AcceptPayload acceptPayload{};
-            acceptPayload.udpToken = token;
-
-            protocol::UdpRegisterPayload registerPayload{};
-            registerPayload.udpToken = token;
-
-            const auto join = MakeMessage(MessageType::JOIN,
-                protocol::JoinPayload{}, 32, 0, sequence + 1);
-            const auto accept = MakeMessage(MessageType::ACCEPT,
-                acceptPayload, 44, sessionId, sequence + 2);
-            const auto udpRegister = MakeMessage(MessageType::UDP_REGISTER,
-                registerPayload, 44, sessionId, sequence + 3);
-            const auto udpAck = MakeMessage(MessageType::UDP_ACK,
-                protocol::UdpAckPayload{}, 36, sessionId, sequence + 4);
-
-            ReceivedMessage received{};
-
-            if (host)
-            {
-                if (mgr.EnqueueSend(net::Channel::Udp, udpAck) != net::SendResult::InvalidRequest)
-                {
-                    std::cerr << "[FAIL] Expected UDP peer to be unset before registration\n";
-                    return false;
-                }
-                std::cout << "[PASS] UDP peer unset before registration\n";
-
-                if (!Receive(mgr, TransportType::TCP, join, tcpPeer, true, "TCP JOIN", received))
-                    return false;
-
-                if (!CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, accept), "Queue ACCEPT"))
-                    return false;
-
-                // Client의 UDP 포트는 운영체제가 배정하므로 수신한 주소를 사용한다.
-                if (!Receive(mgr, TransportType::UDP, udpRegister,
-                    tcpPeer, false, "UDP_REGISTER", received))
-                {
-                    return false;
-                }
-
-                if (!CheckRequest(mgr.SetUdpPeer(received.sender), "Set verified UDP peer"))
-                    return false;
-
-                if (!CheckQueued(mgr.EnqueueSend(net::Channel::Udp, udpAck), "Queue UDP_ACK"))
-                    return false;
-
-                // Client는 UDP_ACK를 검증한 뒤 연결을 닫는다.
-                return WaitEvent(mgr, NetworkEventType::Disconnected, event, "Disconnected");
-            }
-
-            if (!CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, join), "Queue JOIN"))
-                return false;
-
-            if (!Receive(mgr, TransportType::TCP, accept, tcpPeer, true, "TCP ACCEPT", received))
-                return false;
-
-            sockaddr_in udpPeer = tcpPeer;
-            udpPeer.sin_port = htons(udpPort);
-
-            if (!CheckQueued(mgr.EnqueueSend(net::Channel::Udp, udpRegister), "Queue UDP_REGISTER"))
-                return false;
-
-            return Receive(mgr, TransportType::UDP, udpAck, udpPeer, true, "UDP_ACK", received);
         }
 
         bool RunQueueSender(CNetworkMgr& mgr, const sockaddr_in& peer)
@@ -381,7 +296,7 @@ namespace network_mgr_test
             return true;
         }
 
-        net::SnapshotBatch MakeSnapshotBatch(std::uint32_t tick, std::uint8_t partCount = 2)
+        net::SnapshotBatch MakeSnapshotBatch(std::uint32_t tick, std::uint8_t partCount = 2, std::uint32_t sessionId = 1000)
         {
             constexpr std::uint32_t SESSION_ID = 1000;
             constexpr auto TOTAL_BYTES = static_cast<std::uint32_t>(protocol::HEADER_BYTES + protocol::SNAPSHOT_HEADER_BYTES + protocol::OBJECT_STATE_RECORD_BYTES);
@@ -409,6 +324,182 @@ namespace network_mgr_test
             }
 
             return batch;
+        }
+
+        bool SendSnapshotBatchFixture(CNetworkMgr& mgr, std::uint32_t sessionId)
+        {
+            const auto first = MakeMessage(MessageType::HEARTBEAT, protocol::HeartbeatPayload{}, 32, sessionId, 101);
+            const auto second = MakeMessage(MessageType::HEARTBEAT, protocol::HeartbeatPayload{}, 32, sessionId, 102);
+
+            const auto batch = MakeSnapshotBatch(10, 2, sessionId);
+
+            return CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, first), "Queue TCP E1")
+                && CheckQueued(mgr.EnqueueSnapshotBatch(batch), "Queue snapshot batch")
+                && CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, second), "Queue TCP E2");
+        }
+
+        bool ReceiveSnapshotBatchFixture(CNetworkMgr& mgr, const sockaddr_in& tcpPeer, const sockaddr_in& udpPeer, std::uint32_t sessionId)
+        {
+            const auto batch = MakeSnapshotBatch(10, 2, sessionId);
+            std::vector<bool> seen(batch.parts.size(), false);
+            std::size_t udpCount = 0;
+            std::uint32_t tcpCount = 0;
+
+            return WaitFor("TCP 2 messages and UDP 2 parts verified", 5s, [&] {
+                NetworkEvent event{};
+                if (mgr.TryPopEvent(event))
+                    return UnexpectedEvent(event);
+
+                ReceivedMessage received{};
+                while (mgr.TryReceive(received))
+                {
+                    const auto& peer = received.transport == TransportType::TCP ? tcpPeer : udpPeer;
+                    const auto& sender = received.sender;
+                    if (sender.sin_family != peer.sin_family ||
+                        sender.sin_addr.s_addr != peer.sin_addr.s_addr ||
+                        sender.sin_port != peer.sin_port)
+                    {
+                        std::cerr << "[FAIL] Unexpected sender\n";
+                        return PollResult::Failed;
+                    }
+
+                    if (received.transport == TransportType::TCP)
+                    {
+                        const auto expected = MakeMessage(MessageType::HEARTBEAT, protocol::HeartbeatPayload{}, 32, sessionId, 101 + tcpCount);
+
+                        if (tcpCount >= 2 || received.message != expected)
+                        {
+                            std::cerr << "[FAIL] TCP message mismatch, expected sequence=" << 101 + tcpCount << ", actual=" << received.message.header.sequence << '\n';
+                            return PollResult::Failed;
+                        }
+
+                        ++tcpCount;
+                        continue;
+                    }
+
+                    const auto* part = std::get_if<protocol::StateSnapshotPayload>(&received.message.payload);
+                    if (!part || part->partIndex >= batch.parts.size() ||
+                        seen[part->partIndex] || received.message != batch.parts[part->partIndex])
+                    {
+                        std::cerr << "[FAIL] Invalid, duplicate or mismatched UDP snapshot part\n";
+                        return PollResult::Failed;
+                    }
+
+                    seen[part->partIndex] = true;
+                    ++udpCount;
+                }
+
+                return tcpCount == 2 && udpCount == batch.parts.size() ? PollResult::Passed : PollResult::Pending;
+                });
+        }
+
+        bool RunRound(CNetworkMgr& mgr, bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, std::uint32_t round, TestMode mode)
+        {
+            const auto started = host
+                ? mgr.StartHost(tcpPort, udpPort)
+                : mgr.StartClient(hostIp, tcpPort, udpPort);
+
+            if (!CheckRequest(started, "Start"))
+                return false;
+
+            NetworkEvent event{};
+
+            if (host && !WaitEvent(mgr, NetworkEventType::Listening, event, "Listening"))
+                return false;
+
+            if (!WaitEvent(mgr, NetworkEventType::Connected, event, "Connected", 60s))
+                return false;
+
+            const sockaddr_in tcpPeer = event.peer;
+            const std::uint32_t sessionId = 1000 + round;
+            const std::uint32_t sequence = round * 10;
+            const protocol::UdpToken token = 0x0102030405060708ULL + round;
+
+            const auto ready = MakeMessage(MessageType::HEARTBEAT, protocol::HeartbeatPayload{}, 32, sessionId, 100);
+            const auto done = MakeMessage(MessageType::HEARTBEAT, protocol::HeartbeatPayload{}, 32, sessionId, 103);
+
+            protocol::AcceptPayload acceptPayload{};
+            acceptPayload.udpToken = token;
+
+            protocol::UdpRegisterPayload registerPayload{};
+            registerPayload.udpToken = token;
+
+            const auto join = MakeMessage(MessageType::JOIN, protocol::JoinPayload{}, 32, 0, sequence + 1);
+            const auto accept = MakeMessage(MessageType::ACCEPT, acceptPayload, 44, sessionId, sequence + 2);
+            const auto udpRegister = MakeMessage(MessageType::UDP_REGISTER, registerPayload, 44, sessionId, sequence + 3);
+            const auto udpAck = MakeMessage(MessageType::UDP_ACK, protocol::UdpAckPayload{}, 36, sessionId, sequence + 4);
+
+            ReceivedMessage received{};
+
+            if (host)
+            {
+                if (mgr.EnqueueSend(net::Channel::Udp, udpAck) != net::SendResult::InvalidRequest)
+                {
+                    std::cerr << "[FAIL] Expected UDP peer to be unset before registration\n";
+                    return false;
+                }
+                std::cout << "[PASS] UDP peer unset before registration\n";
+
+                if (!Receive(mgr, TransportType::TCP, join, tcpPeer, true, "TCP JOIN", received))
+                    return false;
+
+                if (!CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, accept), "Queue ACCEPT"))
+                    return false;
+
+                // Client의 UDP 포트는 운영체제가 배정하므로 수신한 주소를 사용한다.
+                if (!Receive(mgr, TransportType::UDP, udpRegister,
+                    tcpPeer, false, "UDP_REGISTER", received))
+                {
+                    return false;
+                }
+
+                if (!CheckRequest(mgr.SetUdpPeer(received.sender), "Set verified UDP peer"))
+                    return false;
+
+                if (!CheckQueued(mgr.EnqueueSend(net::Channel::Udp, udpAck), "Queue UDP_ACK"))
+                    return false;
+
+                if (mode == TestMode::SnapshotBatch)
+                {
+                    std::cout << "[HOST] UDP_ACK queued\n";
+                    // 다음 단계에서 TCP·UDP 시험 메시지 송신을 연결한다.
+
+                    return Receive(mgr, TransportType::TCP, ready, tcpPeer, true, "Client ready", received)
+                        && SendSnapshotBatchFixture(mgr, sessionId)
+                        && Receive(mgr, TransportType::TCP, done, tcpPeer, true, "Client verified batch", received);
+                }
+
+                // Client는 UDP_ACK를 검증한 뒤 연결을 닫는다.
+                return WaitEvent(mgr, NetworkEventType::Disconnected, event, "Disconnected");
+            }
+
+            if (!CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, join), "Queue JOIN"))
+                return false;
+
+            if (!Receive(mgr, TransportType::TCP, accept, tcpPeer, true, "TCP ACCEPT", received))
+                return false;
+
+            sockaddr_in udpPeer = tcpPeer;
+            udpPeer.sin_port = htons(udpPort);
+
+            if (!CheckQueued(mgr.EnqueueSend(net::Channel::Udp, udpRegister), "Queue UDP_REGISTER"))
+                return false;
+
+            if (!Receive(mgr, TransportType::UDP, udpAck, udpPeer, true, "UDP_ACK", received))
+                return false;
+
+            if (mode == TestMode::SnapshotBatch)
+            {
+                std::cout << "[CLIENT] UDP_ACK verified\n";
+
+                // 다음 단계에서 TCP·UDP 시험 메시지 수신을 연결한다.
+                return CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, ready), "Queue ready")
+                    && ReceiveSnapshotBatchFixture(mgr, tcpPeer, udpPeer, sessionId)
+                    && CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, done), "Queue completion")
+                    && WaitEvent(mgr, NetworkEventType::Disconnected, event, "Host disconnected");
+            }
+
+            return true;
         }
     }
 
@@ -570,16 +661,16 @@ namespace network_mgr_test
 
         const auto rejectPreservingPending = [&](const net::SnapshotBatch& rejected,
             net::SendResult expectedResult)
-        {
-            return Access::WithConnectedHost([&](CNetworkMgr& mgr)
             {
-                return mgr.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
-                    && mgr.EnqueueSnapshotBatch(rejected) == expectedResult
-                    && pendingMatches(mgr, batchA)
-                    && mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::ReplacedPending
-                    && pendingMatches(mgr, batchB);
-            });
-        };
+                return Access::WithConnectedHost([&](CNetworkMgr& mgr)
+                    {
+                        return mgr.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
+                            && mgr.EnqueueSnapshotBatch(rejected) == expectedResult
+                            && pendingMatches(mgr, batchA)
+                            && mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::ReplacedPending
+                            && pendingMatches(mgr, batchB);
+                    });
+            };
 
         const auto candidate = MakeSnapshotBatch(20);
 
@@ -612,118 +703,118 @@ namespace network_mgr_test
         const bool b06 = oversizedPartRejected && partLimitRejected;
 
         const bool b07 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
-        {
-            if (mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued)
-                return false;
+            {
+                if (mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued)
+                    return false;
 
-            const auto inFlight = Access::TakePending(mgr);
-            if (!inFlight || *inFlight != batchA)
-                return false;
+                const auto inFlight = Access::TakePending(mgr);
+                if (!inFlight || *inFlight != batchA)
+                    return false;
 
-            return mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::Queued
-                && mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::StaleBatch
-                && pendingMatches(mgr, batchB)
-                && mgr.EnqueueSnapshotBatch(batchA) == net::SendResult::StaleBatch
-                && pendingMatches(mgr, batchB)
-                && *inFlight == batchA;
-        });
+                return mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::Queued
+                    && mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::StaleBatch
+                    && pendingMatches(mgr, batchB)
+                    && mgr.EnqueueSnapshotBatch(batchA) == net::SendResult::StaleBatch
+                    && pendingMatches(mgr, batchB)
+                    && *inFlight == batchA;
+            });
 
         const bool b08 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
-        {
-            const auto first = MakeQueueHeartbeat(1);
-            const auto second = MakeQueueHeartbeat(2);
-
-            if (mgr.EnqueueSend(net::Channel::Tcp, first) != net::SendResult::Queued
-                || mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued
-                || mgr.EnqueueSnapshotBatch(batchB) != net::SendResult::ReplacedPending
-                || mgr.EnqueueSend(net::Channel::Tcp, second) != net::SendResult::Queued
-                || mgr.EnqueueSnapshotBatch(batchC) != net::SendResult::ReplacedPending)
             {
-                return false;
-            }
+                const auto first = MakeQueueHeartbeat(1);
+                const auto second = MakeQueueHeartbeat(2);
 
-            const auto requests = Access::PeekSendRequests(mgr);
-            return requests.size() == 2
-                && requests[0].transport == TransportType::TCP && requests[0].message == first
-                && requests[1].transport == TransportType::TCP && requests[1].message == second
-                && pendingMatches(mgr, batchC);
-        });
-
-        const bool b09 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
-        {
-            if (mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued)
-                return false;
-
-            const auto singleSlots = net::MAX_SEND_QUEUE_ENTRIES - batchA.parts.size();
-            for (std::size_t i = 0; i < singleSlots; ++i)
-            {
-                if (mgr.EnqueueSend(net::Channel::Tcp, MakeQueueHeartbeat(static_cast<std::uint32_t>(i + 1)))
-                    != net::SendResult::Queued)
+                if (mgr.EnqueueSend(net::Channel::Tcp, first) != net::SendResult::Queued
+                    || mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued
+                    || mgr.EnqueueSnapshotBatch(batchB) != net::SendResult::ReplacedPending
+                    || mgr.EnqueueSend(net::Channel::Tcp, second) != net::SendResult::Queued
+                    || mgr.EnqueueSnapshotBatch(batchC) != net::SendResult::ReplacedPending)
                 {
                     return false;
                 }
-            }
 
-            return mgr.EnqueueSend(net::Channel::Tcp, MakeQueueHeartbeat(static_cast<std::uint32_t>(singleSlots + 1)))
+                const auto requests = Access::PeekSendRequests(mgr);
+                return requests.size() == 2
+                    && requests[0].transport == TransportType::TCP && requests[0].message == first
+                    && requests[1].transport == TransportType::TCP && requests[1].message == second
+                    && pendingMatches(mgr, batchC);
+            });
+
+        const bool b09 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
+            {
+                if (mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued)
+                    return false;
+
+                const auto singleSlots = net::MAX_SEND_QUEUE_ENTRIES - batchA.parts.size();
+                for (std::size_t i = 0; i < singleSlots; ++i)
+                {
+                    if (mgr.EnqueueSend(net::Channel::Tcp, MakeQueueHeartbeat(static_cast<std::uint32_t>(i + 1)))
+                        != net::SendResult::Queued)
+                    {
+                        return false;
+                    }
+                }
+
+                return mgr.EnqueueSend(net::Channel::Tcp, MakeQueueHeartbeat(static_cast<std::uint32_t>(singleSlots + 1)))
                     == net::SendResult::QueueFull
-                && mgr.EnqueueSnapshotBatch(MakeSnapshotBatch(20, 3)) == net::SendResult::QueueFull
-                && pendingMatches(mgr, batchA)
-                && mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::ReplacedPending
-                && pendingMatches(mgr, batchB)
-                && Access::PeekSendRequests(mgr).size() == singleSlots;
-        });
+                    && mgr.EnqueueSnapshotBatch(MakeSnapshotBatch(20, 3)) == net::SendResult::QueueFull
+                    && pendingMatches(mgr, batchA)
+                    && mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::ReplacedPending
+                    && pendingMatches(mgr, batchB)
+                    && Access::PeekSendRequests(mgr).size() == singleSlots;
+            });
 
         const bool b10 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
-        {
-            auto original = batchA;
-            if (mgr.EnqueueSnapshotBatch(original) != net::SendResult::Queued)
-                return false;
+            {
+                auto original = batchA;
+                if (mgr.EnqueueSnapshotBatch(original) != net::SendResult::Queued)
+                    return false;
 
-            auto& payload = std::get<protocol::StateSnapshotPayload>(original.parts[0].payload);
-            ++payload.objects[0].pos.x;
+                auto& payload = std::get<protocol::StateSnapshotPayload>(original.parts[0].payload);
+                ++payload.objects[0].pos.x;
 
-            return pendingMatches(mgr, batchA);
-        });
+                return pendingMatches(mgr, batchA);
+            });
 
         const bool b11 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
-        {
-            if (mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued)
-                return false;
+            {
+                if (mgr.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued)
+                    return false;
 
-            mgr.Shutdown();
+                mgr.Shutdown();
 
-            protocol::PlayerInputPayload payload{};
-            payload.inputSequence = 1;
-            const auto input = MakeMessage(MessageType::PLAYER_INPUT, payload, 40,
-                batchA.parts.front().header.sessionId, 1);
+                protocol::PlayerInputPayload payload{};
+                payload.inputSequence = 1;
+                const auto input = MakeMessage(MessageType::PLAYER_INPUT, payload, 40,
+                    batchA.parts.front().header.sessionId, 1);
 
-            return mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::NotRunning
-                && mgr.EnqueueSend(net::Channel::Udp, input) == net::SendResult::NotRunning
-                && !Access::PeekPending(mgr)
-                && Access::PeekSendRequests(mgr).empty();
-        });
+                return mgr.EnqueueSnapshotBatch(batchB) == net::SendResult::NotRunning
+                    && mgr.EnqueueSend(net::Channel::Udp, input) == net::SendResult::NotRunning
+                    && !Access::PeekPending(mgr)
+                    && Access::PeekSendRequests(mgr).empty();
+            });
 
         const bool b12 = Access::WithConnectedHost([&](CNetworkMgr& mgr)
-        {
-            if (mgr.EnqueueSnapshotBatch(batchC) != net::SendResult::Queued
-                || mgr.EnqueueSend(net::Channel::Tcp, MakeQueueHeartbeat(1)) != net::SendResult::Queued)
             {
-                return false;
-            }
+                if (mgr.EnqueueSnapshotBatch(batchC) != net::SendResult::Queued
+                    || mgr.EnqueueSend(net::Channel::Tcp, MakeQueueHeartbeat(1)) != net::SendResult::Queued)
+                {
+                    return false;
+                }
 
-            Access::RecordReceiveOverflow(mgr);
-            mgr.Shutdown();
+                Access::RecordReceiveOverflow(mgr);
+                mgr.Shutdown();
 
-            if (!Access::PrepareConnectedHost(mgr))
-                return false;
+                if (!Access::PrepareConnectedHost(mgr))
+                    return false;
 
-            NetworkEvent event{};
-            // 같은 ID에 더 낮은 틱을 등록해 이전 수락 기록의 제거를 확인한다.
-            return !mgr.TryPopEvent(event)
-                && Access::PeekSendRequests(mgr).empty()
-                && mgr.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
-                && pendingMatches(mgr, batchA);
-        });
+                NetworkEvent event{};
+                // 같은 ID에 더 낮은 틱을 등록해 이전 수락 기록의 제거를 확인한다.
+                return !mgr.TryPopEvent(event)
+                    && Access::PeekSendRequests(mgr).empty()
+                    && mgr.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
+                    && pendingMatches(mgr, batchA);
+            });
 
         std::cout << (b01 ? "[PASS]" : "[FAIL]") << " B01 Initial batch queued\n";
         std::cout << (b02 ? "[PASS]" : "[FAIL]") << " B02 Pending batch replaced\n";
@@ -836,7 +927,7 @@ namespace network_mgr_test
         return true;
     }
 
-    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort)
+    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, TestMode mode)
     {
         auto& mgr = *CNetworkMgr::GetInst();
 
@@ -853,7 +944,7 @@ namespace network_mgr_test
 
             std::cout << "\n=== CNetworkMgr 시험 " << round << " ===\n";
 
-            const bool passed = RunRound(mgr, host, hostIp, tcpPort, udpPort, round);
+            const bool passed = RunRound(mgr, host, hostIp, tcpPort, udpPort, round, mode);
             mgr.Shutdown();
 
             if (!passed)
