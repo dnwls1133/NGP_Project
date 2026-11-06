@@ -351,7 +351,8 @@ namespace protocol
         {
             if (!IsValidPlayerSlot(p.assignedPlayerId)
                 || p.maxPlayers != MAX_PROTOCOL_PLAYERS
-                || p.reserved != 0)
+                || p.reserved != 0
+                || p.udpToken == 0)
             {
                 return CodecError::INVALID_FIELD;
             }
@@ -467,7 +468,8 @@ namespace protocol
         {
             if (!IsValidPlayerSlot(p.playerId)
                 || p.reserved0 != 0
-                || p.reserved1 != 0)
+                || p.reserved1 != 0
+                || p.udpToken == 0)
             {
                 return CodecError::INVALID_FIELD;
             }
@@ -711,7 +713,8 @@ namespace protocol
 
                 if (!IsValidPlayerSlot(p.assignedPlayerId)
                     || p.maxPlayers != MAX_PROTOCOL_PLAYERS
-                    || p.reserved != 0)
+                    || p.reserved != 0
+                    || p.udpToken == 0)
                 {
                     return CodecError::INVALID_FIELD;
                 }
@@ -851,7 +854,8 @@ namespace protocol
                 p.udpToken = r.ReadU64();
                 if (!IsValidPlayerSlot(p.playerId)
                     || p.reserved0 != 0
-                    || p.reserved1 != 0)
+                    || p.reserved1 != 0
+                    || p.udpToken == 0)
                 {
                     return CodecError::INVALID_FIELD;
                 }

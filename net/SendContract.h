@@ -1,8 +1,13 @@
 ﻿#pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <mutex>
+#include <optional>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -193,4 +198,151 @@ namespace net
 
         return SendResult::Queued;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 11/06 가짜 송신 링크 (FakeSendSink)
+    // - 소켓이나 실제 통신 스레드 없이 호스트 상태 배치 교체(B01~B12)와
+    // 단건 메시지 송신 계약을 독립 검증하기 위한 테스트 입니다.
+    // - CNetworkMgr와 동일한 잠금 검증 교체 용량 생명주기 규칙을 따릅니다.
+    // ─────────────────────────────────────────────────────────────────────────
+    class FakeSendSink : public ISendSink
+    {
+    public:
+        struct QueuedSendEntry
+        {
+            Channel channel = Channel::Tcp;
+            protocol::Message message{};
+
+            bool operator==(const QueuedSendEntry&) const = default;
+        };
+
+        SendResult EnqueueSend(
+            Channel channel,
+            const protocol::Message& message) override
+        {
+            if (!m_running.load())
+                return SendResult::NotRunning;
+
+            // 1. 잠금 밖에서 구조·길이·채널 검증 및 독립 복사본 준비
+            const SendResult validation = ValidateSendRequest(channel, message);
+            if (validation != SendResult::Queued)
+                return validation;
+
+            QueuedSendEntry copy{ channel, message };
+
+            // 2. 송신 mutex 안에서 실행 상태와 큐 상한(1,024건) 확인 후 등록
+            std::lock_guard<std::mutex> lock(m_sendMutex);
+            if (!m_running.load())
+                return SendResult::NotRunning;
+
+            const std::size_t pendingBatchParts =
+                m_pendingBatch.has_value() ? m_pendingBatch->parts.size() : 0;
+            if (m_sendQueue.size() + pendingBatchParts + 1 > MAX_SEND_QUEUE_ENTRIES)
+                return SendResult::QueueFull;
+
+            m_sendQueue.push_back(std::move(copy));
+            return SendResult::Queued;
+
+        }
+
+        SendResult EnqueueSnapshotBatch(const SnapshotBatch& batch) override
+        {
+            if (!m_running.load())
+                return SendResult::NotRunning;
+
+            // 1. 잠금 밖에서 배치 구성·크기 검증 및 독립 값 복사본 준비 (B10 원본 변경 불변 보장)
+            const SendResult validation = ValidateSnapshotBatch(batch);
+            if (validation != SendResult::Queued)
+                return validation;
+
+            SnapshotBatch copy{ batch };
+            const auto& firstHeader = copy.parts.front().header;
+
+            // 2. 송신 mutex 안에서 실행 상태, 최신 틱(StateBatch), 큐 용량(QueueFull) 확인
+            std::lock_guard<std::mutex> lock{ m_sendMutex };
+            if (!m_running.load())
+                return SendResult::NotRunning;
+
+            const auto lastIt = m_lastSnapshotTickBySession.find(firstHeader.sessionId);
+            if (lastIt != m_lastSnapshotTickBySession.end()
+                && firstHeader.hostTick <= lastIt->second)
+            {
+                return SendResult::StaleBatch;
+            }
+
+            // 교체 용량: (현재 단건 대기 건수 + 새 배치 조각 수)
+            // <= 1,024건 (기존 대기 배치 조각 수는 교체되므로 제외)
+            if (m_sendQueue.size() + copy.parts.size() > MAX_SEND_QUEUE_ENTRIES)
+                return SendResult::QueueFull;
+
+            const bool replaced = m_pendingBatch.has_value();
+            m_lastSnapshotTickBySession.insert_or_assign(
+                firstHeader.sessionId,
+                firstHeader.hostTick
+            );
+            m_pendingBatch = std::move(copy);
+
+            return replaced ? SendResult::ReplacedPending : SendResult::Queued;
+
+        }
+
+        // 통신 스레드가 송신 mutex 안에서 대기 배치를 가져가는(전송 시작 경계) 동작을 모사합니다. (B03)
+        std::optional<SnapshotBatch> TakePendingBatchForSend()
+        {
+            std::lock_guard<std::mutex> lock{ m_sendMutex };
+            if (!m_pendingBatch.has_value())
+                return std::nullopt;
+
+            m_inFlightBatch = std::move(m_pendingBatch);
+            m_pendingBatch.reset();
+            return m_inFlightBatch;
+        }
+
+        // 종료(Stop): 새 송신 요청을 차단하고 대기 데이터를 정리합니다. (반복 호출 안전, B11)
+        void Stop()
+        {
+            m_running.store(false);
+            std::lock_guard<std::mutex> lock(m_sendMutex);
+            m_sendQueue.clear();
+            m_pendingBatch.reset();
+            m_inFlightBatch.reset();
+            m_lastSnapshotTickBySession.clear();
+        }
+
+        // 새 세션 시작: 이전 세션의 틱·배치·큐 기록을 비우고 실행 상태로 전환한다.
+        void StartNewSession()
+        {
+            std::lock_guard<std::mutex> lock(m_sendMutex);
+            m_sendQueue.clear();
+            m_pendingBatch.reset();
+            m_inFlightBatch.reset();
+            m_lastSnapshotTickBySession.clear();
+            m_running.store(true);
+        }
+
+        std::optional<SnapshotBatch> PeekPendingBatch() const
+        {
+            std::lock_guard<std::mutex> lock{ m_sendMutex };
+            return m_pendingBatch;
+        }
+
+        std::optional<SnapshotBatch> PeekInFlightBatch() const
+        {
+            std::lock_guard<std::mutex> lock{ m_sendMutex };
+            return m_inFlightBatch;
+        }
+
+        std::vector<QueuedSendEntry> PeekSendQueue() const
+        {
+            std::lock_guard<std::mutex> lock{ m_sendMutex };
+            return { m_sendQueue.begin(), m_sendQueue.end() };
+        }
+    private:
+        mutable std::mutex m_sendMutex;
+        std::atomic<bool> m_running{ true };
+        std::deque<QueuedSendEntry> m_sendQueue;
+        std::optional<SnapshotBatch> m_pendingBatch;
+        std::optional<SnapshotBatch> m_inFlightBatch;
+        std::unordered_map<std::uint32_t, std::uint32_t> m_lastSnapshotTickBySession;
+    };
 }

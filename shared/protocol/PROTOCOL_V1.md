@@ -38,14 +38,14 @@
 | 번호 | 이름 | 경로 | 본문(B) | 총 길이(B) | 본문 필드 순서 (오프셋은 본문 시작 = 바이트 32 기준) |
 |---:|---|---|---:|---:|---|
 | 1 | `JOIN` | TCP | 0 | 32 | (본문 없음) `header.sessionId`는 반드시 `0` |
-| 2 | `ACCEPT` | TCP | 12 | 44 | `+0: assignedPlayerId(u8, 0..1)`, `+1: maxPlayers(u8, 2)`, `+2: reserved(u16, 0)`, `+4: udpToken(u64)` |
+| 2 | `ACCEPT` | TCP | 12 | 44 | `+0: assignedPlayerId(u8, 0..1)`, `+1: maxPlayers(u8, 2)`, `+2: reserved(u16, 0)`, `+4: udpToken(u64, 0 불가)` |
 | 3 | `REJECT` | TCP | 4 | 36 | `+0: reason(u8, 1..4)`, `+1: reserved0(u8, 0)`, `+2: reserved1(u16, 0)` |
 | 4 | `READY` | TCP | 4 | 36 | `+0: playerId(u8, 0..1)`, `+1: isReady(u8, 0..1)`, `+2: reserved(u16, 0)` |
 | 5 | `ROOM_STATE` | TCP | 8 | 40 | 슬롯 0(4B) + 슬롯 1(4B): 각 `playerId(u8)`, `connected(u8)`, `ready(u8)`, `udpRegistered(u8)` |
 | 6 | `LOAD` | TCP | 4 | 36 | `+0: stageId(u16, 1=CScene_Stage01)`, `+2: reserved(u16, 0)` |
 | 7 | `LOADED` | TCP | 4 | 36 | `+0: playerId(u8, 0..1)`, `+1: reserved0(u8, 0)`, `+2: reserved1(u16, 0)` |
 | 8 | `START` | TCP | 12 | 44 | `+0: startHostTick(u32)`, `+4: simRateHz(u16)`, `+6: stateRateHz(u16)`, `+8: inputRateHz(u16)`, `+10: reserved(u16, 0)` |
-| 9 | `UDP_REGISTER` | UDP | 12 | 44 | `+0: playerId(u8, 0..1)`, `+1: reserved0(u8, 0)`, `+2: reserved1(u16, 0)`, `+4: udpToken(u64)` |
+| 9 | `UDP_REGISTER` | UDP | 12 | 44 | `+0: playerId(u8, 0..1)`, `+1: reserved0(u8, 0)`, `+2: reserved1(u16, 0)`, `+4: udpToken(u64, 0 불가)` |
 | 10 | `UDP_ACK` | UDP | 4 | 36 | `+0: playerId(u8, 0..1)`, `+1: registered(u8, 0..1)`, `+2: reserved(u16, 0)` |
 | 11 | `PLAYER_INPUT` | UDP | 8 | 40 | `+0: playerId(u8, 0..1)`, `+1: moveBits(u8, 상위4비트=0)`, `+2: fireHeld(u8, 0..1)`, `+3: reserved(u8, 0)`, `+4: inputSequence(u32)` |
 | 12 | `STATE_SNAPSHOT` | UDP | `8+32N` | `40+32N` | `+0: snapshotTick(u32)`, `+4: partIndex(u8)`, `+5: partCount(u8, >=1)`, `+6: objectCount(u16, 0..36)` 이후 32B 레코드 `N`개 |
