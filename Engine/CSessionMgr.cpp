@@ -32,6 +32,92 @@ namespace network
         return result;
     }
 
+    net::SendResult CSessionMgr::RequestReady(bool ready)
+    {
+        if (role != NetworkRole::Client || state != SessionState::UdpRegistered)
+            return net::SendResult::InvalidRequest;
+
+        protocol::ReadyPayload payload{};
+        payload.playerId = clientSlot;
+        payload.isReady = ready ? 1 : 0;
+
+        protocol::Message request{};
+        request.header.type = protocol::MessageType::READY;
+        request.header.sessionId = sessionId;
+        request.payload = payload;
+
+        return network.EnqueueSend(net::Channel::Tcp, request);
+    }
+
+    net::SendResult CSessionMgr::RequestLoad()
+    {
+        if (role != NetworkRole::Host || state != SessionState::UdpRegistered || !clientReady)
+            return net::SendResult::InvalidRequest;
+
+        protocol::Message message{};
+        message.header.type = protocol::MessageType::LOAD;
+        message.header.sessionId = sessionId;
+        message.payload = protocol::LoadPayload{};
+
+        const auto result = network.EnqueueSend(net::Channel::Tcp, message);
+        if (result == net::SendResult::Queued)
+            state = SessionState::Loading;
+
+        return result;
+    }
+
+    bool CSessionMgr::NotifyLocalLoaded()
+    {
+        if (state != SessionState::Loading)
+            return false;
+
+        if (localLoaded)
+            return true;
+
+        if (role == NetworkRole::Client)
+        {
+            protocol::LoadedPayload payload{};
+            payload.playerId = clientSlot;
+
+            protocol::Message message{};
+            message.header.type = protocol::MessageType::LOADED;
+            message.header.sessionId = sessionId;
+            message.payload = payload;
+
+            if (network.EnqueueSend(net::Channel::Tcp, message) != net::SendResult::Queued)
+                return false;
+        }
+
+        localLoaded = true;
+        return true;
+    }
+
+    net::SendResult CSessionMgr::RequestStart(std::uint32_t startHostTick)
+    {
+        if (role != NetworkRole::Host || state != SessionState::Loading ||
+            !localLoaded || !clientLoaded)
+        {
+            return net::SendResult::InvalidRequest;
+        }
+
+        protocol::StartPayload payload{};
+        payload.startHostTick = startHostTick;
+
+        protocol::Message message{};
+        message.header.type = protocol::MessageType::START;
+        message.header.sessionId = sessionId;
+        message.payload = payload;
+
+        const auto result = network.EnqueueSend(net::Channel::Tcp, message);
+        if (result == net::SendResult::Queued)
+        {
+            startInfo = payload;
+            state = SessionState::Started;
+        }
+
+        return result;
+    }
+
     void CSessionMgr::BeginSession(NetworkRole newRole)
     {
         role = newRole;
@@ -54,7 +140,11 @@ namespace network
         case SessionState::AwaitingAccept:
         case SessionState::AwaitingUdpRegister:
         case SessionState::AwaitingUdpAck:
+        case SessionState::UdpRegistered:
+        case SessionState::Loading:
             break;
+            break;
+
         default:
             return;
         }
@@ -76,6 +166,17 @@ namespace network
             break;
         case SessionState::AwaitingUdpAck:
             HandleUdpAck(received);
+            break;
+        case SessionState::UdpRegistered:
+            if (role == NetworkRole::Host)
+                HandleReady(received);
+            else if (received.message.header.type == protocol::MessageType::LOAD)
+                HandleLoad(received);
+            else
+                HandleRoomState(received);
+            break;
+        case SessionState::Loading:
+            HandleLoadingMessage(received);
             break;
         default:
             break;
@@ -228,6 +329,9 @@ namespace network
         udpToken = 0;
         clientSlot = protocol::INVALID_PLAYER_SLOT;
         rejectReason = protocol::RejectReason::NONE;
+        localLoaded = false;
+        clientLoaded = false;
+        startInfo = {};
     }
 
     void CSessionMgr::SendUdpRegister()
@@ -318,6 +422,104 @@ namespace network
             return;
 
         state = SessionState::UdpRegistered;
+    }
+
+    void CSessionMgr::HandleReady(const ReceivedMessage& received)
+    {
+        const auto& message = received.message;
+        if (received.transport != TransportType::TCP ||
+            message.header.type != protocol::MessageType::READY ||
+            message.header.sessionId != sessionId)
+        {
+            return;
+        }
+
+        const auto* ready = std::get_if<protocol::ReadyPayload>(&message.payload);
+        if (!ready || ready->playerId != clientSlot || ready->isReady > 1)
+            return;
+
+        protocol::RoomStatePayload room{};
+        room.slots[0] = protocol::RoomSlotState{ 0, 1, 1, 0 };
+        room.slots[clientSlot] = protocol::RoomSlotState{ clientSlot, 1, ready->isReady, 1 };
+
+        protocol::Message reply{};
+        reply.header.type = protocol::MessageType::ROOM_STATE;
+        reply.header.sessionId = sessionId;
+        reply.payload = room;
+
+        if (network.EnqueueSend(net::Channel::Tcp, reply) != net::SendResult::Queued)
+        {
+            state = SessionState::Failed;
+            return;
+        }
+
+        clientReady = ready->isReady == 1;
+    }
+
+    void CSessionMgr::HandleRoomState(const ReceivedMessage& received)
+    {
+        const auto& message = received.message;
+        if (received.transport != TransportType::TCP ||
+            message.header.type != protocol::MessageType::ROOM_STATE ||
+            message.header.sessionId != sessionId)
+        {
+            return;
+        }
+
+        const auto* room = std::get_if<protocol::RoomStatePayload>(&message.payload);
+        if (!room || clientSlot >= room->slots.size())
+            return;
+
+        const auto& slot = room->slots[clientSlot];
+        if (slot.playerId != clientSlot || slot.connected != 1 || slot.udpRegistered != 1)
+            return;
+
+        clientReady = slot.ready == 1;
+    }
+
+    void CSessionMgr::HandleLoad(const ReceivedMessage& received)
+    {
+        const auto& message = received.message;
+        if (received.transport != TransportType::TCP ||
+            message.header.type != protocol::MessageType::LOAD ||
+            message.header.sessionId != sessionId ||
+            !clientReady)
+        {
+            return;
+        }
+
+        const auto* payload = std::get_if<protocol::LoadPayload>(&message.payload);
+        if (payload && payload->stageId == 1)
+            state = SessionState::Loading;
+    }
+
+    void CSessionMgr::HandleLoadingMessage(const ReceivedMessage& received)
+    {
+        const auto& message = received.message;
+        if (received.transport != TransportType::TCP || message.header.sessionId != sessionId)
+            return;
+
+        if (role == NetworkRole::Host)
+        {
+            if (message.header.type != protocol::MessageType::LOADED)
+                return;
+
+            const auto* payload = std::get_if<protocol::LoadedPayload>(&message.payload);
+            if (payload && payload->playerId == clientSlot)
+                clientLoaded = true;
+
+            return;
+        }
+
+        if (message.header.type != protocol::MessageType::START || !localLoaded)
+            return;
+
+        const auto* payload = std::get_if<protocol::StartPayload>(&message.payload);
+        if (payload)
+        {
+            startInfo = *payload;
+            state = SessionState::Started;
+        }
     }
 
     void CSessionMgr::Stop()

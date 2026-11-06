@@ -1125,6 +1125,9 @@ namespace network_mgr_test
     bool RunSessionApproval(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort)
     {
         using network::SessionState;
+        using namespace std::chrono_literals;
+
+        constexpr std::uint32_t TEST_START_TICK = 120;
 
         network::CSessionMgr session(*CNetworkMgr::GetInst());
         const auto started = host
@@ -1134,18 +1137,90 @@ namespace network_mgr_test
         if (!CheckRequest(started, "Start session"))
             return false;
 
+        const auto pollReady = [&session]() -> PollResult
+            {
+                session.Update();
+
+                const auto state = session.GetState();
+                if (state == SessionState::Failed || state == SessionState::Disconnected)
+                    return PollResult::Failed;
+
+                return session.IsClientReady() ? PollResult::Passed : PollResult::Pending;
+            };
+
+        const auto pollClientLoaded = [&session]() -> PollResult
+            {
+                session.Update();
+
+                if (session.GetState() != SessionState::Loading)
+                    return PollResult::Failed;
+
+                return session.HasClientLoaded() ? PollResult::Passed : PollResult::Pending;
+            };
+
+        const auto check = [](bool condition, const char* step)
+            {
+                std::cout << (condition ? "[PASS] " : "[FAIL] ") << step << '\n';
+                return condition;
+            };
+
+
         bool passed = false;
 
         if (host)
         {
             std::cout << "Waiting for session-client...\n";
-            passed = WaitForSessionState(session, SessionState::UdpRegistered, "Host registered UDP peer", std::chrono::seconds(60));
+            passed = WaitForSessionState(session, SessionState::UdpRegistered, "Host registered UDP peer", 60s);
 
             if (passed)
-                passed = WaitForSessionState(session, SessionState::Disconnected, "Client disconnected after UDP registration", std::chrono::seconds(5));
+                passed = check(session.RequestLoad() == net::SendResult::InvalidRequest, "LOAD rejected before READY");
+
+            if (passed)
+                passed = WaitFor("Host processed READY", 5s, pollReady);
+
+            if (passed)
+                passed = CheckQueued(session.RequestLoad(), "Queue LOAD");
+
+            if (passed)
+                passed = WaitFor("Host processed LOADED", 5s, pollClientLoaded);
+
+            if (passed)
+                passed = check(session.RequestStart(TEST_START_TICK) == net::SendResult::InvalidRequest, "START rejected before Host finished loading");
+
+            if (passed)
+                passed = check(session.NotifyLocalLoaded(), "Host loading completed");
+
+            if (passed)
+                passed = CheckQueued(session.RequestStart(TEST_START_TICK), "Queue START");
+
+            if (passed)
+                passed = check(session.GetState() == SessionState::Started, "Host entered Started");
+
+            if (passed)
+                passed = WaitForSessionState(session, SessionState::Disconnected, "Client disconnected after start test", 5s);
         }
         else
-            passed = WaitForSessionState(session, SessionState::UdpRegistered, "Client received and verified UDP_ACK", std::chrono::seconds(5));
+        {
+            passed = WaitForSessionState(session, SessionState::UdpRegistered, "Client received and verified UDP_ACK", 5s);
+
+            if (passed)
+                passed = CheckQueued(session.RequestReady(true), "Queue READY");
+
+            if (passed)
+                passed = WaitFor("Client applied ROOM_STATE", 5s, pollReady);
+
+            if (passed)
+                passed = WaitForSessionState(session, SessionState::Loading, "Client received LOAD", 5s);
+
+            if (passed)
+                passed = check(session.NotifyLocalLoaded(), "Client loading completed and LOADED queued");
+
+            if (passed)
+                passed = WaitForSessionState(session, SessionState::Started, "Client received START", 5s);
+
+            if (passed)
+                passed = check(session.GetStartInfo().startHostTick == TEST_START_TICK, "Client verified startHostTick");
+        }
 
         session.Stop();
         std::cout << (passed ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");

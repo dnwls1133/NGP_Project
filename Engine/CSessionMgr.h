@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "NetworkTypes.h"
+#include "../net/SendContract.h"
 
 namespace network
 {
@@ -17,6 +18,8 @@ namespace network
         AwaitingUdpAck,
         UdpRegistered,
         AwaitingUdpRegister, // Host가 ACCEPT를 큐에 넣고 UDP 등록 대기
+        Loading,
+        Started,
         Rejected,
         Failed
     };
@@ -26,13 +29,12 @@ namespace network
     {
     public:
         explicit CSessionMgr(CNetworkMgr& network);
-
+        
         CSessionMgr(const CSessionMgr&) = delete;
         CSessionMgr& operator=(const CSessionMgr&) = delete;
 
         NetworkResult StartHost(unsigned short tcpPort, unsigned short udpPort);
-        NetworkResult StartClient(const std::string& hostIp,
-            unsigned short tcpPort, unsigned short udpPort);
+        NetworkResult StartClient(const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort);
 
         void Update();
         void Stop();
@@ -40,6 +42,17 @@ namespace network
         SessionState GetState() const { return state; }
         const NetworkEvent& GetLastNetworkEvent() const { return lastNetworkEvent; }
         protocol::RejectReason GetRejectReason() const { return rejectReason; }
+
+        net::SendResult RequestReady(bool ready);
+        bool IsClientReady() const { return state == SessionState::UdpRegistered && clientReady; }
+
+        net::SendResult RequestLoad();
+        bool NotifyLocalLoaded();
+
+        net::SendResult RequestStart(std::uint32_t startHostTick);
+
+        bool HasClientLoaded() const { return clientLoaded; }
+        const protocol::StartPayload& GetStartInfo() const { return startInfo; }
 
     private:
         void BeginSession(NetworkRole newRole);
@@ -51,6 +64,16 @@ namespace network
         void SendUdpRegister();
         void HandleUdpRegister(const ReceivedMessage& received);
         void HandleUdpAck(const ReceivedMessage& received);
+        void HandleReady(const ReceivedMessage& received);
+        void HandleRoomState(const ReceivedMessage& received);
+        void HandleLoad(const ReceivedMessage& received);
+        void HandleLoadingMessage(const ReceivedMessage& received);
+
+        bool clientReady = false;
+
+        bool localLoaded = false;
+        bool clientLoaded = false;
+        protocol::StartPayload startInfo{};
 
         CNetworkMgr& network;
         NetworkRole role = NetworkRole::Client;
