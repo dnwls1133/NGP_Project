@@ -89,7 +89,23 @@
 
 ## 5. 고정 바이트 Fixture (독립 검산 기준)
 
-### Fixture 1: 정상 `JOIN` (32바이트)
+전체 바이트 배열 정의는 `tests/CodecTests/fixtures/ProtocolV1Fixtures.h`에 고정되어 있으며, `CodecTests`에서 양방향(`Encode` / `Decode`) 100% 일치를 검증한다.
+
+| 번호 | 상수 이름 | 메시지(`type`) | 총 바이트 | 핵심 필드 기준값 |
+|---|---|---|---|---|
+| 1 | `VALID_JOIN_BYTES` | `JOIN` (1) | 32B | `sessionId=0`, `roundId=1`, `sequence=0` |
+| 2 | `VALID_PLAYER_INPUT_BYTES` | `PLAYER_INPUT` (11) | 40B | `sessionId=1000`, `playerId=1`, `moveBits=0x05`, `fireHeld=1`, `inputSequence=0x01020304` |
+| 3 | `VALID_SPAWN_BYTES` | `SPAWN` (13) | 68B | `eventId=15`, `objectId=42`, `kind=PROJ_PLAYER(3)`, `pos=(64000, 70000)`, `vel=(-250, -150000)` |
+| 4 | `VALID_ACCEPT_BYTES` | `ACCEPT` (2) | 44B | `sessionId=1000`, `assignedPlayerId=1`, `maxPlayers=2`, `udpToken=0x0102030405060708` |
+| 5 | `VALID_START_BYTES` | `START` (8) | 44B | `sessionId=1000`, `hostTick=120`, `startHostTick=120`, `simRateHz=60`, `stateRateHz=20`, `inputRateHz=30` |
+| 6 | `VALID_UDP_REGISTER_BYTES` | `UDP_REGISTER` (9) | 44B | `sessionId=1000`, `playerId=1`, `udpToken=0x0102030405060708` |
+| 7 | `VALID_UDP_ACK_BYTES` | `UDP_ACK` (10) | 36B | `sessionId=1000`, `playerId=1`, `registered=1` |
+| 8 | `VALID_READY_BYTES` | `READY` (4) | 36B | `sessionId=1000`, `playerId=1`, `isReady=1` |
+| 9 | `VALID_ROOM_STATE_BYTES` | `ROOM_STATE` (5) | 40B | `sessionId=1000`, `slots[0]={0,1,1,1}`, `slots[1]={1,1,1,1}` |
+| 10 | `VALID_LOAD_BYTES` | `LOAD` (6) | 36B | `sessionId=1000`, `stageId=1` |
+| 11 | `VALID_LOADED_BYTES` | `LOADED` (7) | 36B | `sessionId=1000`, `playerId=1` |
+
+### 대표 바이트 예시 1: 정상 `JOIN` (32바이트)
 - 입력: `type = JOIN(1)`, `sessionId = 0`, `roundId = 1`, `sequence = 0`, `hostTick = 0`
 ```text
 56 53 00 01 00 01 00 00
@@ -98,7 +114,7 @@
 00 00 00 00 00 00 00 00
 ```
 
-### Fixture 2: 정상 `PLAYER_INPUT` (40바이트)
+### 대표 바이트 예시 2: 정상 `PLAYER_INPUT` (40바이트)
 - 입력:
   - 헤더: `type = PLAYER_INPUT(11)`, `totalBytes = 40(0x28)`, `sessionId = 0x000003E8(1000)`, `roundId = 1`, `sequence = 0x01020304`, `hostTick = 0`
   - 본문: `playerId = 1`, `moveBits = 0x05(UP | LEFT)`, `fireHeld = 1`, `reserved = 0`, `inputSequence = 0x01020304`
@@ -116,3 +132,19 @@
 - 첫 삭제 요청 시 `PendingDestroy`로 전환하여 같은 틱의 이후 충돌·피해·아이템 획득·조준에서 즉시 제외하고 중복 삭제 요청을 무시한다.
 - `CScene::render`에서 수행하던 객체 제거를 시뮬레이션 틱 종료 경계로 분리하고, 충돌 쌍·플레이어 슬롯·`ObjectId` 조회표·그룹 벡터를 함께 정리한 뒤 해제한다.
 - 참가자는 삭제된 `ObjectId`를 세션 종료까지 기억하여 지연 도착한 `STATE_SNAPSHOT`으로 인해 삭제된 객체가 부활하지 않게 한다.
+
+## 7. 송신 인터페이스 및 상태 배치 원자 교체 계약 v1 (`net/SendContract.h`)
+
+- **채널 분리 (`net::ISendSink`)**:
+  - `EnqueueSend(Channel, const protocol::Message&)`는 단건 메시지 전용이며, `STATE_SNAPSHOT`을 전달하거나 메시지 종류별 전송 경로(`Channel::Udp` 4종 vs `Channel::Tcp` 15종)가 일치하지 않으면 `SendResult::InvalidRequest`로 거부한다(`B06`).
+  - `EnqueueSnapshotBatch(const SnapshotBatch&)`는 20Hz `STATE_SNAPSHOT` 배치 전용이며, 미전송 대기 배치(`m_pendingBatch`)가 없을 때는 `SendResult::Queued`, 기존 대기 배치를 최신 `hostTick` 배치로 통째로 교체했을 때는 `SendResult::ReplacedPending`을 반환한다(`B01`, `B02`).
+- **배치 불변식 및 용량 상한 (`B04`~`B09`)**:
+  - `parts.size() == partCount` (`1 <= partCount <= MAX_SNAPSHOT_PARTS_PER_BATCH(255)`), 각 조각 `snap.partIndex == i`, 전 조각의 `header.sessionId != 0`·`header.roundId == 1`·`header.hostTick == snap.snapshotTick` 일치, 조각당 객체 수 `0..MAX_SNAPSHOT_OBJECTS_PER_PACKET(36)` 및 직렬화 크기 `<= MAX_UDP_BYTES(1200)`, 배치 내 `objectId == 0` 및 중복 `ObjectId` 금지.
+  - 조각당 객체 36개 초과, 배치 조각 수 255개 초과, 단일 메시지 크기 상한 초과 시 `SendResult::TooLarge`를 반환한다(`B06`).
+  - 같은 `sessionId`에서 이미 수락한 `hostTick` 이하의 배치는 `SendResult::StaleBatch`로 거부하고 기존 대기 배치를 보존한다(`B08`).
+  - 단건 대기 큐(`m_sendQueue`)와 대기 배치 조각 수의 합이 `MAX_SEND_QUEUE_ENTRIES(1024)`를 초과하면 `SendResult::QueueFull`을 반환한다(`B09`).
+- **전송 시작 경계 및 생명주기 (`B03`, `B10`~`B12`)**:
+  - 호출자가 `EnqueueSnapshotBatch` 호출 후 원본 `SnapshotBatch`를 수정해도 내부 복사본은 영향을 받지 않으며(`B10`), 송신 측이 대기 배치를 인출(`TakePendingBatchForSend`)한 뒤 새 배치가 등록되어도 이미 인출된 배치(`m_inFlightBatch`)와 섞이지 않는다(`B03`).
+  - `Stop()` 이후 모든 송신 요청은 `SendResult::NotRunning`으로 거부하며(`B11`), `StartNewSession()` 호출 시 이전 세션의 틱·배치·큐 기록을 초기화한다(`B12`).
+- **두 PC `START` 진입 조건**:
+  - `ROOM_STATE`의 슬롯 0·1 모두 `connected == 1 && ready == 1 && udpRegistered == 1`이고, `LOAD(stageId = 1)` 전환 후 호스트의 `CScene_Stage01` 로딩 완료와 참가자의 `LOADED(playerId = 1)` 수신이 모두 확인된 시점에만 호스트가 `START(startHostTick, 60, 20, 30)`를 송신한다.

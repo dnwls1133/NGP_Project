@@ -1036,9 +1036,237 @@ namespace
                 counters);
         }
     }
+
+    // 9. 11/07 두 PC START 발송 가능 여부 판정 헬퍼 (호스트/세션 공통 계약 대조용)
+    bool IsTwoPcStartConditionMet(
+        const protocol::RoomStatePayload& roomState,
+        const protocol::LoadPayload& load,
+        bool hostSceneLoaded,
+        bool clientLoadedReported,
+        protocol::PlayerSlot loadedPlayerId)
+    {
+        // 1. 슬롯 0(호스트)과 슬롯 1(참가자) 모두 연결 + 준비완료 + UDP 등록 완료여야 함
+        for (std::size_t i = 0; i < protocol::MAX_PROTOCOL_PLAYERS; ++i)
+        {
+            const protocol::RoomSlotState& slot = roomState.slots[i];
+            if (slot.playerId != static_cast<protocol::PlayerSlot>(i)
+                || slot.connected != 1
+                || slot.ready != 1
+                || slot.udpRegistered != 1)
+            {
+                return false;
+            }
+        }
+
+        // 2. 스테이지 번호는 반드시 CScene_State01(1)이어야함
+        if (load.stageId != 1 || load.reserved != 0)
+            return false;
+
+        // 3. 호스트 자체 로딩 완료 + 참가자(playerId == 1) LOADED 보고가 모두 충족되어야 함
+        return hostSceneLoaded && clientLoadedReported && loadedPlayerId == 1;
+    }
+
+    // 10. 11/07 1주차 핸드셰이크 9단계 대조 및 두 PC START 조건 검증 스위트
+    void RunWeek1HandshakeIntegrationSuite(TestCounters& counters)
+    {
+        using namespace protocol;
+        std::vector<std::uint8_t> wire;
+        Message decoded{};
+        // (1) READY (36B) 고정 바이트 Encode & Decode 일치 검산
+        {
+            const Message expected = fixtures::MakeValidReadyMessage();
+            const std::vector<std::uint8_t> expectedBytes(
+                fixtures::VALID_READY_BYTES.begin(),
+                fixtures::VALID_READY_BYTES.end());
+            Check(CPacketCodec::Encode(expected, wire) == CodecError::NONE
+                && wire == expectedBytes
+                && CPacketCodec::Decode(fixtures::VALID_READY_BYTES, decoded) == CodecError::NONE
+                && decoded == expected,
+                "Handshake1107: READY (36B) matches fixed bytes in both Encode and Decode",
+                counters);
+        }
+        // (2) ROOM_STATE (40B) 고정 바이트 Encode & Decode 일치 검산
+        {
+            const Message expected = fixtures::MakeValidRoomStateMessage();
+            const std::vector<std::uint8_t> expectedBytes(
+                fixtures::VALID_ROOM_STATE_BYTES.begin(),
+                fixtures::VALID_ROOM_STATE_BYTES.end());
+            Check(CPacketCodec::Encode(expected, wire) == CodecError::NONE
+                && wire == expectedBytes
+                && CPacketCodec::Decode(fixtures::VALID_ROOM_STATE_BYTES, decoded) == CodecError::NONE
+                && decoded == expected,
+                "Handshake1107: ROOM_STATE (40B) matches fixed bytes in both Encode and Decode",
+                counters);
+        }
+        // (3) LOAD (36B) 고정 바이트 Encode & Decode 일치 검산
+        {
+            const Message expected = fixtures::MakeValidLoadMessage();
+            const std::vector<std::uint8_t> expectedBytes(
+                fixtures::VALID_LOAD_BYTES.begin(),
+                fixtures::VALID_LOAD_BYTES.end());
+            Check(CPacketCodec::Encode(expected, wire) == CodecError::NONE
+                && wire == expectedBytes
+                && CPacketCodec::Decode(fixtures::VALID_LOAD_BYTES, decoded) == CodecError::NONE
+                && decoded == expected,
+                "Handshake1107: LOAD (36B) matches fixed bytes in both Encode and Decode",
+                counters);
+        }
+        // (4) LOADED (36B) 고정 바이트 Encode & Decode 일치 검산
+        {
+            const Message expected = fixtures::MakeValidLoadedMessage();
+            const std::vector<std::uint8_t> expectedBytes(
+                fixtures::VALID_LOADED_BYTES.begin(),
+                fixtures::VALID_LOADED_BYTES.end());
+            Check(CPacketCodec::Encode(expected, wire) == CodecError::NONE
+                && wire == expectedBytes
+                && CPacketCodec::Decode(fixtures::VALID_LOADED_BYTES, decoded) == CodecError::NONE
+                && decoded == expected,
+                "Handshake1107: LOADED (36B) matches fixed bytes in both Encode and Decode",
+                counters);
+        }
+        // (5) 9단계 핸드셰이크(JOIN -> ACCEPT -> UDP_REGISTER -> UDP_ACK -> READY -> ROOM_STATE -> LOAD -> LOADED -> START)
+        //     전 과정 FakeSendSink 채널 검증 및 코덱 직렬화/역직렬화 연속 통과 검산
+        {
+            net::FakeSendSink sink;
+            struct StepSpec
+            {
+                net::Channel channel;
+                Message message;
+            };
+            const std::array<StepSpec, 9> steps = { {
+                { net::Channel::Tcp, fixtures::MakeValidJoinMessage() },
+                { net::Channel::Tcp, fixtures::MakeValidAcceptMessage() },
+                { net::Channel::Udp, fixtures::MakeValidUdpRegisterMessage() },
+                { net::Channel::Udp, fixtures::MakeValidUdpAckMessage() },
+                { net::Channel::Tcp, fixtures::MakeValidReadyMessage() },
+                { net::Channel::Tcp, fixtures::MakeValidRoomStateMessage() },
+                { net::Channel::Tcp, fixtures::MakeValidLoadMessage() },
+                { net::Channel::Tcp, fixtures::MakeValidLoadedMessage() },
+                { net::Channel::Tcp, fixtures::MakeValidStartMessage() }
+            } };
+            bool allQueued = true;
+            for (const StepSpec& step : steps)
+            {
+                if (sink.EnqueueSend(step.channel, step.message) != net::SendResult::Queued)
+                {
+                    allQueued = false;
+                    break;
+                }
+            }
+            const std::vector<net::FakeSendSink::QueuedSendEntry> sent = sink.PeekSendQueue();
+            bool allRoundTripOk = (sent.size() == steps.size());
+            std::vector<Message> decodedMessages;
+            decodedMessages.reserve(sent.size());
+            for (std::size_t i = 0; i < sent.size() && allRoundTripOk; ++i)
+            {
+                if (sent[i].channel != steps[i].channel)
+                {
+                    allRoundTripOk = false;
+                    break;
+                }
+                std::vector<std::uint8_t> wireBytes;
+                if (CPacketCodec::Encode(sent[i].message, wireBytes) != CodecError::NONE)
+                {
+                    allRoundTripOk = false;
+                    break;
+                }
+                Message roundTripMsg{};
+                if (CPacketCodec::Decode(wireBytes, roundTripMsg) != CodecError::NONE
+                    || !(roundTripMsg == steps[i].message))
+                {
+                    allRoundTripOk = false;
+                    break;
+                }
+                decodedMessages.push_back(roundTripMsg);
+            }
+            Check(allQueued && allRoundTripOk && decodedMessages.size() == 9,
+                "Handshake1107: Full 9-step handshake queues on expected TCP/UDP channels and round-trips cleanly",
+                counters);
+            // (6) 9단계 핸드셰이크 메시지 간 세션/슬롯/토큰/틱 불변식 교차 대조
+            bool crossInvariantsOk = (decodedMessages.size() == 9);
+            if (crossInvariantsOk)
+            {
+                const Message& joinMsg = decodedMessages[0];
+                const Message& acceptMsg = decodedMessages[1];
+                const Message& udpRegMsg = decodedMessages[2];
+                const Message& udpAckMsg = decodedMessages[3];
+                const Message& readyMsg = decodedMessages[4];
+                const Message& roomMsg = decodedMessages[5];
+                const Message& loadMsg = decodedMessages[6];
+                const Message& loadedMsg = decodedMessages[7];
+                const Message& startMsg = decodedMessages[8];
+                const auto& accept = std::get<AcceptPayload>(acceptMsg.payload);
+                const auto& udpReg = std::get<UdpRegisterPayload>(udpRegMsg.payload);
+                const auto& udpAck = std::get<UdpAckPayload>(udpAckMsg.payload);
+                const auto& ready = std::get<ReadyPayload>(readyMsg.payload);
+                const auto& room = std::get<RoomStatePayload>(roomMsg.payload);
+                const auto& load = std::get<LoadPayload>(loadMsg.payload);
+                const auto& loaded = std::get<LoadedPayload>(loadedMsg.payload);
+                const auto& start = std::get<StartPayload>(startMsg.payload);
+                const std::uint32_t establishedSessionId = acceptMsg.header.sessionId;
+                crossInvariantsOk =
+                    (joinMsg.header.sessionId == 0)
+                    && (establishedSessionId == 1000)
+                    && (udpRegMsg.header.sessionId == establishedSessionId)
+                    && (udpAckMsg.header.sessionId == establishedSessionId)
+                    && (readyMsg.header.sessionId == establishedSessionId)
+                    && (roomMsg.header.sessionId == establishedSessionId)
+                    && (loadMsg.header.sessionId == establishedSessionId)
+                    && (loadedMsg.header.sessionId == establishedSessionId)
+                    && (startMsg.header.sessionId == establishedSessionId)
+                    && (accept.assignedPlayerId == 1)
+                    && (accept.udpToken != 0 && accept.udpToken == udpReg.udpToken)
+                    && (udpReg.playerId == accept.assignedPlayerId)
+                    && (udpAck.playerId == accept.assignedPlayerId && udpAck.registered == 1)
+                    && (ready.playerId == accept.assignedPlayerId && ready.isReady == 1)
+                    && (room.slots[1].playerId == accept.assignedPlayerId && room.slots[1].udpRegistered == 1 && room.slots[1].ready == 1)
+                    && (load.stageId == 1)
+                    && (loaded.playerId == accept.assignedPlayerId)
+                    && (start.startHostTick == startMsg.header.hostTick && start.startHostTick == 120)
+                    && (start.simRateHz == 60 && start.stateRateHz == 20 && start.inputRateHz == 30);
+            }
+            Check(crossInvariantsOk,
+                "Handshake1107: Cross-message invariants (sessionId=1000, playerId=1, udpToken, stageId=1, startHostTick=120) hold",
+                counters);
+        }
+        // (7) 두 PC START 발송 조건 대조: 모든 전제 조건 충족 시에만 true 반환
+        {
+            const RoomStatePayload readyRoom = std::get<RoomStatePayload>(fixtures::MakeValidRoomStateMessage().payload);
+            const LoadPayload validLoad = std::get<LoadPayload>(fixtures::MakeValidLoadMessage().payload);
+            const LoadedPayload validLoaded = std::get<LoadedPayload>(fixtures::MakeValidLoadedMessage().payload);
+            const bool canStart = IsTwoPcStartConditionMet(
+                readyRoom,
+                validLoad,
+                true, // 호스트 CScene_Stage01 로딩 완료
+                true, // 참가자 LOADED 수신 완료
+                validLoaded.playerId);
+            Check(canStart,
+                "Handshake1107: Two-PC START condition passes when both slots connected/ready/udpRegistered and stage 1 loaded",
+                counters);
+        }
+        // (8) 두 PC START 발송 차단 대조: UDP 미등록, 준비 미완료, 호스트/참가자 로딩 미완료 중 하나라도 있으면 START 불가
+        {
+            const RoomStatePayload readyRoom = std::get<RoomStatePayload>(fixtures::MakeValidRoomStateMessage().payload);
+            const LoadPayload validLoad = std::get<LoadPayload>(fixtures::MakeValidLoadMessage().payload);
+            RoomStatePayload udpMissingRoom = readyRoom;
+            udpMissingRoom.slots[1].udpRegistered = 0;
+            RoomStatePayload notReadyRoom = readyRoom;
+            notReadyRoom.slots[0].ready = 0;
+            const bool blockedWhenUdpNotRegistered = !IsTwoPcStartConditionMet(udpMissingRoom, validLoad, true, true, 1);
+            const bool blockedWhenHostNotReady = !IsTwoPcStartConditionMet(notReadyRoom, validLoad, true, true, 1);
+            const bool blockedWhenHostNotLoaded = !IsTwoPcStartConditionMet(readyRoom, validLoad, false, true, 1);
+            const bool blockedWhenClientNotLoaded = !IsTwoPcStartConditionMet(readyRoom, validLoad, true, false, 1);
+            const bool blockedWhenWrongPlayerLoaded = !IsTwoPcStartConditionMet(readyRoom, validLoad, true, true, 0);
+            Check(blockedWhenUdpNotRegistered
+                && blockedWhenHostNotReady
+                && blockedWhenHostNotLoaded
+                && blockedWhenClientNotLoaded
+                && blockedWhenWrongPlayerLoaded,
+                "Handshake1107: Two-PC START condition blocks if UDP registration, ready, or either PC's stage load is incomplete",
+                counters);
+        }
+    }
 }
-
-
 int main()
 {
     TestCounters counters{};
@@ -1052,6 +1280,7 @@ int main()
     RunSnapshotBatchContractSuite(counters);
     RunUdpRegistrationCodecSuite(counters);
     RunFakeSendSinkBatchSuite(counters);
+    RunWeek1HandshakeIntegrationSuite(counters);
 
     std::cout << "----------------------------------------------\n";
     std::cout << "Passed:  " << counters.passed << '\n';

@@ -352,4 +352,145 @@ namespace protocol::fixtures
         msg.payload = ack;
         return msg;
     }
+
+   // ────────────────────────────────────────────────────────────
+   // 11/07 로비 준비·방 상태·스테이지 로딩 고정 바이트 Fixture 모음
+   // ────────────────────────────────────────────────────────────
+
+   // 고정 정상 바이트 8: READY (36바이트)
+    // sessionId = 1000(0x000003E8), sequence = 4, playerId = 1, ready = 1, reserved = 0
+    inline constexpr std::array<std::uint8_t, 36> VALID_READY_BYTES = {
+        // Header (32B): type = READY(4), totalBytes = 36 (0x24)
+        0x56, 0x53, 0x00, 0x01, 0x00, 0x04, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x03, 0xE8,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // Payload (4B): playerId=1, isReady=1, reserved=0
+        0x01, 0x01, 0x00, 0x00
+    };
+
+    inline Message MakeValidReadyMessage()
+    {
+        Message msg{};
+        msg.header.magic = MAGIC;
+        msg.header.version = VERSION;
+        msg.header.type = MessageType::READY;
+        msg.header.flags = FLAGS_NONE;
+        msg.header.totalBytes = 36;
+        msg.header.sessionId = 1000;
+        msg.header.roundId = 1;
+        msg.header.sequence = 4;
+        msg.header.hostTick = 0;
+        msg.header.reserved = RESERVED_VALUE;
+        ReadyPayload ready{};
+        ready.playerId = 1;
+        ready.isReady = 1;
+        ready.reserved = 0;
+        msg.payload = ready;
+        return msg;
+    }
+
+    // 고정 정상 바이트 9: ROOM_STATE (40바이트)
+    // sessionId = 1000(0x000003E8), sequence = 4,
+    // slots[0] = { playerId=0, connected=1, ready=1, udpRegistered=1 }
+    // slots[1] = { playerId=1, connected=1, ready=1, udpRegistered=1 }
+    inline constexpr std::array<std::uint8_t, 40> VALID_ROOM_STATE_BYTES = {
+        // Header (32B): type = ROOM_STATE(5), totalBytes = 40 (0x28)
+        0x56, 0x53, 0x00, 0x01, 0x00, 0x05, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x03, 0xE8,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // Payload (8B): slot 0 (00 01 01 01), slot 1 (01 01 01 01)
+        0x00, 0x01, 0x01, 0x01,
+        0x01, 0x01, 0x01, 0x01
+    };
+
+    inline Message MakeValidRoomStateMessage()
+    {
+        Message msg{};
+        msg.header.magic = MAGIC;
+        msg.header.version = VERSION;
+        msg.header.type = MessageType::ROOM_STATE;
+        msg.header.flags = FLAGS_NONE;
+        msg.header.totalBytes = 40;
+        msg.header.sessionId = 1000;
+        msg.header.roundId = 1;
+        msg.header.sequence = 4;
+        msg.header.hostTick = 0;
+        msg.header.reserved = RESERVED_VALUE;
+
+        RoomStatePayload room{};
+        room.slots[0] = RoomSlotState{ 0,1,1,1 };
+        room.slots[1] = RoomSlotState{ 1,1,1,1 };
+        msg.payload = room;
+        return msg;
+
+    }
+
+    // 고정 정상 바이트 10: LOAD (36바이트)
+    // sessionId = 1000(0x000003E8), sequence = 4, stageId = 1(0x0001), reserved = 0
+    inline constexpr std::array<std::uint8_t, 36> VALID_LOAD_BYTES = {
+        // Header (32B): type = LOAD(6), totalBytes = 36 (0x24)
+        0x56, 0x53, 0x00, 0x01, 0x00, 0x06, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x03, 0xE8,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // Payload (4B): stageId = 1 (0x0001), reserved = 0 (0x0000)
+        0x00, 0x01, 0x00, 0x00
+    };
+
+    inline Message MakeValidLoadMessage()
+    {
+        Message msg{};
+        msg.header.magic = MAGIC;
+        msg.header.version = VERSION;
+        msg.header.type = MessageType::LOAD;
+        msg.header.flags = FLAGS_NONE;
+        msg.header.totalBytes = 36;
+        msg.header.sessionId = 1000;
+        msg.header.roundId = 1;
+        msg.header.sequence = 4;
+        msg.header.hostTick = 0;
+        msg.header.reserved = RESERVED_VALUE;
+
+        LoadPayload load{};
+        load.stageId = 1;
+        load.reserved = 0;
+        msg.payload = load;
+        return msg;
+    }
+
+    // 고정 정상 바이트 11: LOADED (36바이트)
+    // sessionId = 1000(0x000003E8), sequence = 5, playerId = 1, reserved0 = 0, reserved1 = 0
+    inline constexpr std::array<std::uint8_t, 36> VALID_LOADED_BYTES = {
+        // Header (32B): type = LOADED(7), totalBytes = 36 (0x24)
+        0x56, 0x53, 0x00, 0x01, 0x00, 0x07, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x03, 0xE8,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x05,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // Payload (4B): playerId = 1, reserved0 = 0, reserved1 = 0
+        0x01, 0x00, 0x00, 0x00
+    };
+
+    inline Message MakeValidLoadedMessage()
+    {
+        Message msg{};
+        msg.header.magic = MAGIC;
+        msg.header.version = VERSION;
+        msg.header.type = MessageType::LOADED;
+        msg.header.flags = FLAGS_NONE;
+        msg.header.totalBytes = 36;
+        msg.header.sessionId = 1000;
+        msg.header.roundId = 1;
+        msg.header.sequence = 5;
+        msg.header.hostTick = 0;
+        msg.header.reserved = RESERVED_VALUE;
+
+        LoadedPayload loaded{};
+        loaded.playerId = 1;
+        loaded.reserved0 = 0;
+        loaded.reserved1 = 0;
+        msg.payload = loaded;
+        return msg;
+    }
 }
