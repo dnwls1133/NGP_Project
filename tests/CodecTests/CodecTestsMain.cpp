@@ -741,6 +741,301 @@ namespace
                 counters);
         }
     }
+
+    // 7. 11/06 UDP_REGISTER / UDP_ACK 코덱 고정 바이트·토큰 직렬화·오류 필드 검사 묶음
+    void RunUdpRegistrationCodecSuite(TestCounters& counters)
+    {
+        using namespace protocol;
+        const Message sentinelMsg = fixtures::MakeValidPlayerInputMessage();
+        std::vector<std::uint8_t> wire;
+        Message decoded = sentinelMsg;
+        // (1) UDP_REGISTER (44B) 고정 바이트 인코딩·디코딩 및 64비트 토큰 Big-Endian 직렬화 대조
+        {
+            const Message validReg = fixtures::MakeValidUdpRegisterMessage();
+            const std::vector<std::uint8_t> expectedReg(
+                fixtures::VALID_UDP_REGISTER_BYTES.begin(),
+                fixtures::VALID_UDP_REGISTER_BYTES.end());
+            Check(CPacketCodec::Encode(validReg, wire) == CodecError::NONE
+                && wire == expectedReg
+                && wire[36] == 0x01 && wire[37] == 0x02
+                && wire[38] == 0x03 && wire[39] == 0x04
+                && wire[40] == 0x05 && wire[41] == 0x06
+                && wire[42] == 0x07 && wire[43] == 0x08
+                && CPacketCodec::Decode(fixtures::VALID_UDP_REGISTER_BYTES, decoded) == CodecError::NONE
+                && decoded == validReg,
+                "UdpReg1106: UDP_REGISTER matches fixed 44-byte fixture and big-endian u64 token",
+                counters);
+        }
+        // (2) UDP_ACK (36B) 고정 바이트 인코딩·디코딩 대조
+        {
+            const Message validAck = fixtures::MakeValidUdpAckMessage();
+            const std::vector<std::uint8_t> expectedAck(
+                fixtures::VALID_UDP_ACK_BYTES.begin(),
+                fixtures::VALID_UDP_ACK_BYTES.end());
+            Check(CPacketCodec::Encode(validAck, wire) == CodecError::NONE
+                && wire == expectedAck
+                && CPacketCodec::Decode(fixtures::VALID_UDP_ACK_BYTES, decoded) == CodecError::NONE
+                && decoded == validAck,
+                "UdpReg1106: UDP_ACK matches fixed 36-byte fixture in Encode & Decode",
+                counters);
+        }
+        // (3) 토큰 누락(udpToken == 0) 거부 vs 비영(non-zero) 토큰 통과 경계 확인
+        //     (비영 토큰의 실제 발급값 일치 및 송신 주소 대조는 CSessionMgr 담당)
+        {
+            Message acceptZeroToken = fixtures::MakeValidAcceptMessage();
+            std::get<AcceptPayload>(acceptZeroToken.payload).udpToken = 0;
+            Message regZeroToken = fixtures::MakeValidUdpRegisterMessage();
+            std::get<UdpRegisterPayload>(regZeroToken.payload).udpToken = 0;
+            auto rawRegZeroToken = std::vector<std::uint8_t>(
+                fixtures::VALID_UDP_REGISTER_BYTES.begin(),
+                fixtures::VALID_UDP_REGISTER_BYTES.end());
+            for (std::size_t i = 36; i < 44; ++i)
+                rawRegZeroToken[i] = 0x00;
+            Message out = sentinelMsg;
+            Check(CPacketCodec::Encode(acceptZeroToken, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Encode(regZeroToken, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Decode(rawRegZeroToken, out) == CodecError::INVALID_FIELD
+                && out == sentinelMsg,
+                "UdpReg1106: Missing udpToken (0) in ACCEPT or UDP_REGISTER returns INVALID_FIELD",
+                counters);
+            // 0이 아닌 다른 토큰 값은 코덱 구조 검사를 통과해 CSessionMgr로 전달되어야 함
+            Message regDifferentToken = fixtures::MakeValidUdpRegisterMessage();
+            std::get<UdpRegisterPayload>(regDifferentToken.payload).udpToken = 0xFEDCBA9876543210ULL;
+            Message roundTrip{};
+            Check(CPacketCodec::Encode(regDifferentToken, wire) == CodecError::NONE
+                && CPacketCodec::Decode(wire, roundTrip) == CodecError::NONE
+                && roundTrip == regDifferentToken,
+                "UdpReg1106: Non-zero different udpToken passes codec (token matching deferred to CSessionMgr)",
+                counters);
+        }
+        // (4) UDP_REGISTER / UDP_ACK 필드 범위 및 예약 필드 오류 검사
+        {
+            Message badRegPlayer = fixtures::MakeValidUdpRegisterMessage();
+            std::get<UdpRegisterPayload>(badRegPlayer.payload).playerId = 2;
+            Message badRegReserved0 = fixtures::MakeValidUdpRegisterMessage();
+            std::get<UdpRegisterPayload>(badRegReserved0.payload).reserved0 = 1;
+            Message badRegReserved1 = fixtures::MakeValidUdpRegisterMessage();
+            std::get<UdpRegisterPayload>(badRegReserved1.payload).reserved1 = 1;
+            Message badAckPlayer = fixtures::MakeValidUdpAckMessage();
+            std::get<UdpAckPayload>(badAckPlayer.payload).playerId = INVALID_PLAYER_SLOT;
+            Message badAckBool = fixtures::MakeValidUdpAckMessage();
+            std::get<UdpAckPayload>(badAckBool.payload).registered = 2;
+            Message badAckReserved = fixtures::MakeValidUdpAckMessage();
+            std::get<UdpAckPayload>(badAckReserved.payload).reserved = 1;
+            Check(CPacketCodec::Encode(badRegPlayer, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Encode(badRegReserved0, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Encode(badRegReserved1, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Encode(badAckPlayer, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Encode(badAckBool, wire) == CodecError::INVALID_FIELD
+                && CPacketCodec::Encode(badAckReserved, wire) == CodecError::INVALID_FIELD,
+                "UdpReg1106: Invalid playerId, registered bool, or non-zero reserved in UDP_REGISTER/UDP_ACK returns INVALID_FIELD",
+                counters);
+        }
+    }
+
+    // 8. 11/06 FakeSendSink 기반 상태 배치 교체 및 큐 동작 독립 시험 묶음 (B01~B12)
+    void RunFakeSendSinkBatchSuite(TestCounters& counters)
+    {
+        using namespace protocol;
+        // 지정한 틱과 조각 수(기본 2조각)를 가진 정상 SnapshotBatch 생성 도우미
+        auto makeBatch = [](
+            std::uint32_t tick,
+            std::uint8_t partCount = 2,
+            std::uint32_t sessionId = 1000) -> net::SnapshotBatch
+            {
+                net::SnapshotBatch batch{};
+                for (std::uint8_t idx = 0; idx < partCount; ++idx)
+                {
+                    Message msg{};
+                    msg.header.type = MessageType::STATE_SNAPSHOT;
+                    msg.header.sessionId = sessionId;
+                    msg.header.roundId = 1;
+                    msg.header.sequence = tick * 10 + idx;
+                    msg.header.hostTick = tick;
+                    StateSnapshotPayload snap{};
+                    snap.snapshotTick = tick;
+                    snap.partIndex = idx;
+                    snap.partCount = partCount;
+                    ObjectStateRecord obj{};
+                    obj.objectId = static_cast<ObjectId>(idx + 1);
+                    obj.kind = NetObjectKind::PLAYER;
+                    obj.subType = 1;
+                    obj.alive = 1;
+                    obj.pos = FixedVec2{ static_cast<std::int32_t>(tick * 100 + idx), 2000 };
+                    obj.hp = 10;
+                    obj.maxHp = 10;
+                    snap.objects.push_back(obj);
+                    msg.header.totalBytes = static_cast<std::uint32_t>(
+                        HEADER_BYTES + SNAPSHOT_HEADER_BYTES
+                        + snap.objects.size() * OBJECT_STATE_RECORD_BYTES);
+                    msg.payload = std::move(snap);
+                    batch.parts.push_back(std::move(msg));
+                }
+                return batch;
+            };
+        auto makeHeartbeat = [](std::uint32_t sequence, std::uint32_t sessionId = 1000) -> Message
+            {
+                Message msg{};
+                msg.header.type = MessageType::HEARTBEAT;
+                msg.header.totalBytes = static_cast<std::uint32_t>(HEADER_BYTES);
+                msg.header.sessionId = sessionId;
+                msg.header.roundId = 1;
+                msg.header.sequence = sequence;
+                msg.payload = HeartbeatPayload{};
+                return msg;
+            };
+        const net::SnapshotBatch batchA = makeBatch(10);
+        const net::SnapshotBatch batchB = makeBatch(11);
+        const net::SnapshotBatch batchC = makeBatch(12);
+        // B01: 배치 A(틱 10) 등록, 아직 인출 안 함 -> Queued, 대기 A
+        {
+            net::FakeSendSink sink;
+            Check(sink.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
+                && sink.PeekPendingBatch() == batchA,
+                "FakeSink1106 (B01): Initial batch A(tick 10) is Queued and stored as pending",
+                counters);
+        }
+        // B02: A 대기 중 B(틱 11) 등록 -> ReplacedPending, B 전체만 대기
+        {
+            net::FakeSendSink sink;
+            Check(sink.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
+                && sink.EnqueueSnapshotBatch(batchB) == net::SendResult::ReplacedPending
+                && sink.PeekPendingBatch() == batchB,
+                "FakeSink1106 (B02): Registering B(tick 11) while A is pending returns ReplacedPending and keeps only B",
+                counters);
+        }
+        // B03: A 인출 후 B(틱 11), C(틱 12) 등록 -> 전송 중 A 불변, 다음 대기는 C 전체
+        {
+            net::FakeSendSink sink;
+            const bool queuedA = (sink.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued);
+            const auto inFlight = sink.TakePendingBatchForSend();
+            const bool bAndC = (sink.EnqueueSnapshotBatch(batchB) == net::SendResult::Queued)
+                && (sink.EnqueueSnapshotBatch(batchC) == net::SendResult::ReplacedPending);
+            Check(queuedA
+                && inFlight.has_value() && *inFlight == batchA
+                && bAndC
+                && sink.PeekInFlightBatch() == batchA
+                && sink.PeekPendingBatch() == batchC,
+                "FakeSink1106 (B03): In-flight batch A remains immutable while pending B is replaced by C",
+                counters);
+        }
+        // B04~B06: 대기 배치 A가 있을 때 오류 배치(세션 불일치/조각 번호 오류/크기 초과) 등록 시 기존 대기 A와 최신 틱 보존
+        {
+            auto checkRejectPreservesPending = [&](const net::SnapshotBatch& badBatch, net::SendResult expected) -> bool
+                {
+                    net::FakeSendSink sink;
+                    if (sink.EnqueueSnapshotBatch(batchA) != net::SendResult::Queued)
+                        return false;
+                    if (sink.EnqueueSnapshotBatch(badBatch) != expected)
+                        return false;
+                    if (sink.PeekPendingBatch() != batchA)
+                        return false;
+                    // 기존 최신 틱(10)이 오염되지 않았으므로 틱 11인 batchB가 정상 ReplacedPending 되어야 함
+                    return sink.EnqueueSnapshotBatch(batchB) == net::SendResult::ReplacedPending
+                        && sink.PeekPendingBatch() == batchB;
+                };
+            net::SnapshotBatch badSession = makeBatch(20);
+            badSession.parts[1].header.sessionId = 2000;
+            net::SnapshotBatch badPartIndex = makeBatch(20);
+            std::get<StateSnapshotPayload>(badPartIndex.parts[1].payload).partIndex = 0;
+            net::SnapshotBatch tooManyParts = makeBatch(20, 1);
+            tooManyParts.parts.resize(net::MAX_SNAPSHOT_PARTS_PER_BATCH + 1, tooManyParts.parts[0]);
+            Check(checkRejectPreservesPending(badSession, net::SendResult::InvalidRequest)
+                && checkRejectPreservesPending(badPartIndex, net::SendResult::InvalidRequest)
+                && checkRejectPreservesPending(tooManyParts, net::SendResult::TooLarge),
+                "FakeSink1106 (B04~B06): Rejected batch preserves existing pending batch and last accepted tick",
+                counters);
+        }
+        // B07: 이미 수락한 틱(11) 또는 과거 틱(10) 재등록 -> StaleBatch, 대기·전송 데이터 유지
+        {
+            net::FakeSendSink sink;
+            const bool step1 = (sink.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued);
+            const auto inFlight = sink.TakePendingBatchForSend();
+            const bool step2 = (sink.EnqueueSnapshotBatch(batchB) == net::SendResult::Queued);
+            Check(step1 && inFlight.has_value() && step2
+                && sink.EnqueueSnapshotBatch(batchB) == net::SendResult::StaleBatch
+                && sink.EnqueueSnapshotBatch(batchA) == net::SendResult::StaleBatch
+                && sink.PeekPendingBatch() == batchB
+                && sink.PeekInFlightBatch() == batchA,
+                "FakeSink1106 (B07): Same or older tick returns StaleBatch and preserves pending/in-flight batches",
+                counters);
+        }
+        // B08: TCP 이벤트 E1·E2 사이 상태 배치 여러 번 교체 -> E1·E2 순서·개수 유지
+        {
+            net::FakeSendSink sink;
+            const Message e1 = makeHeartbeat(1);
+            const Message e2 = makeHeartbeat(2);
+            const bool ok = sink.EnqueueSend(net::Channel::Tcp, e1) == net::SendResult::Queued
+                && sink.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
+                && sink.EnqueueSnapshotBatch(batchB) == net::SendResult::ReplacedPending
+                && sink.EnqueueSend(net::Channel::Tcp, e2) == net::SendResult::Queued
+                && sink.EnqueueSnapshotBatch(batchC) == net::SendResult::ReplacedPending;
+            const auto tcpQueue = sink.PeekSendQueue();
+            Check(ok
+                && tcpQueue.size() == 2
+                && tcpQueue[0].channel == net::Channel::Tcp && tcpQueue[0].message == e1
+                && tcpQueue[1].channel == net::Channel::Tcp && tcpQueue[1].message == e2
+                && sink.PeekPendingBatch() == batchC,
+                "FakeSink1106 (B08): TCP events E1 and E2 preserve FIFO order and count across batch replacements",
+                counters);
+        }
+        // B09: 기존 배치를 빼고도 큐가 1,024건 초과 -> QueueFull, 기존 배치 유지 (동일 크기 교체는 허용)
+        {
+            net::FakeSendSink sink;
+            bool ok = (sink.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued); // 2조각
+            const std::size_t fillCount = net::MAX_SEND_QUEUE_ENTRIES - batchA.parts.size(); // 1022건
+            for (std::size_t i = 0; i < fillCount && ok; ++i)
+            {
+                ok = (sink.EnqueueSend(net::Channel::Tcp, makeHeartbeat(static_cast<std::uint32_t>(i + 1)))
+                    == net::SendResult::Queued);
+            }
+            // 현재 1022 + 2 = 1024건 가득 찬 상태:
+            // - 단건 추가(1025건) -> QueueFull
+            // - 3조각 배치로 교체 시도(1022 + 3 = 1025건) -> QueueFull 및 기존 batchA 유지
+            // - 2조각 배치 B로 교체 시도(1022 + 2 = 1024건) -> ReplacedPending 성공
+            const net::SnapshotBatch batch3Parts = makeBatch(20, 3);
+            Check(ok
+                && sink.EnqueueSend(net::Channel::Tcp, makeHeartbeat(9999)) == net::SendResult::QueueFull
+                && sink.EnqueueSnapshotBatch(batch3Parts) == net::SendResult::QueueFull
+                && sink.PeekPendingBatch() == batchA
+                && sink.EnqueueSnapshotBatch(batchB) == net::SendResult::ReplacedPending
+                && sink.PeekPendingBatch() == batchB,
+                "FakeSink1106 (B09): Send queue limit (1024) enforced and preserves existing batch on QueueFull",
+                counters);
+        }
+        // B10: 등록 성공 후 호출자가 원본 위치 값 변경 -> 내부에 수락한 위치 값은 변경되지 않음
+        {
+            net::FakeSendSink sink;
+            net::SnapshotBatch callerBatch = batchA;
+            const bool queued = (sink.EnqueueSnapshotBatch(callerBatch) == net::SendResult::Queued);
+            // 호출자가 등록 직후 원본 객체 좌표를 임의로 수정
+            std::get<StateSnapshotPayload>(callerBatch.parts[0].payload).objects[0].pos.x = 999999;
+            Check(queued && sink.PeekPendingBatch() == batchA,
+                "FakeSink1106 (B10): Modifying caller batch after EnqueueSnapshotBatch does not mutate queued copy",
+                counters);
+        }
+        // B11 & B12: Stop 후 등록 거부(NotRunning) 및 새 세션 시작 후 이전 배치·틱 영향 없음
+        {
+            net::FakeSendSink sink;
+            const bool queuedC = (sink.EnqueueSnapshotBatch(batchC) == net::SendResult::Queued); // 틱 12 등록
+            sink.Stop();
+            sink.Stop(); // 반복 Stop 호출 안전성 확인
+            const Message validInput = fixtures::MakeValidPlayerInputMessage();
+            const bool rejectedAfterStop =
+                sink.EnqueueSnapshotBatch(batchB) == net::SendResult::NotRunning
+                && sink.EnqueueSend(net::Channel::Udp, validInput) == net::SendResult::NotRunning
+                && !sink.PeekPendingBatch().has_value()
+                && sink.PeekSendQueue().empty();
+            // 새 세션 시작 후 이전 틱(12)보다 작은 batchA(틱 10)를 등록해도 StaleBatch 없이 Queued 성공해야 함
+            sink.StartNewSession();
+            const bool acceptedInNewSession =
+                sink.EnqueueSnapshotBatch(batchA) == net::SendResult::Queued
+                && sink.PeekPendingBatch() == batchA;
+            Check(queuedC && rejectedAfterStop && acceptedInNewSession,
+                "FakeSink1106 (B11~B12): Stop rejects new sends with NotRunning, and StartNewSession clears prior ticks",
+                counters);
+        }
+    }
 }
 
 
@@ -755,6 +1050,8 @@ int main()
     RunValidationAndBoundarySuite(counters);
     RunSessionMessageSuite(counters);
     RunSnapshotBatchContractSuite(counters);
+    RunUdpRegistrationCodecSuite(counters);
+    RunFakeSendSinkBatchSuite(counters);
 
     std::cout << "----------------------------------------------\n";
     std::cout << "Passed:  " << counters.passed << '\n';

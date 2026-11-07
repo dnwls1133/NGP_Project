@@ -277,4 +277,79 @@ namespace protocol::fixtures
         msg.payload = start;
         return msg;
     }
+
+    // ────────────────────────────────────────────────────────────
+    // 11/06 UDP_REGISTER / UDP_ACK 고정 바이트 Fixture 모음
+    // ────────────────────────────────────────────────────────────
+
+    // 고정 정상 바이트 6: UDP_REGISTER (44바이트)
+    // sessionId = 1000(0x000003E8), sequence = 2, playerId = 1,
+    // reserved = 0, udpToken = 0x0102030405060708
+    inline constexpr std::array<std::uint8_t, 44> VALID_UDP_REGISTER_BYTES = {
+        // Header (32B): type = UDP_REGISTER(9), totalBytes = 44 (0x2C)
+        0x56, 0x53, 0x00, 0x01, 0x00, 0x09, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x2C, 0x00, 0x00, 0x03, 0xE8,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // Payload (12B): playerId=1, reserved0=0, reserved1=0, udpToken=0x0102030405060708
+        0x01, 0x00, 0x00, 0x00,
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
+    };
+
+    inline Message MakeValidUdpRegisterMessage()
+    {
+        Message msg{};
+        msg.header.magic = MAGIC;
+        msg.header.version = VERSION;
+        msg.header.type = MessageType::UDP_REGISTER;
+        msg.header.flags = FLAGS_NONE;
+        msg.header.totalBytes = 44;
+        msg.header.sessionId = 1000;
+        msg.header.roundId = 1;
+        msg.header.sequence = 2;
+        msg.header.hostTick = 0;
+        msg.header.reserved = RESERVED_VALUE;
+
+        UdpRegisterPayload reg{};
+        reg.playerId = 1;
+        reg.reserved0 = 0;
+        reg.reserved1 = 0;
+        reg.udpToken = 0x0102030405060708ULL;
+        msg.payload = reg;
+        return msg;
+    }
+
+    // 고정 정상 바이트 7: UDP_ACK (36바이트)
+    // sessionId = 1000(0x000003E8), sequence = 3, playerId = 1, registered = 1, reserved = 0
+    inline constexpr std::array<std::uint8_t, 36> VALID_UDP_ACK_BYTES = {
+        // Header (32B): type = UDP_ACK(10), totalBytes = 36 (0x24)
+        0x56, 0x53, 0x00, 0x01, 0x00, 0x0A, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x03, 0xE8,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x03,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // Payload (4B): playerId=1, registered=1, reserved=0
+        0x01, 0x01, 0x00, 0x00
+    };
+
+    inline Message MakeValidUdpAckMessage()
+    {
+        Message msg{};
+        msg.header.magic = MAGIC;
+        msg.header.version = VERSION;
+        msg.header.type = MessageType::UDP_ACK;
+        msg.header.flags = FLAGS_NONE;
+        msg.header.totalBytes = 36;
+        msg.header.sessionId = 1000;
+        msg.header.roundId = 1;
+        msg.header.sequence = 3;
+        msg.header.hostTick = 0;
+        msg.header.reserved = RESERVED_VALUE;
+
+        UdpAckPayload ack{};
+        ack.playerId = 1;
+        ack.registered = 1;
+        ack.reserved = 0;
+        msg.payload = ack;
+        return msg;
+    }
 }
