@@ -374,6 +374,22 @@ namespace network
             if (!ethernet && !wifi)
                 continue;
 
+            MIB_IF_ROW2 interfaceInfo{};
+            interfaceInfo.InterfaceLuid = adapter->Luid;
+
+            const auto interfaceResult = GetIfEntry2(&interfaceInfo);
+            if (interfaceResult != NO_ERROR)
+            {
+                std::cerr << "[NETWORK] GetIfEntry2 failed. error=" << interfaceResult << '\n';
+                continue;
+            }
+
+            if (!interfaceInfo.InterfaceAndOperStatusFlags.HardwareInterface)
+            {
+                std::cout << "[NETWORK] Skipping virtual adapter. index=" << adapter->IfIndex << '\n';
+                continue;
+            }
+
             auto& candidate = ethernet ? ethernetIp : wifiIp;
             if (!candidate.empty())
                 continue;
