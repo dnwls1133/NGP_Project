@@ -139,9 +139,11 @@ namespace network
         protocol::StartPayload payload{};
         payload.startHostTick = startHostTick;
 
+
         protocol::Message message{};
         message.header.type = protocol::MessageType::START;
         message.header.sessionId = sessionId;
+        message.header.hostTick = startHostTick;
         message.payload = payload;
 
         const auto result = network.EnqueueSend(net::Channel::Tcp, message);
@@ -574,7 +576,7 @@ namespace network
             return;
 
         protocol::RoomStatePayload room{};
-        room.slots[0] = protocol::RoomSlotState{ 0, 1, 1, 0 };
+        room.slots[0] = protocol::RoomSlotState{ 0, 1, 1, 1 };
         room.slots[clientSlot] = protocol::RoomSlotState{ clientSlot, 1, ready->isReady, 1 };
 
         protocol::Message reply{};
@@ -650,11 +652,14 @@ namespace network
             return;
 
         const auto* payload = std::get_if<protocol::StartPayload>(&message.payload);
-        if (payload)
+        if (!payload || message.header.hostTick != payload->startHostTick)
         {
-            startInfo = *payload;
-            state = SessionState::Started;
+            state = SessionState::Failed;
+            return;
         }
+
+        startInfo = *payload;
+        state = SessionState::Started;
     }
 
     void CSessionMgr::Stop()
