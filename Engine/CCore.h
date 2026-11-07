@@ -14,6 +14,8 @@
 // *단 static 멤버함수는 static 멤버 변수는 접근이 가능
 // 또한 클래스 밖에서 정적멤버변수는 항상 초기화를 해주어야한다.
 
+#include "CSessionMgr.h"
+
 class CTexture;
 
 class CCore
@@ -34,6 +36,8 @@ private:
 
     // 메뉴
     HMENU   m_hMenu; // TOOL SCENE에서만 사용
+
+    network::CSessionMgr session;
 public:
 	int init(HWND _hWnd, POINT _ptresolution);
 	void progress();
@@ -51,7 +55,8 @@ public:
 	HWND GetMainHwnd() { return m_hWnd; }
 	HDC GetMainDC() { return m_hDC; }
 	POINT GetResolution() { return m_ptResolution; }
- 
+    network::CSessionMgr& GetSession() { return session; }
+
 public:
 
 	HBRUSH GetBrush(BRUSH_TYPE _eType) { return m_arrBrush[(UINT)_eType]; }

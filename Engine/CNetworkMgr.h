@@ -101,6 +101,8 @@ namespace network
         bool TryReceive(ReceivedMessage& out);
         bool TryPopEvent(NetworkEvent& out);
 
+        bool FindLocalIpv4(std::string& outIp) const;
+
     private:
         static int SendSnapshotPart(SOCKET socket, const sockaddr_in& destination, const std::vector<std::uint8_t>& bytes);
 

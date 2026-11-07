@@ -130,6 +130,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\Engine\CNetworkMgr.cpp" />
+    <ClCompile Include="..\Engine\CSessionMgr.cpp" />
     <ClCompile Include="..\shared\protocol\PacketCodec.cpp" />
     <ClCompile Include="ClientTest.cpp" />
     <ClCompile Include="HostTest.cpp" />
@@ -144,6 +145,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Engine\CNetworkMgr.h" />
+    <ClInclude Include="..\Engine\CSessionMgr.h" />
     <ClInclude Include="..\shared\protocol\PacketCodec.h" />
     <ClInclude Include="ClientTest.h" />
     <ClInclude Include="Common.h" />

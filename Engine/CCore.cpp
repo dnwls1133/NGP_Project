@@ -9,7 +9,8 @@
 #include "CEventMgr.h"
 #include "CUIMgr.h"
 #include "CResMgr.h"
-
+#include "CNetworkMgr.h"
+#include "CSessionMgr.h"
 
 #include "CObject.h"
 #include "CTexture.h"
@@ -34,6 +35,7 @@ CCore::CCore()
 	, m_pMemTex(nullptr)
 	, m_arrBrush{}
 	, m_arrPen{}
+    , session(*network::CNetworkMgr::GetInst())
 {
 }
 
@@ -46,6 +48,7 @@ CCore::~CCore()
 		DeleteObject(m_arrPen[i]);
 	}
     DestroyMenu(m_hMenu);
+    session.Stop();
 }
 
 int CCore::init(HWND _hWnd, POINT _ptresolution)
@@ -79,8 +82,7 @@ int CCore::init(HWND _hWnd, POINT _ptresolution)
 	CKeyMgr::GetInst()->init();
     CCamera::GetInst()->init();
 	CSceneMgr::GetInst()->init();
-	
-	
+
 
 
 	return S_OK;
@@ -93,7 +95,7 @@ void CCore::progress()
 	CKeyMgr::GetInst()->update();
 	//CCamera::GetInst()->update();
 
-
+    session.Update();
 	CSceneMgr::GetInst()->update();
 
 	// 충돌체크 
@@ -113,8 +115,7 @@ void CCore::progress()
 
     CCamera::GetInst()->render((m_pMemTex->GetDC()));
 
-	BitBlt(m_hDC, 0, 0, m_ptResolution.x, m_ptResolution.y
-		, m_pMemTex->GetDC(), 0, 0, SRCCOPY);
+	BitBlt(m_hDC, 0, 0, m_ptResolution.x, m_ptResolution.y , m_pMemTex->GetDC(), 0, 0, SRCCOPY);
 
 	CTimeMgr::GetInst()->render();
 

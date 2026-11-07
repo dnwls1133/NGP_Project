@@ -11,7 +11,11 @@
 #include <chrono>
 #include <exception>
 #include <new>
+#include <iphlpapi.h>
+#include <cstdlib>
+#include <memory>
 
+#pragma comment(lib, "Iphlpapi.lib")
 #pragma comment(lib, "Ws2_32.lib")
 
 namespace network
@@ -321,6 +325,96 @@ namespace network
 
         out = NetworkEvent{ NetworkEventType::Error, {}, WSAENOBUFS };
         receiveOverflowReported = true;
+        return true;
+    }
+
+    bool CNetworkMgr::FindLocalIpv4(std::string& outIp) const
+    {
+        outIp.clear();
+
+        constexpr ULONG FLAGS = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+
+        ULONG bufferBytes = 15 * 1024;
+
+        std::unique_ptr<IP_ADAPTER_ADDRESSES, decltype(&std::free)> adapters(nullptr, &std::free);
+        ULONG result = ERROR_BUFFER_OVERFLOW;
+
+        for (int attempt = 0; attempt < 3; ++attempt)
+        {
+            adapters.reset(static_cast<IP_ADAPTER_ADDRESSES*>(std::malloc(bufferBytes)));
+            if (!adapters)
+            {
+                std::cerr << "[NETWORK] Adapter buffer allocation failed\n";
+                return false;
+            }
+
+            result = GetAdaptersAddresses(AF_INET, FLAGS, nullptr, adapters.get(), &bufferBytes);
+
+            if (result != ERROR_BUFFER_OVERFLOW)
+                break;
+        }
+
+        if (result != NO_ERROR)
+        {
+            std::cerr << "[NETWORK] GetAdaptersAddresses failed. error=" << result << '\n';
+            return false;
+        }
+
+        std::string ethernetIp;
+        std::string wifiIp;
+
+        for (auto* adapter = adapters.get(); adapter != nullptr; adapter = adapter->Next)
+        {
+            if (adapter->OperStatus != IfOperStatusUp)
+                continue;
+
+            const bool ethernet = adapter->IfType == IF_TYPE_ETHERNET_CSMACD;
+            const bool wifi = adapter->IfType == IF_TYPE_IEEE80211;
+
+            if (!ethernet && !wifi)
+                continue;
+
+            auto& candidate = ethernet ? ethernetIp : wifiIp;
+            if (!candidate.empty())
+                continue;
+
+            for (auto* address = adapter->FirstUnicastAddress; address != nullptr; address = address->Next)
+            {
+                const auto& socketAddress = address->Address;
+
+                if (!socketAddress.lpSockaddr || socketAddress.iSockaddrLength < static_cast<int>(sizeof(sockaddr_in)) || socketAddress.lpSockaddr->sa_family != AF_INET || address->DadState != IpDadStatePreferred)
+                {
+                    continue;
+                }
+
+                const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(socketAddress.lpSockaddr);
+                const std::uint32_t hostAddress = ntohl(ipv4->sin_addr.s_addr);
+
+                if ((hostAddress & 0xFF000000u) == 0 ||                 // 0.x.x.x        일반적이지 않은 대역
+                    (hostAddress & 0xFF000000u) == 0x7F000000u ||       // 127.x.x.x      루프백
+                    (hostAddress & 0xFFFF0000u) == 0xA9FE0000u ||       // 169.254.x.x,   링크 로컬 자동 할당 주소 
+                    hostAddress >= 0xE0000000u)                         // 224 이상,      멀티캐스트·예약 대역 및 브로드캐스트 포함
+                    continue;
+
+                char text[INET_ADDRSTRLEN]{};
+                if (!inet_ntop(AF_INET, &ipv4->sin_addr, text, sizeof(text)))
+                    continue;
+
+                candidate = text;
+                break;
+            }
+        }
+
+        outIp = ethernetIp.empty() ? wifiIp : ethernetIp;
+
+        if (outIp.empty())
+        {
+            std::cerr << "[NETWORK] No usable Ethernet or Wi-Fi IPv4 address\n";
+            return false;
+        }
+
+        std::cout << "[NETWORK] Selected " << (ethernetIp.empty() ? "Wi-Fi" : "Ethernet") << " IPv4=" << outIp << '\n';
+
         return true;
     }
 
