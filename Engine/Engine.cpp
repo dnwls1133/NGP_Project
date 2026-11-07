@@ -33,8 +33,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
     //_crtBreakAlloc();
 
-   
-   
+#ifdef _DEBUG
+    AllocConsole();
+
+    FILE* pFile{ nullptr };
+    freopen_s(&pFile, "CONOUT$", "w", stdout);
+    freopen_s(&pFile, "CONOUT$", "w", stderr);
+#endif
 
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
@@ -208,7 +213,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         CScene* scene = CSceneMgr::GetInst()->GetCurScene();
         if (scene != nullptr && scene->GetName() == TEXT("Lobby Scene"))
         {
-            static_cast<CScene_Lobby*>(scene)->GetIPAddress(wParam);
+            static_cast<CScene_Lobby*>(scene)->GetRoomCodeInput(wParam);
         }
         break;
     }

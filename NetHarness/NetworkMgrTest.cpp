@@ -296,6 +296,43 @@ namespace network_mgr_test
                 });
         }
 
+        bool CheckSessionConnectionRefused(network::CSessionMgr& session, unsigned short udpPort)
+        {
+            using network::SessionState;
+
+            constexpr unsigned short CLOSED_TCP_PORT = 40002;
+
+            const auto started = session.StartClient("127.0.0.1", CLOSED_TCP_PORT, udpPort);
+            if (started != network::NetworkResult::Success)
+            {
+                std::cerr << "[FAIL] StartClient did not accept the connection request\n";
+                return false;
+            }
+
+            const bool failed = WaitForSessionState(session, SessionState::Failed, "Client entered Failed", std::chrono::seconds(7));
+
+            const auto event = session.GetLastNetworkEvent();
+            session.Stop();
+
+            if (!failed)
+                return false;
+
+            if (event.type != NetworkEventType::Error || event.socketError != WSAECONNREFUSED)
+            {
+                std::cerr << "[FAIL] Expected connection refused, socketError=" << event.socketError << '\n';
+                return false;
+            }
+
+            if (session.GetState() != SessionState::Idle)
+            {
+                std::cerr << "[FAIL] Session did not return to Idle after Stop\n";
+                return false;
+            }
+
+            std::cout << "[PASS] Connection refused and session returned to Idle\n";
+            return true;
+        }
+
         bool Receive(CNetworkMgr& mgr, TransportType transport, const Message& expected, const sockaddr_in& expectedSender, bool checkPort, const char* step, ReceivedMessage& out)
         {
             return WaitFor(step, 5s, [&]
@@ -1122,7 +1159,7 @@ namespace network_mgr_test
         return passed;
     }
 
-    bool RunSessionApproval(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort)
+    bool RunSessionApproval(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, SessionJoinTest joinTest)
     {
         using network::SessionState;
         using namespace std::chrono_literals;
@@ -1130,6 +1167,34 @@ namespace network_mgr_test
         constexpr std::uint32_t TEST_START_TICK = 120;
 
         network::CSessionMgr session(*CNetworkMgr::GetInst());
+
+        if (!host && joinTest == SessionJoinTest::InvalidIp)
+        {
+            const auto result = session.StartClient("256.0.0.1", tcpPort, udpPort);
+
+            if (result != network::NetworkResult::InvalidArgument || session.GetState() != SessionState::Idle)
+            {
+                std::cerr << "[FAIL] Expected InvalidArgument and Idle after invalid IPv4\n";
+                session.Stop();
+                std::cout << "[SUITE] FAIL\n";
+                return false;
+            }
+
+            std::cout << "[PASS] Invalid IPv4 rejected and session remained Idle\n";
+            std::cout << "[TEST] Retrying with " << hostIp << '\n';
+        }
+
+        if (!host && joinTest == SessionJoinTest::ConnectionRefused)
+        {
+            if (!CheckSessionConnectionRefused(session, udpPort))
+            {
+                std::cout << "[SUITE] FAIL\n";
+                return false;
+            }
+
+            std::cout << "[TEST] Retrying with " << hostIp << '\n';
+        }
+
         const auto started = host
             ? session.StartHost(tcpPort, udpPort)
             : session.StartClient(hostIp, tcpPort, udpPort);
@@ -1226,6 +1291,48 @@ namespace network_mgr_test
         std::cout << (passed ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");
 
         return passed;
+    }
+
+    bool RunSessionRoomLifecycle(unsigned short tcpPort, unsigned short udpPort)
+    {
+        using network::SessionState;
+
+        network::CSessionMgr session(*CNetworkMgr::GetInst());
+
+        for (int round = 1; round <= 2; ++round)
+        {
+            std::cout << "=== Session room test " << round << " ===\n";
+
+            if (!CheckRequest(session.StartHost(tcpPort, udpPort), "StartHost"))
+            {
+                std::cout << "[SUITE] FAIL\n";
+                return false;
+            }
+
+            const char* step = round == 1 ? "Room is listening" : "Room recreated on the same ports";
+            const bool listening = WaitForSessionState(session, SessionState::Listening, step, std::chrono::seconds(5));
+
+            // Listening 대기가 실패해도 시작된 세션은 정리
+            session.Stop();
+
+            if (!listening)
+            {
+                std::cout << "[SUITE] FAIL\n";
+                return false;
+            }
+
+            if (session.GetState() != SessionState::Idle)
+            {
+                std::cout << "[FAIL] Session did not return to Idle\n";
+                std::cout << "[SUITE] FAIL\n";
+                return false;
+            }
+
+            std::cout << "[PASS] Room closed and session returned to Idle\n";
+        }
+
+        std::cout << "[SUITE] PASS\n";
+        return true;
     }
 
     bool RunSessionBadTokenClient(const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort)

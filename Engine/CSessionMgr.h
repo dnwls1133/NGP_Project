@@ -43,6 +43,9 @@ namespace network
         const NetworkEvent& GetLastNetworkEvent() const { return lastNetworkEvent; }
         protocol::RejectReason GetRejectReason() const { return rejectReason; }
 
+        bool SetRole(network::NetworkRole newRole);
+        network::NetworkRole GetRole() const { return role; }
+
         net::SendResult RequestReady(bool ready);
         bool IsClientReady() const { return state == SessionState::UdpRegistered && clientReady; }
 
@@ -53,6 +56,18 @@ namespace network
 
         bool HasClientLoaded() const { return clientLoaded; }
         const protocol::StartPayload& GetStartInfo() const { return startInfo; }
+
+        bool IsHost() const { return role == NetworkRole::Host; }
+
+        const std::string& GetHostIp() const { return hostIp; }
+        unsigned short GetTcpPort() const { return tcpPort; }
+        unsigned short GetUdpPort() const { return hostUdpPort; }
+
+        static bool EncodeRoomCode(const std::string& ip, std::string& outCode);
+        static bool DecodeRoomCode(const std::string& code, std::string& outIp);
+
+        std::string GetRoomCode() const;
+        NetworkResult JoinRoom(const std::string& code, unsigned short tcpPort, unsigned short udpPort);
 
     private:
         void BeginSession(NetworkRole newRole);
@@ -80,11 +95,15 @@ namespace network
         SessionState state = SessionState::Idle;
         NetworkEvent lastNetworkEvent{};
 
+        std::string hostIp;
+        unsigned short tcpPort = 0;
         unsigned short hostUdpPort = 0;
 
         std::uint32_t sessionId = 0;
         protocol::UdpToken udpToken = 0;
         protocol::PlayerSlot clientSlot = protocol::INVALID_PLAYER_SLOT;
         protocol::RejectReason rejectReason = protocol::RejectReason::NONE;
+
+        
     };
 }

@@ -84,8 +84,10 @@ namespace
             << "\nCSessionMgr Test:\n"
             << "  NetHarness.exe session-host\n"
             << "  NetHarness.exe session-client <ip>\n"
-            << "  NetHarness.exe session-bad-token-client <ip>\n";
-
+            << "  NetHarness.exe session-bad-token-client <ip>\n"
+            << "  NetHarness.exe session-room-test\n"
+            << "  NetHarness.exe session-retry-client <ip>\n"
+            << "  NetHarness.exe session-connect-failure-client <ip>\n";
     }
 
     bool ParseCount(std::string_view text, std::uint32_t& out)
@@ -264,6 +266,15 @@ int main(int argc, char* argv[])
 
     if (argc == 3 && std::string(argv[1]) == "session-bad-token-client")
         return network_mgr_test::RunSessionBadTokenClient(argv[2], TCP_PORT, UDP_PORT) ? 0 : 1;
+
+    if (argc == 2 && std::string_view(argv[1]) == "session-room-test")
+        return network_mgr_test::RunSessionRoomLifecycle(TCP_PORT, UDP_PORT) ? 0 : 1;
+
+    if (argc == 3 && std::string_view(argv[1]) == "session-retry-client")
+        return network_mgr_test::RunSessionApproval(false, argv[2], TCP_PORT, UDP_PORT, network_mgr_test::SessionJoinTest::InvalidIp) ? 0 : 1;
+
+    if (argc == 3 && std::string_view(argv[1]) == "session-connect-failure-client")
+        return network_mgr_test::RunSessionApproval(false, argv[2], TCP_PORT, UDP_PORT, network_mgr_test::SessionJoinTest::ConnectionRefused) ? 0 : 1;
 
     if (argc == 2)
     {

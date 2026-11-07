@@ -8,6 +8,7 @@
 #include <string>
 
 #include "CScene.h"
+#include "CSessionMgr.h"
 
 class CTexture;
 class CSound;
@@ -23,13 +24,23 @@ public:
     virtual void render(HDC _dc);
     virtual void Exit();
 
-    void SetHostAddress(const std::wstring& address) { m_hostAddress = address; }
-    void GetIPAddress(WPARAM character);
+    void GetRoomCodeInput(WPARAM character);
 
 private:
     CTexture* m_pBackground;
     CSound* m_pTheme;
 
     HFONT m_hFont;
-    std::wstring m_hostAddress;
+
+    std::wstring inputRoomCode;
+    bool leavingLobby = false;
+
+    void LogSessionState();
+    void ResumeHostWaiting();
+
+#ifdef _DEBUG
+    bool hasSessionLog = false;
+    network::SessionState loggedState = network::SessionState::Idle;
+    bool loggedReady = false;
+#endif
 };

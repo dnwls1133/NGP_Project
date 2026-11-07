@@ -166,8 +166,10 @@ void CScene_Title::CreateMenus()
     openRoomButton->SetScale(Vec2(210.0f, 70.0f));
     openRoomButton->SetClickedCallBack(
         [](DWORD_PTR, DWORD_PTR) {
-            lobbyMode = LOBBY_MODE::HOST;
-            ChangeScene(SCENE_TYPE::LOBBY);
+            auto& session = CCore::GetInst()->GetSession();
+
+            if (session.SetRole(network::NetworkRole::Host))
+                ChangeScene(SCENE_TYPE::LOBBY);
         },
         (DWORD_PTR)0, (DWORD_PTR)0
     );
@@ -180,8 +182,10 @@ void CScene_Title::CreateMenus()
     enterRoomButton->SetScale(Vec2(210.0f, 70.0f));
     enterRoomButton->SetClickedCallBack(
         [](DWORD_PTR, DWORD_PTR) {
-            lobbyMode = LOBBY_MODE::GUEST;
-            ChangeScene(SCENE_TYPE::LOBBY);
+            auto& session = CCore::GetInst()->GetSession();
+
+            if (session.SetRole(network::NetworkRole::Client))
+                ChangeScene(SCENE_TYPE::LOBBY);
         },
         (DWORD_PTR)0, (DWORD_PTR)0
     );
