@@ -13,6 +13,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <set>
 
 namespace network
 {
@@ -172,6 +173,30 @@ namespace network
             mgr.tcpSendOverride = {};
             mgr.snapshotSendOverride = {};
         }
+
+        static std::pair<std::size_t, std::size_t> ReadSharedQueueSizes(CNetworkMgr& mgr)
+        {
+            std::size_t sendCount = 0;
+            std::size_t receiveCount = 0;
+
+            {
+                std::lock_guard lock(mgr.sendMutex);
+
+                sendCount = mgr.sendRequestQueue.size();
+
+                if (mgr.pendingSnapshotBatch)
+                    sendCount += mgr.pendingSnapshotBatch->batch.parts.size();
+            }
+
+            {
+                std::lock_guard lock(mgr.receiveMutex);
+
+                receiveCount =
+                    mgr.recvQueue.size() + mgr.networkEventQueue.size();
+            }
+
+            return { sendCount, receiveCount };
+        }
     };
 }
 
@@ -194,6 +219,24 @@ namespace network_mgr_test
         constexpr std::uint32_t QUEUE_TEST_BATCH_SIZE = 64;
         constexpr std::uint32_t QUEUE_TEST_BATCH_COUNT = 32;
         constexpr std::uint32_t QUEUE_TEST_MESSAGE_COUNT = QUEUE_TEST_BATCH_SIZE * QUEUE_TEST_BATCH_COUNT;
+
+        constexpr std::uint8_t CONCURRENT_PART_COUNT = 16;
+        constexpr int CONCURRENT_BATCH_BURST = 8;
+        constexpr std::uint32_t CONCURRENT_MAX_TICK = 10'000;
+
+        struct ConcurrentStatistics
+        {
+            std::uint32_t nextSnapshotTick = 0;
+
+            std::size_t acceptedBatches = 0;
+            std::size_t replacedBatches = 0;
+            std::size_t queueFull = 0;
+
+            std::size_t maxSharedSend = 0;
+            std::size_t maxSharedReceive = 0;
+
+            std::set<std::pair<std::uint32_t, std::uint8_t>> receivedParts;
+        };
 
         template<typename Poll>
         bool WaitFor(const char* step, std::chrono::milliseconds timeout, Poll poll)
@@ -489,7 +532,6 @@ namespace network_mgr_test
 
         net::SnapshotBatch MakeSnapshotBatch(std::uint32_t tick, std::uint8_t partCount = 2, std::uint32_t sessionId = 1000)
         {
-            constexpr std::uint32_t SESSION_ID = 1000;
             constexpr auto TOTAL_BYTES = static_cast<std::uint32_t>(protocol::HEADER_BYTES + protocol::SNAPSHOT_HEADER_BYTES + protocol::OBJECT_STATE_RECORD_BYTES);
 
             net::SnapshotBatch batch;
@@ -508,13 +550,120 @@ namespace network_mgr_test
                 payload.partCount = partCount;
                 payload.objects.push_back(object);
 
-                auto message = MakeMessage(MessageType::STATE_SNAPSHOT, std::move(payload), TOTAL_BYTES, SESSION_ID, tick * partCount + index);
+                auto message = MakeMessage(MessageType::STATE_SNAPSHOT, std::move(payload), TOTAL_BYTES, sessionId, tick * partCount + index);
                 message.header.hostTick = tick;
 
                 batch.parts.push_back(std::move(message));
             }
 
             return batch;
+        }
+
+        Message MakeConcurrentHeartbeat(std::uint32_t sessionId, std::uint32_t sequence)
+        {
+            return MakeMessage(MessageType::HEARTBEAT, protocol::HeartbeatPayload{}, static_cast<std::uint32_t>(protocol::HEADER_BYTES), sessionId, sequence);
+        }
+
+        bool ObserveConcurrentQueues(CNetworkMgr& mgr, ConcurrentStatistics& statistics)
+        {
+            const auto [sendCount, receiveCount] = network::SnapshotBatchTestAccess::ReadSharedQueueSizes(mgr);
+
+            statistics.maxSharedSend = (std::max)(statistics.maxSharedSend, sendCount);
+
+            statistics.maxSharedReceive = (std::max)(statistics.maxSharedReceive, receiveCount);
+
+            if (sendCount > net::MAX_SEND_QUEUE_ENTRIES || receiveCount > net::MAX_RECV_QUEUE_ENTRIES)
+            {
+                std::cerr << "[FAIL] Shared queue limit exceeded" << ", send=" << sendCount << ", receive=" << receiveCount << '\n';
+
+                return false;
+            }
+
+            return true;
+        }
+
+        bool QueueConcurrentSnapshots(CNetworkMgr& mgr, std::uint32_t sessionId, ConcurrentStatistics& statistics)
+        {
+            for (int i = 0; i < CONCURRENT_BATCH_BURST; ++i)
+            {
+                if (statistics.nextSnapshotTick >= CONCURRENT_MAX_TICK)
+                {
+                    std::cerr << "[FAIL] Snapshot test iteration limit reached\n";
+                    return false;
+                }
+
+                auto batch = MakeSnapshotBatch(++statistics.nextSnapshotTick, CONCURRENT_PART_COUNT, sessionId);
+
+                const auto result = mgr.EnqueueSnapshotBatch(batch);
+
+                if (result == net::SendResult::QueueFull)
+                {
+                    ++statistics.queueFull;
+                    continue;
+                }
+
+                if (result != net::SendResult::Queued && result != net::SendResult::ReplacedPending)
+                {
+                    std::cerr << "[FAIL] Concurrent batch enqueue failed" << ", result=" << static_cast<int>(result) << '\n';
+
+                    return false;
+                }
+
+                ++statistics.acceptedBatches;
+
+                if (result == net::SendResult::ReplacedPending)
+                    ++statistics.replacedBatches;
+
+                // 등록 후 호출자의 원본을 바꿔도 내부 복사본은 유지되어야 한다.
+                auto& firstPart = std::get<protocol::StateSnapshotPayload>(batch.parts.front().payload);
+
+                firstPart.objects.front().pos.x = -123;
+
+                if (!ObserveConcurrentQueues(mgr, statistics))
+                    return false;
+            }
+
+            return true;
+        }
+
+        bool WaitForConcurrentAck(CNetworkMgr& mgr, const sockaddr_in& tcpPeer, std::uint32_t sessionId, std::uint32_t sequence, bool keepReplacing, ConcurrentStatistics& statistics)
+        {
+            const auto expected = MakeConcurrentHeartbeat(sessionId, sequence);
+
+            return WaitFor("Q01 TCP acknowledged in order", 5s, [&] {
+                if (!ObserveConcurrentQueues(mgr, statistics))
+                    return PollResult::Failed;
+
+                NetworkEvent event{};
+
+                if (mgr.TryPopEvent(event))
+                    return UnexpectedEvent(event);
+
+                if (keepReplacing &&
+                    !QueueConcurrentSnapshots(mgr, sessionId, statistics))
+                {
+                    return PollResult::Failed;
+                }
+
+                ReceivedMessage received{};
+
+                if (!mgr.TryReceive(received))
+                    return PollResult::Pending;
+
+                const bool senderMatches =
+                    received.sender.sin_family == tcpPeer.sin_family &&
+                    received.sender.sin_addr.s_addr == tcpPeer.sin_addr.s_addr &&
+                    received.sender.sin_port == tcpPeer.sin_port;
+
+                if (received.transport != TransportType::TCP || !senderMatches || received.message != expected)
+                {
+                    std::cerr << "[FAIL] Concurrent ACK mismatch" << ", expected=" << sequence << ", actual=" << received.message.header.sequence << '\n';
+
+                    return PollResult::Failed;
+                }
+
+                return PollResult::Passed;
+                });
         }
 
         bool SendSnapshotBatchFixture(CNetworkMgr& mgr, std::uint32_t sessionId)
@@ -676,6 +825,186 @@ namespace network_mgr_test
             return restarted;
         }
 
+        bool RunConcurrentSender(CNetworkMgr& mgr, const sockaddr_in& tcpPeer, std::uint32_t sessionId)
+        {
+            ConcurrentStatistics statistics{};
+
+            for (std::uint32_t first = 1; first <= QUEUE_TEST_MESSAGE_COUNT; first += QUEUE_TEST_BATCH_SIZE)
+            {
+                const std::uint32_t last = first + QUEUE_TEST_BATCH_SIZE - 1;
+
+                for (std::uint32_t sequence = first; sequence <= last; ++sequence)
+                {
+                    if (!CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, MakeConcurrentHeartbeat(sessionId, sequence)), "Queue Q01 TCP event"))
+                        return false;
+
+                    if (!ObserveConcurrentQueues(mgr, statistics))
+                        return false;
+                }
+
+                if (!WaitForConcurrentAck(mgr, tcpPeer, sessionId, last, true, statistics))
+                {
+                    return false;
+                }
+            }
+
+            // TCP 데이터 전부를 확인한 뒤 종료 표식을 보낸다.
+            constexpr auto END_SEQUENCE = QUEUE_TEST_MESSAGE_COUNT + 1;
+
+            if (!CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, MakeConcurrentHeartbeat(sessionId, END_SEQUENCE)), "Queue Q01 completion"))
+                return false;
+
+            // 종료 표식 이후에는 새 배치를 만들지 않는다.
+            if (!WaitForConcurrentAck(mgr, tcpPeer, sessionId, END_SEQUENCE, false, statistics))
+                return false;
+
+            if (statistics.replacedBatches == 0)
+            {
+                std::cerr << "[FAIL] No pending batch replacement observed." << " Increase the test load and repeat.\n";
+
+                return false;
+            }
+
+            std::cout
+                << "[PASS] TCP acknowledged=" << QUEUE_TEST_MESSAGE_COUNT << '\n'
+                << "[PASS] Snapshot batches accepted=" << statistics.acceptedBatches << ", replaced=" << statistics.replacedBatches << '\n'
+                << "[PASS] Shared queue samples within limits" << ", maxSend=" << statistics.maxSharedSend << ", maxReceive=" << statistics.maxSharedReceive << ", queueFull=" << statistics.queueFull << '\n';
+
+            return true;
+        }
+
+        bool RunConcurrentReceiver(CNetworkMgr& mgr, const sockaddr_in& tcpPeer, const sockaddr_in& udpPeer, std::uint32_t sessionId)
+        {
+            ConcurrentStatistics statistics{};
+
+            std::uint32_t tcpCount = 0;
+            bool completionReceived = false;
+            auto completionAt = std::chrono::steady_clock::now();
+
+            constexpr auto END_SEQUENCE = QUEUE_TEST_MESSAGE_COUNT + 1;
+
+            const bool receivedAll = WaitFor("Q01 TCP order and UDP snapshot parts verified", 30s, [&] {
+                if (!ObserveConcurrentQueues(mgr, statistics))
+                    return PollResult::Failed;
+
+                NetworkEvent event{};
+
+                if (mgr.TryPopEvent(event))
+                    return UnexpectedEvent(event);
+
+                ReceivedMessage received{};
+
+                // 한 번의 확인이 무한히 길어지지 않도록 제한한다.
+                for (std::size_t drained = 0; drained < 256 && mgr.TryReceive(received); ++drained)
+                {
+                    const auto& peer = received.transport == TransportType::TCP ? tcpPeer : udpPeer;
+
+                    if (received.sender.sin_family != peer.sin_family ||
+                        received.sender.sin_addr.s_addr != peer.sin_addr.s_addr ||
+                        received.sender.sin_port != peer.sin_port)
+                    {
+                        std::cerr << "[FAIL] Q01 sender mismatch\n";
+                        return PollResult::Failed;
+                    }
+
+                    const auto& message = received.message;
+
+                    if (received.transport == TransportType::TCP)
+                    {
+                        const auto sequence = message.header.sequence;
+
+                        if (sequence == END_SEQUENCE)
+                        {
+                            if (completionReceived ||
+                                tcpCount != QUEUE_TEST_MESSAGE_COUNT ||
+                                message != MakeConcurrentHeartbeat(sessionId, END_SEQUENCE))
+                            {
+                                std::cerr << "[FAIL] Invalid Q01 completion marker\n";
+                                return PollResult::Failed;
+                            }
+
+                            completionReceived = true;
+                            completionAt = std::chrono::steady_clock::now();
+                            continue;
+                        }
+
+                        if (completionReceived ||
+                            tcpCount >= QUEUE_TEST_MESSAGE_COUNT ||
+                            message != MakeConcurrentHeartbeat(sessionId, tcpCount + 1))
+                        {
+                            std::cerr << "[FAIL] Q01 TCP order or fields mismatch" << ", expected=" << tcpCount + 1 << ", actual=" << sequence << '\n';
+
+                            return PollResult::Failed;
+                        }
+
+                        ++tcpCount;
+
+                        if (tcpCount % QUEUE_TEST_BATCH_SIZE == 0)
+                        {
+                            if (!CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, MakeConcurrentHeartbeat(sessionId, tcpCount)), "Queue Q01 TCP ACK"))
+                                return PollResult::Failed;
+                        }
+
+                        continue;
+                    }
+
+                    if (received.transport != TransportType::UDP)
+                        return PollResult::Failed;
+
+                    const auto* part =
+                        std::get_if<protocol::StateSnapshotPayload>(&message.payload);
+
+                    if (!part ||
+                        message.header.type != MessageType::STATE_SNAPSHOT ||
+                        message.header.hostTick == 0 ||
+                        message.header.hostTick > CONCURRENT_MAX_TICK ||
+                        part->partCount != CONCURRENT_PART_COUNT ||
+                        part->partIndex >= CONCURRENT_PART_COUNT)
+                    {
+                        std::cerr << "[FAIL] Invalid Q01 snapshot part\n";
+                        return PollResult::Failed;
+                    }
+
+                    const auto expected = MakeSnapshotBatch(message.header.hostTick, CONCURRENT_PART_COUNT, sessionId);
+
+                    if (message != expected.parts[part->partIndex])
+                    {
+                        std::cerr << "[FAIL] Q01 snapshot fields mixed or corrupted" << ", tick=" << message.header.hostTick << ", part=" << static_cast<int>(part->partIndex) << '\n';
+
+                        return PollResult::Failed;
+                    }
+
+                    statistics.receivedParts.emplace(message.header.hostTick, part->partIndex);
+                }
+
+                // TCP와 UDP 도착 순서는 독립적이므로 종료 표식 뒤에도 잠시 수신한다.
+                const bool drainedAfterCompletion = completionReceived && std::chrono::steady_clock::now() - completionAt >= 200ms;
+
+                if (drainedAfterCompletion && statistics.receivedParts.size() >= CONCURRENT_PART_COUNT)
+                    return PollResult::Passed;
+
+                return PollResult::Pending;
+                });
+
+            if (!receivedAll)
+                return false;
+
+            if (!CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, MakeConcurrentHeartbeat(sessionId, END_SEQUENCE)), "Queue Q01 completion ACK"))
+                return false;
+
+            NetworkEvent event{};
+
+            if (!WaitEvent(mgr, NetworkEventType::Disconnected, event, "Host disconnected after Q01"))
+                return false;
+
+            std::cout
+                << "[PASS] TCP received in order=" << tcpCount << '\n'
+                << "[PASS] Unique snapshot parts verified=" << statistics.receivedParts.size() << '\n'
+                << "[PASS] Shared queue samples within limits" << ", maxSend=" << statistics.maxSharedSend << ", maxReceive=" << statistics.maxSharedReceive << '\n';
+
+            return true;
+        }
+
         bool RunRound(CNetworkMgr& mgr, bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, std::uint32_t round, TestMode mode)
         {
             const auto started = host
@@ -743,6 +1072,11 @@ namespace network_mgr_test
 
                 if (!CheckQueued(mgr.EnqueueSend(net::Channel::Udp, udpAck), "Queue UDP_ACK"))
                     return false;
+
+                if (mode == TestMode::Concurrent)
+                {
+                    return Receive(mgr, TransportType::TCP, ready, tcpPeer, true, "Q01 Client ready", received) && RunConcurrentSender(mgr, tcpPeer, sessionId);
+                }
 
                 if (mode == TestMode::GameFlow)
                 {
@@ -817,6 +1151,11 @@ namespace network_mgr_test
 
             if (!Receive(mgr, TransportType::UDP, udpAck, udpPeer, true, "UDP_ACK", received))
                 return false;
+
+            if (mode == TestMode::Concurrent)
+            {
+                return CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, ready), "Queue Q01 ready") && RunConcurrentReceiver(mgr, tcpPeer, udpPeer, sessionId);
+            }
 
             if (mode == TestMode::GameFlow)
             {
@@ -1520,7 +1859,6 @@ namespace network_mgr_test
         std::cout << (passed ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");
         return passed;
     }
-
 
     bool RunListeningShutdown(unsigned short tcpPort, unsigned short udpPort)
     {

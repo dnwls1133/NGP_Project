@@ -8,7 +8,8 @@ namespace network_mgr_test
     {
         Basic,
         SnapshotBatch,
-        GameFlow
+        GameFlow,
+        Concurrent
     };
 
     enum class SessionJoinTest
