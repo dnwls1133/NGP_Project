@@ -7,6 +7,8 @@
 #include <Ws2tcpip.h>
 #include <charconv>
 #include <string_view>
+#include <new>
+#include <utility>
 
 #pragma comment(lib, "Bcrypt.lib")
 
@@ -262,6 +264,74 @@ namespace network
         ResetHandshake();
     }
 
+    bool CSessionMgr::CanProcessReceivedMessage() const
+    {
+        switch (state)
+        {
+        case SessionState::AwaitingJoin:
+        case SessionState::AwaitingAccept:
+        case SessionState::AwaitingUdpRegister:
+        case SessionState::AwaitingUdpAck:
+        case SessionState::UdpRegistered:
+        case SessionState::Loading:
+        case SessionState::Started:
+            return true;
+
+        default:
+            return false;
+        }
+    }
+
+    void CSessionMgr::HandleReceivedMessage(ReceivedMessage received)
+    {
+        switch (state)
+        {
+        case SessionState::AwaitingJoin:
+            HandleJoin(received);
+            break;
+
+        case SessionState::AwaitingAccept:
+            HandleJoinReply(received);
+            break;
+
+        case SessionState::AwaitingUdpRegister:
+            HandleUdpRegister(received);
+            break;
+
+        case SessionState::AwaitingUdpAck:
+            HandleUdpAck(received);
+            break;
+
+        case SessionState::UdpRegistered:
+            if (IsHost())
+                HandleReady(received);
+            else if (received.message.header.type == protocol::MessageType::LOAD)
+                HandleLoad(received);
+            else
+                HandleRoomState(received);
+            break;
+
+        case SessionState::Loading:
+            // TCP START보다 먼저 도착한 UDP 상태를 보관한다.
+            if (!IsHost() && localLoaded && received.message.header.type == protocol::MessageType::STATE_SNAPSHOT)
+            {
+                HandleGameMessage(std::move(received));
+            }
+            else
+            {
+                HandleLoadingMessage(received);
+            }
+            break;
+
+        case SessionState::Started:
+            HandleGameMessage(std::move(received));
+            break;
+
+        default:
+            break;
+        }
+    }
+
     void CSessionMgr::Update()
     {
         NetworkEvent event{};
@@ -270,52 +340,19 @@ namespace network
             HandleNetworkEvent(event);
         }
 
-        switch (state)
+        constexpr std::size_t MAX_MESSAGES_PER_UPDATE = 64;
+
+        for (std::size_t i = 0; i < MAX_MESSAGES_PER_UPDATE; ++i)
         {
-        case SessionState::AwaitingJoin:
-        case SessionState::AwaitingAccept:
-        case SessionState::AwaitingUdpRegister:
-        case SessionState::AwaitingUdpAck:
-        case SessionState::UdpRegistered:
-        case SessionState::Loading:
-            break;
-            break;
+            if (!CanProcessReceivedMessage())
+                return;
 
-        default:
-            return;
-        }
+            ReceivedMessage received{};
 
-        ReceivedMessage received{};
-        if (!network.TryReceive(received))
-            return;
+            if (!network.TryReceive(received))
+                return;
 
-        switch (state)
-        {
-        case SessionState::AwaitingJoin:
-            HandleJoin(received);
-            break;
-        case SessionState::AwaitingAccept:
-            HandleJoinReply(received);
-            break;
-        case SessionState::AwaitingUdpRegister:
-            HandleUdpRegister(received);
-            break;
-        case SessionState::AwaitingUdpAck:
-            HandleUdpAck(received);
-            break;
-        case SessionState::UdpRegistered:
-            if (role == NetworkRole::Host)
-                HandleReady(received);
-            else if (received.message.header.type == protocol::MessageType::LOAD)
-                HandleLoad(received);
-            else
-                HandleRoomState(received);
-            break;
-        case SessionState::Loading:
-            HandleLoadingMessage(received);
-            break;
-        default:
-            break;
+            HandleReceivedMessage(std::move(received));
         }
     }
 
@@ -334,6 +371,8 @@ namespace network
         {
             if (state != SessionState::Starting && state != SessionState::Listening)
                 break;
+
+            peerTcpAddress = event.peer;
 
             if (role == NetworkRole::Host)
             {
@@ -469,6 +508,9 @@ namespace network
         clientLoaded = false;
         clientReady = false;
         startInfo = {};
+        peerTcpAddress = {};
+        peerUdpAddress = {};
+        gameReceiveQueue.clear();
     }
 
     void CSessionMgr::SendUdpRegister()
@@ -507,7 +549,7 @@ namespace network
 
         if (received.sender.sin_family != AF_INET ||
             received.sender.sin_port == 0 ||
-            received.sender.sin_addr.s_addr != lastNetworkEvent.peer.sin_addr.s_addr)
+            received.sender.sin_addr.s_addr != peerTcpAddress.sin_addr.s_addr)
         {
             return;
         }
@@ -532,7 +574,7 @@ namespace network
             state = SessionState::Failed;
             return;
         }
-
+        peerUdpAddress = received.sender;
         state = SessionState::UdpRegistered;
     }
 
@@ -547,7 +589,7 @@ namespace network
         }
 
         if (received.sender.sin_family != AF_INET ||
-            received.sender.sin_addr.s_addr != lastNetworkEvent.peer.sin_addr.s_addr ||
+            received.sender.sin_addr.s_addr != peerTcpAddress.sin_addr.s_addr ||
             received.sender.sin_port != htons(hostUdpPort))
         {
             return;
@@ -558,6 +600,7 @@ namespace network
         if (!payload || payload->playerId != clientSlot || payload->registered != 1)
             return;
 
+        peerUdpAddress = received.sender;
         state = SessionState::UdpRegistered;
     }
 
@@ -671,5 +714,166 @@ namespace network
         lastNetworkEvent = {};
         state = SessionState::Idle;
         ResetHandshake();
+    }
+
+    protocol::PlayerSlot CSessionMgr::GetLocalPlayerId() const
+    {
+        if (sessionId == 0)
+            return protocol::INVALID_PLAYER_SLOT;
+
+        return IsHost() ? protocol::PlayerSlot{ 0 } : clientSlot;
+    }
+
+    net::SendResult CSessionMgr::EnqueueSend(net::Channel channel, const protocol::Message& message)
+    {
+        if (state != SessionState::Started)
+            return net::SendResult::NotRunning;
+
+        TransportType transport;
+
+        if (channel == net::Channel::Tcp)
+            transport = TransportType::TCP;
+        else if (channel == net::Channel::Udp)
+            transport = TransportType::UDP;
+        else
+            return net::SendResult::InvalidRequest;
+
+        // 상태 메시지는 한 조각이어도 배치 API를 사용한다.
+        if (message.header.type == protocol::MessageType::STATE_SNAPSHOT)
+            return net::SendResult::InvalidRequest;
+
+        if (!IsGameMessageAllowed(role, transport, message))
+            return net::SendResult::InvalidRequest;
+
+        return network.EnqueueSend(channel, message);
+    }
+
+    net::SendResult CSessionMgr::EnqueueSnapshotBatch(const net::SnapshotBatch& batch)
+    {
+        if (state != SessionState::Started)
+            return net::SendResult::NotRunning;
+
+        if (!IsHost() || batch.parts.empty())
+            return net::SendResult::InvalidRequest;
+
+        for (const auto& part : batch.parts)
+        {
+            if (part.header.type != protocol::MessageType::STATE_SNAPSHOT ||
+                !IsGameMessageAllowed(role, TransportType::UDP, part))
+            {
+                return net::SendResult::InvalidRequest;
+            }
+        }
+
+        // 조각 수·크기·틱 일치·중복 객체·큐 용량 검사는 기존 구현에 위임한다.
+        return network.EnqueueSnapshotBatch(batch);
+    }
+
+    bool CSessionMgr::TryReceiveGame(ReceivedMessage& out)
+    {
+        if (state != SessionState::Started || gameReceiveQueue.empty())
+            return false;
+
+        out = std::move(gameReceiveQueue.front());
+        gameReceiveQueue.pop_front();
+
+        return true;
+    }
+
+    bool CSessionMgr::IsGameMessageAllowed(NetworkRole senderRole, TransportType transport, const protocol::Message& message) const
+    {
+        if (sessionId == 0 || message.header.sessionId != sessionId || message.header.roundId != 1)
+        {
+            return false;
+        }
+
+        using protocol::MessageType;
+
+        if (senderRole == NetworkRole::Client)
+        {
+            if (transport != TransportType::UDP || message.header.type != MessageType::PLAYER_INPUT)
+            {
+                return false;
+            }
+
+            const auto* input = std::get_if<protocol::PlayerInputPayload>(&message.payload);
+
+            return input && input->playerId == clientSlot && message.header.hostTick == 0;
+        }
+
+        if (senderRole != NetworkRole::Host)
+            return false;
+
+        switch (message.header.type)
+        {
+        case MessageType::STATE_SNAPSHOT:
+            return transport == TransportType::UDP &&
+                std::holds_alternative<protocol::StateSnapshotPayload>(message.payload);
+
+        case MessageType::SPAWN:
+            return transport == TransportType::TCP &&
+                std::holds_alternative<protocol::SpawnPayload>(message.payload);
+
+        case MessageType::DESPAWN:
+            return transport == TransportType::TCP &&
+                std::holds_alternative<protocol::DespawnPayload>(message.payload);
+
+        case MessageType::COMBAT_EVENT:
+            return transport == TransportType::TCP &&
+                std::holds_alternative<protocol::CombatEventPayload>(message.payload);
+
+        case MessageType::RESULT:
+            return transport == TransportType::TCP &&
+                std::holds_alternative<protocol::ResultPayload>(message.payload);
+
+        default:
+            return false;
+        }
+    }
+
+    void CSessionMgr::HandleGameMessage(ReceivedMessage received)
+    {
+        const NetworkRole senderRole = IsHost() ? NetworkRole::Client : NetworkRole::Host;
+
+        if (!IsGameMessageAllowed(senderRole, received.transport, received.message))
+            return;
+
+        const sockaddr_in& expectedPeer = received.transport == TransportType::UDP ? peerUdpAddress : peerTcpAddress;
+
+        if (expectedPeer.sin_family != AF_INET ||
+            expectedPeer.sin_port == 0 ||
+            received.sender.sin_family != AF_INET ||
+            received.sender.sin_addr.s_addr != expectedPeer.sin_addr.s_addr ||
+            received.sender.sin_port != expectedPeer.sin_port)
+        {
+            return;
+        }
+
+        int error = WSAENOBUFS;
+
+        if (gameReceiveQueue.size() < net::MAX_RECV_QUEUE_ENTRIES)
+        {
+            try
+            {
+                gameReceiveQueue.push_back(std::move(received));
+                return;
+            }
+            catch (const std::bad_alloc&)
+            {
+                error = WSA_NOT_ENOUGH_MEMORY;
+            }
+        }
+
+        // 큐 포화나 메모리 부족을 조용히 무시하지 않는다.
+        lastNetworkEvent = NetworkEvent{
+            NetworkEventType::Error,
+            expectedPeer,
+            error,
+            protocol::CodecError::NONE
+        };
+
+        state = SessionState::Failed;
+        gameReceiveQueue.clear();
+        network.Shutdown();
     }
 }

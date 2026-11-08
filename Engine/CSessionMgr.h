@@ -2,6 +2,7 @@
 
 #include "NetworkTypes.h"
 #include "../net/SendContract.h"
+#include <deque>
 
 namespace network
 {
@@ -29,7 +30,7 @@ namespace network
     {
     public:
         explicit CSessionMgr(CNetworkMgr& network);
-        
+
         CSessionMgr(const CSessionMgr&) = delete;
         CSessionMgr& operator=(const CSessionMgr&) = delete;
 
@@ -69,6 +70,13 @@ namespace network
         std::string GetRoomCode() const;
         NetworkResult JoinRoom(const std::string& code, unsigned short tcpPort, unsigned short udpPort);
 
+        std::uint32_t GetSessionId() const { return sessionId; }
+        protocol::PlayerSlot GetLocalPlayerId() const;
+
+        net::SendResult EnqueueSend(net::Channel channel, const protocol::Message& message);
+        net::SendResult EnqueueSnapshotBatch(const net::SnapshotBatch& batch);
+
+        bool TryReceiveGame(network::ReceivedMessage& out);
     private:
         void BeginSession(NetworkRole newRole);
         void HandleNetworkEvent(const NetworkEvent& event);
@@ -83,6 +91,15 @@ namespace network
         void HandleRoomState(const ReceivedMessage& received);
         void HandleLoad(const ReceivedMessage& received);
         void HandleLoadingMessage(const ReceivedMessage& received);
+        bool IsGameMessageAllowed(NetworkRole senderRole, TransportType transport, const protocol::Message& message) const;
+        void HandleGameMessage(ReceivedMessage received);
+        bool CanProcessReceivedMessage() const;
+        void HandleReceivedMessage(ReceivedMessage received);
+        std::deque<ReceivedMessage> gameReceiveQueue;
+
+        sockaddr_in peerTcpAddress{};
+        sockaddr_in peerUdpAddress{};
+
 
         bool clientReady = false;
 
@@ -104,6 +121,6 @@ namespace network
         protocol::PlayerSlot clientSlot = protocol::INVALID_PLAYER_SLOT;
         protocol::RejectReason rejectReason = protocol::RejectReason::NONE;
 
-        
+
     };
 }
