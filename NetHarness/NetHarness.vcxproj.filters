@@ -54,6 +54,18 @@
     <ClCompile Include="..\Engine\CSessionMgr.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="GameFlowTest.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="PongTest.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="PongProtocolAdapter.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="PongSimulation.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="HostTest.h">
@@ -66,9 +78,6 @@
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="Common.h">
-      <Filter>헤더 파일</Filter>
-    </ClInclude>
-    <ClInclude Include="ProtocolTypes.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="MessageTest.h">
@@ -99,6 +108,21 @@
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\CSessionMgr.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="GameFlowTest.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="..\shared\protocol\ProtocolTypes.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="PongTest.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="PongProtocolAdapter.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="PongSimulation.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
   </ItemGroup>

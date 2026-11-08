@@ -5,6 +5,7 @@
 #include "../Engine/CSessionMgr.h"
 #include "../net/SendContract.h"
 #include "TcpTestSupport.h"
+#include "GameFlowTest.h"
 
 #include <ws2tcpip.h>
 #include <chrono>
@@ -738,8 +739,55 @@ namespace network_mgr_test
                 if (!CheckRequest(mgr.SetUdpPeer(received.sender), "Set verified UDP peer"))
                     return false;
 
+                const sockaddr_in clientUdpPeer = received.sender;
+
                 if (!CheckQueued(mgr.EnqueueSend(net::Channel::Udp, udpAck), "Queue UDP_ACK"))
                     return false;
+
+                if (mode == TestMode::GameFlow)
+                {
+                    const auto expectedInput = game_flow_test::MakeClientInput(sessionId);
+
+                    if (!Receive(mgr, TransportType::UDP, expectedInput, clientUdpPeer, true,
+                        "Host verified PLAYER_INPUT", received))
+                    {
+                        return false;
+                    }
+
+                    auto world = game_flow_test::MakeInitialWorld();
+
+                    // Host 입력은 네트워크를 거치지 않고 로컬에서 사용
+                    protocol::PlayerInputPayload hostInput{};
+                    hostInput.playerId = 0;
+                    hostInput.moveBits = protocol::MoveBit::RIGHT;
+
+                    // 수신 비교를 통과했으므로 PLAYER_INPUT 본문임이 확인됨
+                    const auto& clientInput =
+                        std::get<protocol::PlayerInputPayload>(received.message.payload);
+
+                    // 시험용 고정 틱 경계에서 양쪽 입력 적용
+                    game_flow_test::ApplyInput(world[0], hostInput);
+                    game_flow_test::ApplyInput(world[1], clientInput);
+
+                    const auto batch = game_flow_test::MakeSnapshot(sessionId, world);
+                    const auto expected = game_flow_test::MakeExpectedSnapshot(sessionId);
+
+                    if (batch != expected)
+                    {
+                        std::cerr << "[FAIL] Host simulation differs from expected state\n";
+                        return false;
+                    }
+
+                    std::cout << "[PASS] Host tick=121, P0.x=" << world[0].pos.x
+                        << ", P1.x=" << world[1].pos.x << '\n';
+
+                    if (!CheckQueued(mgr.EnqueueSnapshotBatch(batch), "Queue calculated snapshot"))
+                        return false;
+
+                    // Client의 검증 완료 응답을 받은 뒤 종료
+                    return Receive(mgr, TransportType::TCP, done, tcpPeer, true,
+                        "Client verified calculated state", received);
+                }
 
                 if (mode == TestMode::SnapshotBatch)
                 {
@@ -769,6 +817,37 @@ namespace network_mgr_test
 
             if (!Receive(mgr, TransportType::UDP, udpAck, udpPeer, true, "UDP_ACK", received))
                 return false;
+
+            if (mode == TestMode::GameFlow)
+            {
+                const auto input = game_flow_test::MakeClientInput(sessionId);
+
+                if (!CheckQueued(mgr.EnqueueSend(net::Channel::Udp, input), "Queue PLAYER_INPUT"))
+                    return false;
+
+                const auto expected = game_flow_test::MakeExpectedSnapshot(sessionId);
+
+                if (!Receive(mgr, TransportType::UDP, expected.parts.front(), udpPeer, true,
+                    "Client verified snapshot fields and tick", received))
+                {
+                    return false;
+                }
+
+                const auto& snapshot =
+                    std::get<protocol::StateSnapshotPayload>(received.message.payload);
+
+                // Client의 메인 스레드에서 수신 상태를 시험용 표시 데이터로 반영
+                game_flow_test::World displayed{};
+                for (std::size_t index = 0; index < displayed.size(); ++index)
+                    displayed[index] = snapshot.objects[index];
+
+                std::cout << "[PASS] Client applied tick=" << snapshot.snapshotTick
+                    << ", P0.x=" << displayed[0].pos.x
+                    << ", P1.x=" << displayed[1].pos.x << '\n';
+
+                return CheckQueued(mgr.EnqueueSend(net::Channel::Tcp, done), "Queue verification result")
+                    && WaitEvent(mgr, NetworkEventType::Disconnected, event, "Host disconnected");
+            }
 
             if (mode == TestMode::SnapshotBatch)
             {

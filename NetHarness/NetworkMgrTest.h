@@ -4,7 +4,12 @@
 
 namespace network_mgr_test
 {
-    enum class TestMode { Basic, SnapshotBatch };
+    enum class TestMode
+    {
+        Basic,
+        SnapshotBatch,
+        GameFlow
+    };
 
     enum class SessionJoinTest
     {
