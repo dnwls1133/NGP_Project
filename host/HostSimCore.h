@@ -79,6 +79,21 @@ namespace host
     // ─────────────────────────────────────────────────────────────────────────
     // 3. 입력·상태 선언 및 InputScript (키보드 대신 틱/시각별 플레이어 입력 주입)
     // ─────────────────────────────────────────────────────────────────────────
+    enum class InputRejectReason : std::uint8_t
+    {
+        None = 0,                    // 정상 채택
+        OutOfRange = 1,              // playerId, moveBits, fireHeld, reserved 범위 위반
+        NonMonotonicTime = 2,        // 단조 시계 수신 시각 역전 (이전 유효 시각보다 작음)
+        DuplicateOrStaleSequence = 3 // 중복 또는 이전 순번 (inputSequence <= lastAcceptedSeq)
+    };
+
+    struct PlayerInputState
+    {
+        bool hasInput = false;
+        std::uint32_t lastSequence = 0;
+        std::uint64_t lastReceiveTimeMs = 0;
+    };
+
     struct ScheduledInputEntry
     {
         std::uint32_t targetHostTick = 1;
@@ -240,6 +255,9 @@ namespace host
             m_totalDestroyedCount = 0;
             m_lastAppliedMoveBits.fill(protocol::MoveBit::NONE);
             m_lastAppliedFireHeld.fill(0);
+            m_hasValidInput.fill(false);
+            m_lastAcceptedInputSeq.fill(0);
+            m_lastValidReceivedTimeMs.fill(0);
             m_playerSlotObjectIds.fill(0);
             m_objects.clear();
             m_pendingSpawns.clear();
@@ -373,6 +391,50 @@ namespace host
             return (slot < protocol::MAX_PROTOCOL_PLAYERS) ? m_lastAppliedMoveBits[slot] : 0;
         }
 
+        // 11/09: 승인 입력의 범위·수신 시각·순번 검사 및 채택 함수
+        InputRejectReason SubmitPlayerInput(
+            const protocol::PlayerInputPayload& payload,
+            std::uint64_t receivedTimeMs) noexcept
+        {
+            const protocol::PlayerSlot slot = payload.playerId;
+            if (slot >= protocol::MAX_PROTOCOL_PLAYERS
+                || (payload.moveBits & ~protocol::MoveBit::ALL_VALID) != 0
+                || payload.fireHeld > 1
+                || payload.reserved != 0)
+            {
+                return InputRejectReason::OutOfRange;
+            }
+
+            if (m_hasValidInput[slot])
+            {
+                if (receivedTimeMs < m_lastValidReceivedTimeMs[slot])
+                {
+                    return InputRejectReason::NonMonotonicTime;
+                }
+                if (payload.inputSequence <= m_lastAcceptedInputSeq[slot])
+                {
+                    return InputRejectReason::DuplicateOrStaleSequence;
+                }
+            }
+
+            m_hasValidInput[slot] = true;
+            m_lastAcceptedInputSeq[slot] = payload.inputSequence;
+            m_lastValidReceivedTimeMs[slot] = receivedTimeMs;
+            m_lastAppliedMoveBits[slot] = payload.moveBits;
+            m_lastAppliedFireHeld[slot] = payload.fireHeld;
+            return InputRejectReason::None;
+        }
+
+        std::uint32_t GetLastAcceptedInputSeq(protocol::PlayerSlot slot) const noexcept
+        {
+            return (slot < protocol::MAX_PROTOCOL_PLAYERS) ? m_lastAcceptedInputSeq[slot] : 0;
+        }
+
+        std::uint64_t GetLastValidReceivedTimeMs(protocol::PlayerSlot slot) const noexcept
+        {
+            return (slot < protocol::MAX_PROTOCOL_PLAYERS) ? m_lastValidReceivedTimeMs[slot] : 0;
+        }
+        
         // 아직 반영되지 않은 생성 대기열을 즉시 틱 시작 전 초기 배치용으로 플러시할 때 사용
         void FlushLifecycleAtTickEnd(net::ISendSink& sendSink)
         {
@@ -482,13 +544,7 @@ namespace host
             const std::vector<ScheduledInputEntry> inputs = inputScript.ConsumeForTick(currentTick);
             for (const ScheduledInputEntry& entry : inputs)
             {
-                const protocol::PlayerSlot slot = entry.payload.playerId;
-                if (slot < protocol::MAX_PROTOCOL_PLAYERS
-                    && (entry.payload.moveBits & ~protocol::MoveBit::ALL_VALID) == 0)
-                {
-                    m_lastAppliedMoveBits[slot] = entry.payload.moveBits;
-                    m_lastAppliedFireHeld[slot] = entry.payload.fireHeld;
-                }
+                SubmitPlayerInput(entry.payload, entry.receivedTimeMs);
             }
 
             // Step 4: 고정 SIM_FIXED_DT(1/60초) 기준 이동 계산 (전역 fDT 미사용)
@@ -594,7 +650,11 @@ namespace host
 
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedMoveBits{};
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedFireHeld{};
+        std::array<bool, protocol::MAX_PROTOCOL_PLAYERS> m_hasValidInput{};
+        std::array<std::uint32_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAcceptedInputSeq{};
+        std::array<std::uint64_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastValidReceivedTimeMs{};
         std::array<protocol::ObjectId, protocol::MAX_PROTOCOL_PLAYERS> m_playerSlotObjectIds{};
+        
 
         std::vector<HostObjectValue> m_objects;
         std::vector<HostObjectValue> m_pendingSpawns;

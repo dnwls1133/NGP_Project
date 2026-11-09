@@ -203,6 +203,63 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1109Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 순번 검사: sequence 10 -> 9 -> 10 -> 11 주입 시 10과 11만 채택
+        {
+            HostSimEngine engine{ 1000 };
+
+            const auto r10 = engine.SubmitPlayerInput(
+                PlayerInputPayload{ 0, MoveBit::LEFT, 0,0,10 }, 100);
+            const auto r9 = engine.SubmitPlayerInput(
+                PlayerInputPayload{ 0, MoveBit::RIGHT, 1,0,9 }, 110);
+            const auto r10Dup = engine.SubmitPlayerInput(
+                PlayerInputPayload{ 0, MoveBit::UP, 1,0,10 }, 120);
+            const auto r11 = engine.SubmitPlayerInput(
+                PlayerInputPayload{ 0, MoveBit::DOWN, 1,0,11 }, 130);
+
+            Check(r10 == InputRejectReason::None
+                && r9 == InputRejectReason::DuplicateOrStaleSequence
+                && r10Dup == InputRejectReason::DuplicateOrStaleSequence
+                && r11 == InputRejectReason::None
+                && engine.GetLastAcceptedInputSeq(0) == 11
+                && engine.GetLastAppliedMoveBits(0) == MoveBit::DOWN
+                && engine.GetLastValidReceivedTimeMs(0) == 130,
+                "HostSim1109: Sequence 10->9->10->11 accepts only 10 and 11",
+                counters);
+
+        }
+
+        // 2. 범위 및 단조 수신 시각 검사: 오류 입력 거부 및 기존 유호 상태 보존
+        {
+            HostSimEngine engine{ 1000 };
+            engine.SubmitPlayerInput(
+                PlayerInputPayload{ 1, MoveBit::UP,1,0,5 }, 200);
+
+            const auto badSlot = engine.SubmitPlayerInput(
+                PlayerInputPayload{ 2, MoveBit::LEFT, 0,0,6 }, 210);
+            const auto badMove = engine.SubmitPlayerInput(
+                PlayerInputPayload{ 1, 0x10, 0, 0, 6 }, 210);
+            const auto badFire = engine.SubmitPlayerInput(
+                PlayerInputPayload{ 1, MoveBit::DOWN, 2, 0, 6 }, 210);
+            const auto badTime = engine.SubmitPlayerInput(
+                PlayerInputPayload{ 1, MoveBit::DOWN, 0, 0, 6 }, 199);
+
+            Check(badSlot == InputRejectReason::OutOfRange
+                && badMove == InputRejectReason::OutOfRange
+                && badFire == InputRejectReason::OutOfRange
+                && badTime == InputRejectReason::NonMonotonicTime
+                && engine.GetLastAcceptedInputSeq(1) == 5
+                && engine.GetLastAppliedMoveBits(1) == MoveBit::UP
+                && engine.GetLastValidReceivedTimeMs(1) == 200,
+                "HostSim1109: Out-of-range fields and non-monotonic receive time are rejected without mutating state",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -211,6 +268,7 @@ int main()
 
     std::cout << "=== Virus Striker HostSimHarness (11/08 Fixed Tick & Lifecycle) ===\n";
     RunHostSim1108Suite(counters);
+    RunHostSim1109Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';
