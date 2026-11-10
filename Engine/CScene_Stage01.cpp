@@ -263,15 +263,23 @@ void CScene_Stage01::Enter()
 
     RegisterBackground(pBackgroundObj);
 
-    // Player Object 추가
-    CPlayer* pObj = new CPlayer;
-    pObj->SetPos(Vec2(vResolution.x /2.f, vResolution.y + 200.f));
-    pObj->SetScale(Vec2(100.f, 100.f));
-    pObj->SetName(L"Player");
-    AddObject(pObj, GROUP_TYPE::PLAYER);
+    // Player 0 (Host) & Player 1 (Client) Object 추가 및 슬롯 등록
+    CPlayer* pPlayer0 = new CPlayer;
+    pPlayer0->SetPlayerId(0);
+    pPlayer0->SetPos(Vec2(vResolution.x / 2.f - 60.f, vResolution.y + 200.f));
+    pPlayer0->SetScale(Vec2(100.f, 100.f));
+    pPlayer0->SetName(L"Player");
+    AddObject(pPlayer0, GROUP_TYPE::PLAYER);
+    RegisterPlayer(0, pPlayer0);
+    CRankMgr::GetInst()->SetPlayer(pPlayer0);
 
-    RegisterPlayer(0, pObj);
-    CRankMgr::GetInst()->SetPlayer(pObj);
+    CPlayer* pPlayer1 = new CPlayer;
+    pPlayer1->SetPlayerId(1);
+    pPlayer1->SetPos(Vec2(vResolution.x / 2.f + 60.f, vResolution.y + 200.f));
+    pPlayer1->SetScale(Vec2(100.f, 100.f));
+    pPlayer1->SetName(L"Player");
+    AddObject(pPlayer1, GROUP_TYPE::PLAYER);
+    RegisterPlayer(1, pPlayer1);
 
 
     // Monster Object 추가
