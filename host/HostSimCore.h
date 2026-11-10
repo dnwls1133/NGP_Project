@@ -274,6 +274,21 @@ namespace host
             std::int32_t hp = 3,
             std::int32_t damage = 1)
         {
+
+            if (kind == protocol::NetObjectKind::PLAYER) {
+                if (ownerPlayerId >= protocol::MAX_PROTOCOL_PLAYERS
+                    || m_playerSlotObjectIds[ownerPlayerId] != 0) {
+                    return 0; // 잘못된 플레이어 슬롯이거나 이미 등록된 슬롯 거부
+                }
+                for (const HostObjectValue& pending : m_pendingSpawns) {
+                    if (pending.kind == protocol::NetObjectKind::PLAYER
+                        && pending.ownerPlayerId == ownerPlayerId) {
+                        return 0; // 같은 틱 내 중복 슬롯 생성 거부
+                    }
+                }
+            }
+
+
             const protocol::ObjectId assignedId = m_nextObjectId++;
 
             HostObjectValue obj{};
@@ -384,6 +399,16 @@ namespace host
         protocol::ObjectId GetPlayerSlotObjectId(protocol::PlayerSlot slot) const noexcept
         {
             return (slot < protocol::MAX_PROTOCOL_PLAYERS) ? m_playerSlotObjectIds[slot] : 0;
+        }
+
+        const HostObjectValue* FindObjectById(protocol::ObjectId objectId) const noexcept
+        {
+            for (const HostObjectValue& obj : m_objects) {
+                if (obj.objectId == objectId) {
+                    return &obj;
+                }
+            }
+            return nullptr;
         }
 
         std::uint8_t GetLastAppliedMoveBits(protocol::PlayerSlot slot) const noexcept

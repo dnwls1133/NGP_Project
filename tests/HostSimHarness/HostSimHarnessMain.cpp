@@ -260,6 +260,69 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1110Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 두 플레이어(P0, P1) 생성·슬롯 등록·ID 검증 및 잘못된/중복 슬롯 거부
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0,
+                FixedVec2{ 10'000, 50'000 });
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1,
+                FixedVec2{ 20'000, 50'000 });
+            const ObjectId dupP0 = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0,
+                FixedVec2{ 15'000, 50'000 });
+            const ObjectId badSlot = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 2,
+                FixedVec2{ 30'000, 50'000 });
+
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            Check(p0Id != 0
+                && p1Id != 0
+                && p0Id != p1Id
+                && dupP0 == 0
+                && badSlot == 0
+                && engine.GetPlayerSlotObjectId(0) == p0Id
+                && engine.GetPlayerSlotObjectId(1) == p1Id,
+                "HostSim1110: Spawns P0/P1 with distinct ObjectIds and rejects invalid or duplicate player slots",
+                counters);
+        }
+
+        // 2. 두 입력 스트림 독립 이동: P0 오른쪽(RIGHT), P1 왼쪽(LEFT) 입력 시 독립 이동 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0,
+                FixedVec2{ 10'000, 50'000 });
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1,
+                FixedVec2{ 20'000, 50'000 });
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            script.ScheduleInput(1, 0, MoveBit::RIGHT, 0, 1, 10);
+            script.ScheduleInput(1, 1, MoveBit::LEFT, 0, 1, 10);
+
+            engine.StepFrame(50'000, script, sink); // 50ms = 3틱 (1틱당 300 이동 -> 3틱 = 900)
+
+            const HostObjectValue* p0 = engine.FindObjectById(p0Id);
+            const HostObjectValue* p1 = engine.FindObjectById(p1Id);
+
+            Check(p0 != nullptr
+                && p1 != nullptr
+                && p0->pos.x == 10'900 // 10,000 + 900 (오른쪽)
+                && p1->pos.x == 19'100 // 20,000 - 900 (왼쪽)
+                && p0->pos.y == 50'000
+                && p1->pos.y == 50'000,
+                "HostSim1110: P0 moves right and P1 moves left independently from two input streams",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -269,6 +332,7 @@ int main()
     std::cout << "=== Virus Striker HostSimHarness (11/08 Fixed Tick & Lifecycle) ===\n";
     RunHostSim1108Suite(counters);
     RunHostSim1109Suite(counters);
+    RunHostSim1110Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';
