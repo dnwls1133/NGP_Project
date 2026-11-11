@@ -416,6 +416,44 @@ namespace host
             return (slot < protocol::MAX_PROTOCOL_PLAYERS) ? m_lastAppliedMoveBits[slot] : 0;
         }
 
+        std::uint8_t GetLastAppliedFireHeld(protocol::PlayerSlot slot) const noexcept
+        {
+            return (slot < protocol::MAX_PROTOCOL_PLAYERS) ? m_lastAppliedFireHeld[slot] : 0;
+        }
+
+        bool SetObjectHp(protocol::ObjectId objectId, std::int32_t newHp) noexcept
+        {
+            for (HostObjectValue& obj : m_objects) {
+                if (obj.objectId == objectId && !obj.pendingDestroy) {
+                    obj.hp = newHp;
+                    return true;
+                }
+             
+            }
+            return false;
+        }
+
+        // 11/11: 마지막 유효 입력 시각 기준 300ms 경과 시 이동·발사 중립화
+        // - 경계 직전(elapsedMs == 299): 유지
+        // - 정확한 경계(elapsedMs == 300) 및 직후(elapsedMs >= 301) :
+        // - moveBits = 0, fireHeld = 0로 중립화
+        void ApplyInputNeutralization(std::uint64_t nowMs) noexcept
+        {
+            for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS
+                ; ++slot)
+            {
+                if (m_hasValidInput[slot]
+                    && nowMs >= m_lastValidReceivedTimeMs[slot]
+                    && (nowMs - m_lastValidReceivedTimeMs[slot] >=
+                        INPUT_NEUTRAL_TIMEOUT_MS)) {
+                    m_lastAppliedMoveBits[slot] = protocol::MoveBit::NONE;
+                    m_lastAppliedFireHeld[slot] = 0;
+                }
+            }
+        }
+
+
+
         // 11/09: 승인 입력의 범위·수신 시각·순번 검사 및 채택 함수
         InputRejectReason SubmitPlayerInput(
             const protocol::PlayerInputPayload& payload,
@@ -571,6 +609,10 @@ namespace host
             {
                 SubmitPlayerInput(entry.payload, entry.receivedTimeMs);
             }
+
+            ApplyInputNeutralization((static_cast<std::uint64_t>(currentTick) *
+                1'000ULL) / SIM_TICK_HZ); // 11/11: 마지막 유효 입력 시각 기준 300ms 경과 시 이동·발사 중립화
+
 
             // Step 4: 고정 SIM_FIXED_DT(1/60초) 기준 이동 계산 (전역 fDT 미사용)
             // - 속도(vel)는 1/100 px/s 단위이므로, 60Hz 1틱당 위치 변화량은 vel / 60 이다.

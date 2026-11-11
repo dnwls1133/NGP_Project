@@ -198,9 +198,24 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
         }
     }
     else if (m_clear) {
-        vPos.y -= 300.f * fDT;
+        vPos.y -= 300.f * dt;
         SetPos(vPos);
     }
+}
+
+protocol::ObjectStateRecord CPlayer::ExportStateRecord(protocol::ObjectId objectId) const
+{
+    protocol::ObjectStateRecord rec{};
+    rec.objectId = objectId;
+    rec.kind = protocol::NetObjectKind::PLAYER;
+    rec.subType = static_cast<std::uint8_t>(m_iLvl);
+    rec.alive = (!m_dead && m_iHp > 0) ? 1 : 0;
+    rec.fsmState = m_clear ? 2 : (m_bHit ? 1 : 0);
+    rec.pos.x = static_cast<std::int32_t>(m_vPos.x * 100.f);
+    rec.pos.y = static_cast<std::int32_t>(m_vPos.y * 100.f);
+    rec.hp = m_iHp;
+    rec.maxHp = 3;
+    return rec;
 }
 
 void CPlayer::render(HDC _dc)

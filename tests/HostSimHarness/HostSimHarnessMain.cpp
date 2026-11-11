@@ -323,6 +323,71 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1111Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. 300ms 중립화 경계(직전 299ms / 정확한 경계 300ms / 직후 301ms) 및 무효·역순 입력 타이머 연장 불가 확인
+        {
+            HostSimEngine engine{ 1000 };
+            // t = 100ms에 유효 입력 채택 (RIGHT + 발사 유지)
+            engine.SubmitPlayerInput(PlayerInputPayload{ 0, MoveBit::RIGHT, 1, 0, 10 }, 100);
+            // t = 250ms에 역순(seq=9) 및 범위 오류(moveBits=0x80) 주입 -> 거부되어 타이머(100ms)가 연장되지 않아야 함
+            engine.SubmitPlayerInput(PlayerInputPayload{ 0, MoveBit::LEFT, 1, 0, 9 }, 250);
+            engine.SubmitPlayerInput(PlayerInputPayload{ 0, 0x80, 1, 0, 11 }, 250);
+            // 경계 직전: t = 399ms (경과 299ms) -> 입력 유지
+            engine.ApplyInputNeutralization(399);
+            const bool beforeBoundaryOk =
+                (engine.GetLastAppliedMoveBits(0) == MoveBit::RIGHT)
+                && (engine.GetLastAppliedFireHeld(0) == 1)
+                && (engine.GetLastValidReceivedTimeMs(0) == 100);
+            // 정확한 경계: t = 400ms (경과 300ms) -> 즉시 중립화 (moveBits = 0, fireHeld = 0)
+            engine.ApplyInputNeutralization(400);
+            const bool exactBoundaryOk =
+                (engine.GetLastAppliedMoveBits(0) == MoveBit::NONE)
+                && (engine.GetLastAppliedFireHeld(0) == 0);
+            // 경계 직후: t = 401ms (경과 301ms) -> 중립 상태 유지
+            engine.ApplyInputNeutralization(401);
+            const bool afterBoundaryOk =
+                (engine.GetLastAppliedMoveBits(0) == MoveBit::NONE)
+                && (engine.GetLastAppliedFireHeld(0) == 0);
+            Check(beforeBoundaryOk && exactBoundaryOk && afterBoundaryOk,
+                "HostSim1111: 300ms neutralization holds at 299ms, clears at 300ms/301ms, and ignores invalid inputs",
+                counters);
+        }
+        // 2. 기본 상태(위치/HP/alive) 추출 및 단일 조각 배치 미전송 교체 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 20'000 }, {}, 3);
+            engine.FlushLifecycleAtTickEnd(sink);
+            script.ScheduleInput(1, 0, MoveBit::RIGHT, 1, 1, 0);
+            // 첫 50ms(tick 3): 단일 조각 상태 배치 등록 (pos.x = 10,900, hp = 3)
+            engine.StepFrame(50'000, script, sink);
+            // P0 피격 가정(HP 3 -> 1) 후 다음 50ms(tick 6) 진행 -> 미전송 대기 배치가 최신 tick 6 배치로 교체됨
+            engine.SetObjectHp(p0Id, 1);
+            engine.StepFrame(50'000, script, sink);
+            const auto pending = sink.GetInnerFakeSink().TakePendingBatchForSend();
+            bool replacedOk = pending.has_value() && (pending->parts.size() == 1);
+            if (replacedOk)
+            {
+                const auto& snap = std::get<StateSnapshotPayload>(pending->parts[0].payload);
+                replacedOk =
+                    (snap.snapshotTick == 6)
+                    && (snap.partIndex == 0 && snap.partCount == 1)
+                    && (snap.objects.size() == 1)
+                    && (snap.objects[0].objectId == p0Id)
+                    && (snap.objects[0].pos.x == 11'800) // 10,000 + 6틱 * 300 = 11,800
+                    && (snap.objects[0].hp == 1)
+                    && (snap.objects[0].alive == 1);
+            }
+            Check(replacedOk,
+                "HostSim1111: Extracts position/HP state and replaces unsent single-part SnapshotBatch with latest tick",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -333,6 +398,7 @@ int main()
     RunHostSim1108Suite(counters);
     RunHostSim1109Suite(counters);
     RunHostSim1110Suite(counters);
+    RunHostSim1111Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';
