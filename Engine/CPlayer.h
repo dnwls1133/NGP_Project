@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "CObject.h"
+#include "../shared/protocol/ProtocolTypes.h"
 class CTexture;
 class CSound;
 class CPlayer :
@@ -17,6 +18,7 @@ private:
     int         m_iBoomb;
     bool        m_clear;
     bool        m_dead;
+    PlayerId    m_PlayerId = 0;
 
     CSound* m_pFireSE;
     CSound* m_pLvUpSE;
@@ -24,6 +26,11 @@ private:
 
 public:
     virtual void update();
+    void Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt);
+    void SetPlayerId(PlayerId id) { m_PlayerId = id; }
+    PlayerId GetPlayerId() { return m_PlayerId; }
+    protocol::ObjectStateRecord ExportStateRecord(protocol::ObjectId objectId) const;
+
     virtual void render(HDC _dc);
 
     int getHP() { return m_iHp; }
