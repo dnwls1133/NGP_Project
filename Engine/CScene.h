@@ -31,7 +31,7 @@ private: // 자식 클래스에게 멤버함수 권한 부여
 
     std::array<CPlayer*, MAX_PLAYERS> m_players{};
     CObject*         m_pBackground; // Background
-
+    std::uint32_t    m_nexObjectId = 1;
     
 	bool			 is_change;
 
@@ -39,11 +39,13 @@ protected:
     float            m_dAcc;
 public:
 	void SetName(const wstring& _strName) { m_strName = _strName; }
-	const wstring& GetName() { return m_strName; }
+    
+    const wstring& GetName() { return m_strName; }
 	UINT GetTileX() { return m_iTileX; }
 	UINT GetTileY() { return m_iTileY; }
 
     CPlayer* GetPlayer(PlayerId id) const;
+    CObject* FindObjectById(std::uint32_t objectId) const;
     CObject* GetBackground() { return m_pBackground; }
 
 	void SetChange() 
@@ -60,7 +62,7 @@ public:
 	virtual void Enter() = 0; // 해당 Scene 에 진입 시 호출
 	virtual void Exit() = 0; // 해당 Scenen 에 탈출 시 호출
 public:
-	void AddObject(CObject* _pObj, GROUP_TYPE _eType){m_arrObj[(UINT)_eType].push_back(_pObj);}
+    void AddObject(CObject* _pObj, GROUP_TYPE _eType);
     void RegisterPlayer(PlayerId id, CPlayer* player);
     void RegisterBackground(CObject* _pBackground) { m_pBackground = _pBackground; }
 
