@@ -13,6 +13,8 @@
 #include "TcpFramingTest.h"
 #include "TcpSendTest.h"
 #include "NetworkMgrTest.h"
+#include "PongTest.h"
+#include "SessionDataTest.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -87,7 +89,20 @@ namespace
             << "  NetHarness.exe session-bad-token-client <ip>\n"
             << "  NetHarness.exe session-room-test\n"
             << "  NetHarness.exe session-retry-client <ip>\n"
-            << "  NetHarness.exe session-connect-failure-client <ip>\n";
+            << "  NetHarness.exe session-connect-failure-client <ip>\n"
+            << "  NetHarness.exe flow-host\n"
+            << "  NetHarness.exe flow-client <Host-IP>\n";
+
+        std::cout
+            << "\nSession data test:\n"
+            << "  NetHarness.exe session-data-host\n"
+            << "  NetHarness.exe session-data-client <Host-IP>\n"
+            << "  NetHarness.exe session-data-compare <host-trace> <client-trace>\n";
+
+        std::cout
+            << "\nConcurrent queue test:\n"
+            << "  NetHarness.exe mgr-concurrent-host\n"
+            << "  NetHarness.exe mgr-concurrent-client <Host-IP>\n";
     }
 
     bool ParseCount(std::string_view text, std::uint32_t& out)
@@ -275,6 +290,30 @@ int main(int argc, char* argv[])
 
     if (argc == 3 && std::string_view(argv[1]) == "session-connect-failure-client")
         return network_mgr_test::RunSessionApproval(false, argv[2], TCP_PORT, UDP_PORT, network_mgr_test::SessionJoinTest::ConnectionRefused) ? 0 : 1;
+
+    if (argc == 2 && std::string_view(argv[1]) == "flow-host")
+        return network_mgr_test::Run(true, "", TCP_PORT, UDP_PORT, network_mgr_test::TestMode::GameFlow) ? 0 : 1;
+
+    if (argc == 3 && std::string_view(argv[1]) == "flow-client")
+        return network_mgr_test::Run(false, argv[2], TCP_PORT, UDP_PORT, network_mgr_test::TestMode::GameFlow) ? 0 : 1;
+
+    if (argc == 2 && std::string_view(argv[1]) == "pong")
+        return pong_test::Run(TCP_PORT, UDP_PORT) ? 0 : 1;
+
+    if (argc == 2 && std::string_view(argv[1]) == "session-data-host")
+        return session_data_test::Run(true, "", TCP_PORT, UDP_PORT) ? 0 : 1;
+
+    if (argc == 3 && std::string_view(argv[1]) == "session-data-client")
+        return session_data_test::Run(false, argv[2], TCP_PORT, UDP_PORT) ? 0 : 1;
+
+    if (argc == 4 && std::string_view(argv[1]) == "session-data-compare")
+        return session_data_test::Compare(argv[2], argv[3]) ? 0 : 1;
+
+    if (argc == 2 && std::string_view(argv[1]) == "mgr-concurrent-host")
+        return network_mgr_test::Run(true, "", TCP_PORT, UDP_PORT, network_mgr_test::TestMode::Concurrent) ? 0 : 1;
+
+    if (argc == 3 && std::string_view(argv[1]) == "mgr-concurrent-client")
+        return network_mgr_test::Run(false, argv[2], TCP_PORT, UDP_PORT, network_mgr_test::TestMode::Concurrent) ? 0 : 1;
 
     if (argc == 2)
     {
