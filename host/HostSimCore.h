@@ -29,6 +29,9 @@ namespace host
     // 마지막 유효 입력 후 중립화까지 허용 시간 (300ms)
     inline constexpr std::uint64_t INPUT_NEUTRAL_TIMEOUT_MS = 300;
 
+    // 플레이어 기본 발사 간격: 0.15초 = 60Hz 기준 9틱
+    inline constexpr std::uint32_t PLAYER_FIRE_INTERVAL_TICKS = 9;
+
     // 고정 틱 시뮬레이션 dt (전역 fDT와 분리된 호스트 계산 전용 고정 시간 간격)
     inline constexpr float SIM_FIXED_DT = 1.0f / static_cast<float>(SIM_TICK_HZ);
 
@@ -255,6 +258,7 @@ namespace host
             m_totalDestroyedCount = 0;
             m_lastAppliedMoveBits.fill(protocol::MoveBit::NONE);
             m_lastAppliedFireHeld.fill(0);
+            m_fireTickAccum.fill(0);
             m_hasValidInput.fill(false);
             m_lastAcceptedInputSeq.fill(0);
             m_lastValidReceivedTimeMs.fill(0);
@@ -637,6 +641,24 @@ namespace host
                     if ((bits & protocol::MoveBit::DOWN) != 0)  vy += PLAYER_SPEED_FIXED_PER_SEC;
 
                     obj.vel = protocol::FixedVec2{ vx, vy };
+
+                    if (m_lastAppliedFireHeld[obj.ownerPlayerId] != 0)
+                    {
+                        ++m_fireTickAccum[obj.ownerPlayerId];
+                        if (m_fireTickAccum[obj.ownerPlayerId] >= PLAYER_FIRE_INTERVAL_TICKS) {
+                            m_fireTickAccum[obj.ownerPlayerId] = 0;
+                            RequestSpawn(
+                                protocol::NetObjectKind::PROJ_PLAYER,
+                                obj.subType,
+                                obj.ownerPlayerId,
+                                obj.pos,
+                                protocol::FixedVec2{ 0, -150'000 },
+                                1,
+                                obj.damage);
+                        
+                        }
+                    }
+
                 }
 
                 obj.pos.x += (obj.vel.x / static_cast<std::int32_t>(SIM_TICK_HZ));
@@ -721,7 +743,7 @@ namespace host
         std::array<std::uint32_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAcceptedInputSeq{};
         std::array<std::uint64_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastValidReceivedTimeMs{};
         std::array<protocol::ObjectId, protocol::MAX_PROTOCOL_PLAYERS> m_playerSlotObjectIds{};
-        
+        std::array<std::uint32_t, protocol::MAX_PROTOCOL_PLAYERS> m_fireTickAccum{};
 
         std::vector<HostObjectValue> m_objects;
         std::vector<HostObjectValue> m_pendingSpawns;

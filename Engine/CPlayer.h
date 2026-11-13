@@ -42,6 +42,11 @@ public:
     void setclear() { m_clear = true; }
     void setdead() { m_dead = true; }
     int GetPlayerAtk() { return m_iAtk; }
+    void SetPlayerAtk(int _atk) { m_iAtk = _atk; }
+
+
+
+
 
     bool isMujeok = false;
 private:
