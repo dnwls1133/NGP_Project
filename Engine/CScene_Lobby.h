@@ -10,6 +10,7 @@
 #include "CScene.h"
 #include "CSessionMgr.h"
 
+class CMenuItem;
 class CTexture;
 class CSound;
 
@@ -29,6 +30,9 @@ public:
 private:
     CTexture* m_pBackground;
     CSound* m_pTheme;
+
+    CMenuItem* m_startButton;
+    CMenuItem* m_backButton;
 
     HFONT m_hFont;
 

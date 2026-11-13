@@ -27,13 +27,13 @@ void CScene_Lobby::Enter()
     inputRoomCode.clear();
     leavingLobby = false;
 
-    auto* backButton = new CMenuItem(
+    m_backButton = new CMenuItem(
         CResMgr::GetInst()->LoadTexture(L"Back Idle", L"texture\\Menu Items\\Go Back\\Sprite_Label_GoBack_0.png"),
         CResMgr::GetInst()->LoadTexture(L"Back Hover", L"texture\\Menu Items\\Go Back\\Sprite_Label_GoBack_1.png")
     );
-    backButton->SetPos(Vec2(940.0f, 770.0f));
-    backButton->SetScale(Vec2(210.0f, 70.0f));
-    backButton->SetClickedCallBack(
+    m_backButton->SetPos(Vec2(940.0f, 770.0f));
+    m_backButton->SetScale(Vec2(210.0f, 70.0f));
+    m_backButton->SetClickedCallBack(
         [](DWORD_PTR context, DWORD_PTR)
         {
             auto* lobby = reinterpret_cast<CScene_Lobby*>(context);
@@ -45,7 +45,7 @@ void CScene_Lobby::Enter()
         },
         reinterpret_cast<DWORD_PTR>(this), 0
     );
-    AddObject(backButton, GROUP_TYPE::UI);
+    AddObject(m_backButton, GROUP_TYPE::UI);
 
     // 배경 로드
     {
@@ -170,6 +170,13 @@ void CScene_Lobby::update()
 
             std::cout << "[HOST] START requested. result=" << static_cast<int>(result) << '\n';
         }
+    }
+
+    if (session.GetState() == network::SessionState::Started)
+    {
+        leavingLobby = true;
+        ChangeScene(SCENE_TYPE::STAGE_01);
+        return;
     }
 }
 
@@ -301,8 +308,6 @@ void CScene_Lobby::render(HDC _dc)
             static_cast<LONG>(resolution.y * 0.59f)
         };
 
-        
-
         LPCTSTR message = session.IsHost()
             ? TEXT("함께할 유저에게 코드를 공유하세요!")
             : TEXT("함께할 유저의 코드를 입력해주세요");
@@ -325,12 +330,56 @@ void CScene_Lobby::render(HDC _dc)
         if (session.IsHost())
         {
             // Client 레디 상태 표시
-            // session.IsClientReady()이면 시작 입력 활성화
+            if (session.IsClientReady())
+            {
+                if (m_backButton)
+                {
+                    DeleteObject(m_backButton);
+                    m_backButton = nullptr;
+                }
+
+                if (!m_startButton)
+                {
+                    m_startButton = new CMenuItem(
+                        CResMgr::GetInst()->LoadTexture(L"Start Idle", L"texture\\Menu Items\\Start Game\\Sprite_Label_StartGame_0.png"),
+                        CResMgr::GetInst()->LoadTexture(L"Start Hover", L"texture\\Menu Items\\Start Game\\Sprite_Label_StartGame_1.png")
+                    );
+                    m_startButton->SetPos(Vec2(940.0f, 770.0f));
+                    m_startButton->SetScale(Vec2(210.0f, 70.0f));
+                    m_startButton->SetClickedCallBack(
+                        [](DWORD_PTR context, DWORD_PTR)
+                        {
+                            CCore::GetInst()->GetSession().RequestLoad();
+                        },
+                        reinterpret_cast<DWORD_PTR>(this), 0
+                    );
+                    AddObject(m_startButton, GROUP_TYPE::UI);
+                }
+            }
         }
         else
         {
-            // 레디 입력 활성화
-            // session.RequestReady(true) 호출
+            session.RequestReady(true);
+
+            SetBkMode(_dc, TRANSPARENT);
+            SetTextColor(_dc, RGB(0, 255, 0));
+            HFONT hOld = (HFONT)SelectObject(_dc, m_hFont);
+            const Vec2 resolution = CCore::GetInst()->GetResolution();
+            RECT readyRect = {
+                static_cast<LONG>(resolution.x * 0.1f),
+                static_cast<LONG>(resolution.y * 0.65f),
+                static_cast<LONG>(resolution.x * 0.9f),
+                static_cast<LONG>(resolution.y * 0.73f)
+            };
+            LPCTSTR readyMessage = TEXT("유저의 선택을 기다리는 중...");
+            DrawText(_dc, readyMessage, -1, &readyRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            SelectObject(_dc, hOld);
+
+            if (m_backButton)
+            {
+                DeleteObject(m_backButton);
+                m_backButton = nullptr;
+            }
         }
     }
 

@@ -25,6 +25,8 @@
 #include "CAnimator.h"
 #include "CAnimation.h"
 
+#include "../shared/protocol/ProtocolTypes.h"
+
 CPlayer::CPlayer()
 	:dAcc(0.)
 	,m_iHp(3)
@@ -69,208 +71,136 @@ CPlayer::~CPlayer()
 }
 void CPlayer::update()
 {
-	Vec2 vPos = GetPos();
+    std::uint8_t moveBits = protocol::MoveBit::NONE;
+    std::uint8_t fireHeld = 0;
+
+    // 11/10: 로컬 슬롯(0) 임시 키 수집 (11/14 통합 시 이현범 담당 BuildInput/호스트 루프로 연결)
+    if (m_PlayerId == 0)
+    {
+        if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
+        if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
+        if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
+        if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
+        if (KEY_HOLD(KEY::S)) fireHeld = 1;
+        if (KEY_TAP(KEY::L)) m_iLvl = 5;
+    }
+   
+    Simulate(moveBits, fireHeld, fDT);
+	
+	
+	//GetAnimator()->update();
+}
+
+void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
+{
+    Vec2 vPos = GetPos();
     CBackground* back = (CBackground*)CSceneMgr::GetInst()->GetCurScene()->GetBackground();
     Vec2 vBackpos = back->GetPos();
     Vec2 vBackScale = back->GetScale();
+
+    auto ApplyMove = [&]()
+        {
+            if ((moveBits & protocol::MoveBit::UP) != 0
+                && vPos.y >= vBackpos.y - vBackScale.y / 2.f)
+                vPos.y -= 300.f * dt;
+            if ((moveBits & protocol::MoveBit::DOWN) != 0
+                && vPos.y <= vBackpos.y + vBackScale.y / 2.f)
+                vPos.y += 300.f * dt;
+            if ((moveBits & protocol::MoveBit::LEFT) != 0
+                && vPos.x >= vBackpos.x - vBackScale.x / 2.f)
+                vPos.x -= 300.f * dt;
+            if ((moveBits & protocol::MoveBit::RIGHT) != 0
+                && vPos.x <= vBackpos.x + vBackScale.x / 2.f)
+                vPos.x += 300.f * dt;
+        };
+
     if (!m_clear && !m_dead)
     {
         if (dStartAcc > 0.f)
         {
-            dStartAcc -= fDT;
-            vPos.y -= 100.f * fDT;
+            dStartAcc -= dt;
+            vPos.y -= 100.f * dt;
             SetPos(vPos);
         }
-        else
+        else if (m_bHit)
         {
-            if (m_bHit == true)
+            dAcc += dt;
+            if (dAcc < 1.5f) {
+                vPos.y -= 300.f * dt;
+            }
+            else {
+                ApplyMove();
+            }
+
+            if (dAcc > 2.f) {
+                dAcc = 0;
+                GetAnimator()->LoadAnimation(L"animation\\player_walk_left.anim");
+                GetAnimator()->Play(L"Player_walk", true);
+                SetCollideron();
+                m_bHit = false;
+            }
+            SetPos(vPos);
+        }
+        else {
+            ApplyMove();
+
+            if (fireHeld != 0)
             {
-                dAcc += fDT;
-                if (dAcc < 1.5f)
-                {
-                    vPos.y -= 300.f * fDT;
-                }
-                else
-                {
-                    if (KEY_HOLD(KEY::UP))
-                    {
-                        if (vPos.y >= vBackpos.y - vBackScale.y / 2.f)
-                        {
-                            vPos.y -= 300.f * fDT;
-                        }
-
-                    }
-                    if (KEY_HOLD(KEY::DOWN))
-                    {
-                        if (vPos.y <= vBackpos.y + vBackScale.y / 2.f)
-                        {
-                            vPos.y += 300.f * fDT;
-                        }
-
-                    }
-                    if (KEY_HOLD(KEY::LEFT))
-                    {
-                        if (vPos.x >= vBackpos.x - vBackScale.x / 2.f)
-                        {
-                            vPos.x -= 300.f * fDT;
-                        }
-
-                    }
-                    if (KEY_HOLD(KEY::RIGHT))
-                    {
-                        if (vPos.x <= vBackpos.x + vBackScale.x / 2.f)
-                        {
-                            vPos.x += 300.f * fDT;
-                        }
-
-                    }
-
-                }
-                if (dAcc > 2.f)
+                dAcc += dt;
+                if (dAcc > 0.15f)
                 {
                     dAcc = 0;
-                    GetAnimator()->LoadAnimation(L"animation\\player_walk_left.anim");
-                    GetAnimator()->Play(L"Player_walk", true);
-                    SetCollideron();
-                    m_bHit = false;
-                }
-                SetPos(vPos);
-
-            }
-            else
-            {
-                if (KEY_HOLD(KEY::UP))
-                {
-                    if (vPos.y >= vBackpos.y - vBackScale.y/2.f)
-                    {
-                        vPos.y -= 300.f * fDT;
-                    }
-                   
-                }
-                if (KEY_HOLD(KEY::DOWN))
-                {
-                    if (vPos.y <= vBackpos.y + vBackScale.y / 2.f)
-                    {
-                        vPos.y += 300.f * fDT;
-                    }
-                    
-                }
-                if (KEY_HOLD(KEY::LEFT))
-                {
-                    if (vPos.x >= vBackpos.x - vBackScale.x / 2.f)
-                    {
-                        vPos.x -= 300.f * fDT;
-                    }
-                    
-                }
-                if (KEY_HOLD(KEY::RIGHT))
-                {
-                    if (vPos.x <= vBackpos.x + vBackScale.x / 2.f)
-                    {
-                        vPos.x += 300.f * fDT;
-                    }
-                    
-                }
-                if (KEY_TAP(KEY::L))
-                {
-                    m_iLvl = 5;
-                }
-                if (KEY_HOLD((KEY::S)))
-                {
-                    dAcc += fDT;
                     switch (m_iLvl)
                     {
                     case 1:
-                    {
-                        if (dAcc > 0.15f)
-                        {
-                            dAcc = 0;
-                            CreateMissile(0, 1500.f, MISSILE_TYPE::LVL1);
-                            CSoundMgr::GetInst()->PlaySE(m_pFireSE);
-                        }
-                    }
-                    break;
+                        CreateMissile(0, 1500.f, MISSILE_TYPE::LVL1);
+                        break;
                     case 2:
-                    {
-                        if (dAcc > 0.15f)
-                        {
-                            dAcc = 0;
-                            CreateMissile(0, 1500.f, MISSILE_TYPE::LVL1);
-                            CreateMissile(1, 1500.f, MISSILE_TYPE::LVL1);
-                            CreateMissile(2, 1500.f, MISSILE_TYPE::LVL1);
-                            CreateMissile(3, 1500.f, MISSILE_TYPE::LVL4);
-                            CreateMissile(4, 1500.f, MISSILE_TYPE::LVL4);
-                            CSoundMgr::GetInst()->PlaySE(m_pFireSE);
-                        }
-                    }
-                    break;
+                        CreateMissile(0, 1500.f, MISSILE_TYPE::LVL1);
+                        CreateMissile(1, 1500.f, MISSILE_TYPE::LVL1);
+                        CreateMissile(2, 1500.f, MISSILE_TYPE::LVL1);
+                        CreateMissile(3, 1500.f, MISSILE_TYPE::LVL4);
+                        CreateMissile(4, 1500.f, MISSILE_TYPE::LVL4);
+                        break;
                     case 3:
-                    {
-                        if (dAcc > 0.15f)
-                        {
-                            dAcc = 0;
-                            CreateMissile(0, 1700.f, MISSILE_TYPE::LVL2);
-                            CreateMissile(0, 1700.f, MISSILE_TYPE::LVL2);
-                            CreateMissile(1, 1700.f, MISSILE_TYPE::LVL5);
-                            CreateMissile(2, 1700.f, MISSILE_TYPE::LVL5);
-                            CreateMissile(3, 1700.f, MISSILE_TYPE::LVL5);
-                            CreateMissile(4, 1700.f, MISSILE_TYPE::LVL5);
-                            CSoundMgr::GetInst()->PlaySE(m_pFireSE);
-                        }
-                    }
-                    break;
+                        CreateMissile(0, 1700.f, MISSILE_TYPE::LVL2);
+                        CreateMissile(0, 1700.f, MISSILE_TYPE::LVL2);
+                        CreateMissile(1, 1700.f, MISSILE_TYPE::LVL5);
+                        CreateMissile(2, 1700.f, MISSILE_TYPE::LVL5);
+                        CreateMissile(3, 1700.f, MISSILE_TYPE::LVL5);
+                        CreateMissile(4, 1700.f, MISSILE_TYPE::LVL5);
+                        break;
                     case 4:
-                    {
-                        if (dAcc > 0.15f)
-                        {
-                            dAcc = 0;
-                            CreateMissile(0, 1700.f, MISSILE_TYPE::LVL3);
-                            CreateMissile(1, 1700.f, MISSILE_TYPE::LVL6);
-                            CreateMissile(2, 1700.f, MISSILE_TYPE::LVL6);
-                            CreateMissile(3, 1700.f, MISSILE_TYPE::LVL6);
-                            CreateMissile(4, 1700.f, MISSILE_TYPE::LVL6);
-                            CreateMissile(5, 1700.f, MISSILE_TYPE::LVL6);
-                            CreateMissile(6, 1700.f, MISSILE_TYPE::LVL6);
-                            CSoundMgr::GetInst()->PlaySE(m_pFireSE);
-                        }
-                    }
-                    break;
+                        CreateMissile(0, 1700.f, MISSILE_TYPE::LVL3);
+                        CreateMissile(1, 1700.f, MISSILE_TYPE::LVL6);
+                        CreateMissile(2, 1700.f, MISSILE_TYPE::LVL6);
+                        CreateMissile(3, 1700.f, MISSILE_TYPE::LVL6);
+                        CreateMissile(4, 1700.f, MISSILE_TYPE::LVL6);
+                        CreateMissile(5, 1700.f, MISSILE_TYPE::LVL6);
+                        CreateMissile(6, 1700.f, MISSILE_TYPE::LVL6);
+                        break;
                     case 5:
-                    {
-                        if (dAcc > 0.15f)
-                        {
-                            dAcc = 0;
-
-                            CreateMissile(1, 1700.f, MISSILE_TYPE::LVL3);
-                            CreateMissile(2, 1700.f, MISSILE_TYPE::LVL3);
-                            CreateMissile(0, 1700.f, MISSILE_TYPE::LVL3);
-                            CreateMissile(3, 1700.f, MISSILE_TYPE::LVL6);
-                            CreateMissile(4, 1700.f, MISSILE_TYPE::LVL6);
-                            CreateMissile(5, 1700.f, MISSILE_TYPE::LVL6);
-                            CreateMissile(6, 1700.f, MISSILE_TYPE::LVL6);
-                            CreateMissile(7, 1700.f, MISSILE_TYPE::LVL6);
-                            CreateMissile(8, 1700.f, MISSILE_TYPE::LVL6);
-                            CSoundMgr::GetInst()->PlaySE(m_pFireSE);
-                        }
+                        CreateMissile(1, 1700.f, MISSILE_TYPE::LVL3);
+                        CreateMissile(2, 1700.f, MISSILE_TYPE::LVL3);
+                        CreateMissile(0, 1700.f, MISSILE_TYPE::LVL3);
+                        CreateMissile(3, 1700.f, MISSILE_TYPE::LVL6);
+                        CreateMissile(4, 1700.f, MISSILE_TYPE::LVL6);
+                        CreateMissile(5, 1700.f, MISSILE_TYPE::LVL6);
+                        CreateMissile(6, 1700.f, MISSILE_TYPE::LVL6);
+                        CreateMissile(7, 1700.f, MISSILE_TYPE::LVL6);
+                        CreateMissile(8, 1700.f, MISSILE_TYPE::LVL6);
+                        break;
                     }
-                    break;
-                    }
-
-                   
+                    CSoundMgr::GetInst()->PlaySE(m_pFireSE);
                 }
-                SetPos(vPos);
             }
+            SetPos(vPos);
         }
     }
-    else if(m_clear) {
+    else if (m_clear) {
         vPos.y -= 300.f * fDT;
         SetPos(vPos);
     }
-   
-  
-	
-	
-	//GetAnimator()->update();
 }
 
 void CPlayer::render(HDC _dc)

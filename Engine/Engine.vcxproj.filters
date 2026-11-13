@@ -182,6 +182,15 @@
     <Filter Include="Engine\03.Manager\SessionMgr">
       <UniqueIdentifier>{ed163e65-0cef-4df1-8036-eac8c4dd2aef}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\03.Manager\RankMgr">
+      <UniqueIdentifier>{f428384e-dbce-430b-8e2d-1f0ac33de800}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\03.Manager\SoundMgr">
+      <UniqueIdentifier>{9f4be7e5-968c-4536-b83d-9df761c565ed}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\04.Object\Background\LoadingBackground">
+      <UniqueIdentifier>{b2cdc641-1acf-4979-b7ef-e3ef322172ae}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CCore.h">
@@ -205,7 +214,9 @@
     <ClInclude Include="CKeyMgr.h">
       <Filter>Engine\03.Manager\KeyMgr</Filter>
     </ClInclude>
-    <ClInclude Include="pch.h" />
+    <ClInclude Include="pch.h">
+      <Filter>Defalut</Filter>
+    </ClInclude>
     <ClInclude Include="CObject.h">
       <Filter>Engine\04.Object</Filter>
     </ClInclude>
@@ -296,7 +307,9 @@
     <ClInclude Include="CBtnUI.h">
       <Filter>Engine\04.Object\UI\ButtonUI</Filter>
     </ClInclude>
-    <ClInclude Include="CTitleLogo.h" />
+    <ClInclude Include="CTitleLogo.h">
+      <Filter>Engine\05.Scene\Scene_Title</Filter>
+    </ClInclude>
     <ClInclude Include="CScene_Title.h">
       <Filter>Engine\05.Scene\Scene_Title</Filter>
     </ClInclude>
@@ -330,8 +343,12 @@
     <ClInclude Include="CDeadState.h">
       <Filter>Engine\08. Module\AI\State\Dead</Filter>
     </ClInclude>
-    <ClInclude Include="CMenuItem.h" />
-    <ClInclude Include="CSoundMgr.h" />
+    <ClInclude Include="CMenuItem.h">
+      <Filter>Engine\04.Object\UI\ButtonUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CSoundMgr.h">
+      <Filter>Engine\03.Manager\SoundMgr</Filter>
+    </ClInclude>
     <ClInclude Include="CPatorl1State.h">
       <Filter>Engine\08. Module\AI\State\Patrol</Filter>
     </ClInclude>
@@ -365,19 +382,27 @@
     <ClInclude Include="CExposion.h">
       <Filter>Engine\04.Object\Monster\Eenemis</Filter>
     </ClInclude>
-    <ClInclude Include="CRankMgr.h" />
+    <ClInclude Include="CRankMgr.h">
+      <Filter>Engine\03.Manager\RankMgr</Filter>
+    </ClInclude>
     <ClInclude Include="CScene_Ranking.h">
       <Filter>Engine\05.Scene\Scene_Ranking</Filter>
     </ClInclude>
     <ClInclude Include="CScene_Credits.h">
       <Filter>Engine\05.Scene\Scene_Credits</Filter>
     </ClInclude>
-    <ClInclude Include="CStageHUD.h" />
+    <ClInclude Include="CStageHUD.h">
+      <Filter>Engine\05.Scene\Scene_Stage01</Filter>
+    </ClInclude>
     <ClInclude Include="CScene_Manual.h">
       <Filter>Engine\05.Scene\Scene_Menuel</Filter>
     </ClInclude>
-    <ClInclude Include="CStageCard.h" />
-    <ClInclude Include="CTitleMenu.hpp" />
+    <ClInclude Include="CStageCard.h">
+      <Filter>Engine\05.Scene\Scene_Stage01</Filter>
+    </ClInclude>
+    <ClInclude Include="CTitleMenu.hpp">
+      <Filter>Engine\05.Scene\Scene_Title</Filter>
+    </ClInclude>
     <ClInclude Include="..\shared\protocol\ProtocolTypes.h">
       <Filter>shared</Filter>
     </ClInclude>
@@ -396,7 +421,9 @@
     <ClInclude Include="NetworkTypes.h">
       <Filter>Engine\01.Header</Filter>
     </ClInclude>
-    <ClInclude Include="CLoadingBackground.h" />
+    <ClInclude Include="CLoadingBackground.h">
+      <Filter>Engine\04.Object\Background\LoadingBackground</Filter>
+    </ClInclude>
     <ClInclude Include="MissileMgr.h">
       <Filter>Engine\03.Manager\MissileMgr</Filter>
     </ClInclude>
@@ -418,7 +445,9 @@
     </Image>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Engine.cpp" />
+    <ClCompile Include="Engine.cpp">
+      <Filter>Defalut</Filter>
+    </ClCompile>
     <ClCompile Include="CCore.cpp">
       <Filter>Engine\02.Core</Filter>
     </ClCompile>
@@ -512,7 +541,9 @@
     <ClCompile Include="CBtnUI.cpp">
       <Filter>Engine\04.Object\UI\ButtonUI</Filter>
     </ClCompile>
-    <ClCompile Include="CTitleLogo.cpp" />
+    <ClCompile Include="CTitleLogo.cpp">
+      <Filter>Engine\05.Scene\Scene_Title</Filter>
+    </ClCompile>
     <ClCompile Include="CScene_Title.cpp">
       <Filter>Engine\05.Scene\Scene_Title</Filter>
     </ClCompile>
@@ -546,8 +577,12 @@
     <ClCompile Include="CDeadState.cpp">
       <Filter>Engine\08. Module\AI\State\Dead</Filter>
     </ClCompile>
-    <ClCompile Include="CMenuItem.cpp" />
-    <ClCompile Include="CSoundMgr.cpp" />
+    <ClCompile Include="CMenuItem.cpp">
+      <Filter>Engine\04.Object\UI\ButtonUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CSoundMgr.cpp">
+      <Filter>Engine\03.Manager\SoundMgr</Filter>
+    </ClCompile>
     <ClCompile Include="CPatorl1State.cpp">
       <Filter>Engine\08. Module\AI\State\Patrol</Filter>
     </ClCompile>
@@ -581,7 +616,9 @@
     <ClCompile Include="CExposion.cpp">
       <Filter>Engine\04.Object\Monster\Eenemis</Filter>
     </ClCompile>
-    <ClCompile Include="CRankMgr.cpp" />
+    <ClCompile Include="CRankMgr.cpp">
+      <Filter>Engine\03.Manager\RankMgr</Filter>
+    </ClCompile>
     <ClCompile Include="CScene_Ranking.cpp">
       <Filter>Engine\05.Scene\Scene_Ranking</Filter>
     </ClCompile>
@@ -591,9 +628,15 @@
     <ClCompile Include="CScene_Manual.cpp">
       <Filter>Engine\05.Scene\Scene_Menuel</Filter>
     </ClCompile>
-    <ClCompile Include="CStageHUD.cpp" />
-    <ClCompile Include="CStageCard.cpp" />
-    <ClCompile Include="pch.cpp" />
+    <ClCompile Include="CStageHUD.cpp">
+      <Filter>Engine\05.Scene\Scene_Stage01</Filter>
+    </ClCompile>
+    <ClCompile Include="CStageCard.cpp">
+      <Filter>Engine\05.Scene\Scene_Stage01</Filter>
+    </ClCompile>
+    <ClCompile Include="pch.cpp">
+      <Filter>Defalut</Filter>
+    </ClCompile>
     <ClCompile Include="..\shared\protocol\PacketCodec.cpp">
       <Filter>shared</Filter>
     </ClCompile>
@@ -603,7 +646,9 @@
     <ClCompile Include="CNetworkMgr.cpp">
       <Filter>Engine\03.Manager\NetworkMgr</Filter>
     </ClCompile>
-    <ClCompile Include="CLoadingBackground.cpp" />
+    <ClCompile Include="CLoadingBackground.cpp">
+      <Filter>Engine\04.Object\Background\LoadingBackground</Filter>
+    </ClCompile>
     <ClCompile Include="MissileMgr.cpp">
       <Filter>Engine\03.Manager\MissileMgr</Filter>
     </ClCompile>

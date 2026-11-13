@@ -17,6 +17,7 @@ private:
     int         m_iBoomb;
     bool        m_clear;
     bool        m_dead;
+    PlayerId    m_PlayerId;
 
     CSound* m_pFireSE;
     CSound* m_pLvUpSE;
@@ -24,6 +25,9 @@ private:
 
 public:
     virtual void update();
+    void Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt);
+    void SetPlayerId(PlayerId id) { m_PlayerId = id; }
+    PlayerId GetPlayerId() { return m_PlayerId; }
     virtual void render(HDC _dc);
 
     int getHP() { return m_iHp; }
