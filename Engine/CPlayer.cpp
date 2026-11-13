@@ -1,13 +1,14 @@
 ﻿#include "pch.h"
 #include "CPlayer.h"
 
-
+#include "CCore.h"
 #include "CSceneMgr.h"
 #include "CKeyMgr.h"
 #include "CTimeMgr.h"
 #include "CPathMgr.h"
 #include "CResMgr.h"
 #include "CSoundMgr.h"
+#include "CSessionMgr.h"
 
 
 #include "CScene.h"
@@ -71,21 +72,32 @@ CPlayer::~CPlayer()
 }
 void CPlayer::update()
 {
-    std::uint8_t moveBits = protocol::MoveBit::NONE;
-    std::uint8_t fireHeld = 0;
-
-    // 11/10: 로컬 슬롯(0) 임시 키 수집 (11/14 통합 시 이현범 담당 BuildInput/호스트 루프로 연결)
-    if (m_PlayerId == 0)
+    auto& session = CCore::GetInst()->GetSession();
+    if (session.IsHost())
     {
-        if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
-        if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
-        if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
-        if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
-        if (KEY_HOLD(KEY::S)) fireHeld = 1;
-        if (KEY_TAP(KEY::L)) m_iLvl = 5;
+
     }
-   
-    Simulate(moveBits, fireHeld, fDT);
+    else
+    {
+        /*
+        std::uint8_t moveBits = protocol::MoveBit::NONE;
+        std::uint8_t fireHeld = 0;
+
+        // 11/10: 로컬 슬롯(0) 임시 키 수집 (11/14 통합 시 이현범 담당 BuildInput/호스트 루프로 연결)
+        if (m_PlayerId == 0)
+        {
+            if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
+            if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
+            if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
+            if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
+            if (KEY_HOLD(KEY::S)) fireHeld = 1;
+            if (KEY_TAP(KEY::L)) m_iLvl = 5;
+        }
+
+        Simulate(moveBits, fireHeld, fDT);
+        */
+    }
+    
 	
 	
 	//GetAnimator()->update();

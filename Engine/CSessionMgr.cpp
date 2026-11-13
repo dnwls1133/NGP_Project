@@ -511,6 +511,7 @@ namespace network
         peerTcpAddress = {};
         peerUdpAddress = {};
         gameReceiveQueue.clear();
+        playerInputSequence = 0;
     }
 
     void CSessionMgr::SendUdpRegister()
@@ -769,6 +770,29 @@ namespace network
         return network.EnqueueSnapshotBatch(batch);
     }
 
+    net::SendResult CSessionMgr::SendPlayerInput(std::uint8_t moveBits, std::uint8_t fireHeld)
+    {
+        if (state != SessionState::Started)
+            return net::SendResult::NotRunning;
+
+        if (IsHost())
+            return net::SendResult::InvalidRequest;
+
+        protocol::PlayerInputPayload input{};
+        input.playerId = GetLocalPlayerId();
+        input.moveBits = moveBits;
+        input.fireHeld = fireHeld;
+        input.inputSequence = ++playerInputSequence;
+
+        protocol::Message message{};
+        message.header.type = protocol::MessageType::PLAYER_INPUT;
+        message.header.sessionId = sessionId;
+        message.header.sequence = input.inputSequence;
+        message.payload = input;
+
+        return EnqueueSend(net::Channel::Udp, message);
+    }
+
     bool CSessionMgr::TryReceiveGame(ReceivedMessage& out)
     {
         if (state != SessionState::Started || gameReceiveQueue.empty())
@@ -777,6 +801,23 @@ namespace network
         out = std::move(gameReceiveQueue.front());
         gameReceiveQueue.pop_front();
 
+        return true;
+    }
+
+    bool CSessionMgr::TryReceivePlayerInput(protocol::PlayerInputPayload& outInput, std::uint64_t& outReceivedTimeMs)
+    {
+        if (!IsHost() || state != SessionState::Started || gameReceiveQueue.empty())
+            return false;
+
+        const auto& received = gameReceiveQueue.front();
+        const auto* input = std::get_if<protocol::PlayerInputPayload>(&received.message.payload);
+
+        if (!input)
+            return false;
+
+        outInput = *input;
+        outReceivedTimeMs = received.receivedTimeMs;
+        gameReceiveQueue.pop_front();
         return true;
     }
 

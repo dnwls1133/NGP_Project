@@ -977,7 +977,7 @@ namespace network
         }
 
         const auto byteCount = static_cast<std::size_t>(received);
-
+        const auto receivedTimeMs = static_cast<std::uint64_t>( std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now().time_since_epoch()).count());
         if (byteCount < protocol::HEADER_BYTES || byteCount > protocol::MAX_UDP_BYTES)
             return;
 
@@ -990,7 +990,7 @@ namespace network
         if (!protocol::IsUdpMessageType(message.header.type))
             return;
 
-        PushReceived(ReceivedMessage{ TransportType::UDP, sender, std::move(message) });
+        PushReceived(ReceivedMessage{ TransportType::UDP, sender, std::move(message), receivedTimeMs });
     }
 
     bool CNetworkMgr::IsReceiveQueueFullLocked() const

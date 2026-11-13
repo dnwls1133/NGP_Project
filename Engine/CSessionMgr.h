@@ -75,8 +75,10 @@ namespace network
 
         net::SendResult EnqueueSend(net::Channel channel, const protocol::Message& message);
         net::SendResult EnqueueSnapshotBatch(const net::SnapshotBatch& batch);
+        net::SendResult SendPlayerInput(std::uint8_t moveBits, std::uint8_t fireHeld);
 
         bool TryReceiveGame(network::ReceivedMessage& out);
+        bool TryReceivePlayerInput(protocol::PlayerInputPayload& outInput, std::uint64_t& outReceivedTimeMs);
     private:
         void BeginSession(NetworkRole newRole);
         void HandleNetworkEvent(const NetworkEvent& event);
@@ -121,6 +123,6 @@ namespace network
         protocol::PlayerSlot clientSlot = protocol::INVALID_PLAYER_SLOT;
         protocol::RejectReason rejectReason = protocol::RejectReason::NONE;
 
-
+        std::uint32_t playerInputSequence = 0;
     };
 }
