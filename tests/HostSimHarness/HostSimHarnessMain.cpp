@@ -388,6 +388,149 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1112Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. ObjectId 할당/조회/제거 및 같은 세션 내 ID 재사용 금지 확인
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId id1 = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT,
+                FixedVec2{ 1'000, 1'000 });
+            const ObjectId id2 = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT,
+                FixedVec2{ 2'000, 2'000 });
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // id1 삭제 후 새 객체 id3 생성 -> 삭제된 id1(1)을 재사용하지 않고 3이 할당되어야 함
+            engine.RequestDestroy(id1, DespawnReason::DESTROYED);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            const ObjectId id3 = engine.RequestSpawn(NetObjectKind::ITEM, 1, INVALID_PLAYER_SLOT,
+                FixedVec2{ 3'000, 3'000 });
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            Check(id1 == 1 && id2 == 2 && id3 == 3
+                && engine.FindObjectById(id1) == nullptr
+                && engine.FindObjectById(id2) != nullptr
+                && engine.FindObjectById(id3) != nullptr,
+                "HostSim1112: ObjectId asslocation/lookup/removal never reuses destryoed IDs in the same session",
+                counters);
+
+        }
+
+        // 2. 순회 중 해제 없음, 중복 삭제 요청시 해제 1회, 플레이어 슬롯 참조 정리 확인
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER
+                , 1, 0, FixedVec2{ 10'000, 20'000 });
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // 활성 객체 순회 도중 동일 객체 삭제 요청 2회 -> 첫 요청만 채택되고 순회 중 컨테이너 크기는 유지됨
+            bool firstReq = false;
+            bool secondReq = true;
+            for (const HostObjectValue& obj : engine.GetActiveObjects()) {
+                if (obj.objectId == p0Id) {
+                    firstReq = engine.RequestDestroy(obj.objectId, DespawnReason::DESTROYED);
+                    secondReq = engine.RequestDestroy(obj.objectId, DespawnReason::DESTROYED);
+                }
+            }
+            const bool keptDuringIteration = (engine.GetActiveObjects().size() == 1);
+
+            // 틱 종료 경계에서 1회만 해제되고 슬롯 참조가 0으로 정리되며, 바로 새 P0 생성이 가능해야 함.
+            engine.FlushLifecycleAtTickEnd(sink);
+            const ObjectId newP0Id = engine.RequestSpawn(NetObjectKind::PLAYER,
+                1, 0, FixedVec2{ 10'000, 20'000 });
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            Check(firstReq && !secondReq && keptDuringIteration
+                && engine.GetTotalDestroyedCount() == 1
+                && newP0Id == 2
+                && engine.GetPlayerSlotObjectId(0) == newP0Id,
+                "HostSim1112: Duplicate destroy frees once at tick-end without mutating during iteration and clears player slot",
+                counters);
+
+        }
+    }
+
+    void RunHostSim1113Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 서로 다른 플레이어(P0 damamge=2, P1 damage=5)의 발사자 ID와 피해량 보존 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 50'000 }, {}, 3,2);
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 50'000 }, {}, 3,5);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            script.ScheduleInput(1, 0, MoveBit::RIGHT, 1, 1, 0);
+            script.ScheduleInput(1, 1, MoveBit::LEFT, 1, 1, 0);
+
+            // 150ms(9틱)를 75ms 두 프레임으로 진행 -> 9번째 틱에서 각 플레이어 탄환 1발씩 생성
+            engine.StepFrame(75'000, script, sink);
+            engine.StepFrame(75'000, script, sink);
+
+            int p0ProjDamage = 0;
+            int p1ProjDamage = 0;
+            for (const HostObjectValue& obj : engine.GetActiveObjects()) {
+                if (obj.kind == NetObjectKind::PROJ_PLAYER) {
+                    if (obj.ownerPlayerId == 0) p0ProjDamage = obj.damage;
+                    if (obj.ownerPlayerId == 1) p1ProjDamage = obj.damage;
+                }
+            }
+            Check(p0ProjDamage == 2 && p1ProjDamage == 5,
+                "HostSim1113: Preserves distinct ownerPlayerId and damage (P0=2, P1=5) on spawned projectiles",
+                counters);
+        }
+
+        // 2. 같은 시간(300ms = 18틱) 입력에서 화면 FPS(externalRenderFdt)와 무한한 발사 수(2발) 확인
+        {
+            InputScript scriptA;
+            InputScript scriptB;
+            scriptA.ScheduleInput(1, 0, MoveBit::NONE, 1, 1, 16);
+            scriptB.ScheduleInput(1, 0, MoveBit::NONE, 1, 1, 16);
+
+            CaptureSink sinkA;
+            CaptureSink sinkB;
+            HostSimEngine engineA{ 1000 };
+            HostSimEngine engineB{ 1000 };
+
+            engineA.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 50'000 }, {}, 3, 2);
+            engineB.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 50'000 }, {}, 3, 2);
+            engineA.FlushLifecycleAtTickEnd(sinkA);
+            engineB.FlushLifecycleAtTickEnd(sinkB);
+
+            // engineA: 75ms씩 4번 (총 300ms = 18틱, 외부 fDT = 0.25f)
+            for (int i = 0; i < 4; ++i) {
+                engineA.StepFrame(75'000, scriptA, sinkA, 0.25f);
+            }
+            // engineB: 50ms씩 6번 (총 300ms = 18틱, 외부 fDT = 0.005f)
+            for (int i = 0; i < 6; ++i) {
+                engineB.StepFrame(50'000, scriptB, sinkB, 0.005f);
+            }
+
+            int countA = 0;
+            int countB = 0;
+            for (const HostObjectValue& obj : engineA.GetActiveObjects())
+                if (obj.kind == NetObjectKind::PROJ_PLAYER) ++countA;
+            for (const HostObjectValue& obj : engineB.GetActiveObjects())
+                if (obj.kind == NetObjectKind::PROJ_PLAYER) ++countB;
+
+            Check(countA == 2 && countB == 2,
+                "HostSim1113: Produces identical projectile count (2 shots in 300ms) regardless of render FPS",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -399,6 +542,8 @@ int main()
     RunHostSim1109Suite(counters);
     RunHostSim1110Suite(counters);
     RunHostSim1111Suite(counters);
+    RunHostSim1112Suite(counters);
+    RunHostSim1113Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

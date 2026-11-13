@@ -40,6 +40,18 @@ CPlayer* CScene::GetPlayer(PlayerId id) const
     return m_players[id];
 }
 
+CObject* CScene::FindObjectById(std::uint32_t objectId) const
+{
+    if (objectId == 0) return nullptr;
+    for (UINT i = 0; i < (UINT)GROUP_TYPE::END; ++i) {
+        for (CObject* pObj : m_arrObj[i]) {
+            if (pObj != nullptr && pObj->GetObjectId() == objectId)
+                return pObj;
+        }
+    }
+    return nullptr;
+}
+
 void CScene::update()
 {
 	for (UINT i = 0; i < (UINT)GROUP_TYPE::END; ++i)
@@ -89,6 +101,10 @@ void CScene::render(HDC _dc)
 			}
 			else
 			{
+                for (CPlayer* slotPlayer : m_players) {
+                    if ((CObject*)slotPlayer == *iter)
+                        slotPlayer = nullptr;
+                }
 				
 				iter = m_arrObj[i].erase(iter);
 			}
@@ -135,6 +151,15 @@ void CScene::render_tile(HDC _dc)
     }
 }
 
+
+void CScene::AddObject(CObject* _pObj, GROUP_TYPE _eType)
+{
+    if (_pObj == nullptr) return;
+    if (_pObj->GetObjectId() == 0) {
+        _pObj->SetObjectId(m_nexObjectId++);
+    }
+    m_arrObj[(UINT)_eType].push_back(_pObj);
+}
 
 void CScene::RegisterPlayer(PlayerId id, CPlayer* player)
 {

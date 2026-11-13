@@ -13,6 +13,8 @@ private:
     float     m_fVec;
     int       m_iType;
     Vec2      m_vDir;
+    PlayerId  m_ownerPlayerId = 0xFF;
+    int       m_iDamage = 1;
 public:
     void SetDir(Vec2 _vDir)
     {
@@ -21,6 +23,11 @@ public:
     }
     void SetType(int _iType) { m_iType = _iType; }
     void SetVec(int _iVec) { m_fVec = (float)_iVec; }
+    void SetOwnerPlayerId(PlayerId _id) { m_ownerPlayerId = _id; }
+    PlayerId GetOwnerPlayerId() const { return m_ownerPlayerId; }
+    void SetDamage(int _iDamage) { m_iDamage = _iDamage; }
+    int GetDamage() const { return m_iDamage; }
+
 public:
     virtual void update();
     virtual void render(HDC _dc);

@@ -161,7 +161,7 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
                 dAcc += dt;
                 if (dAcc > 0.15f)
                 {
-                    dAcc = 0;
+                    dAcc -= 0.15f;
                     switch (m_iLvl)
                     {
                     case 1:
@@ -339,7 +339,10 @@ void CPlayer::CreateMissile(int type,  float _fVec,MISSILE_TYPE _eType)
     pMissile->ChangemType(_eType);
 	pMissile->SetVec(_fVec);
 	pMissile->SetType(0);
-	pMissile->SetName(L"Missile_Player");
+    pMissile->SetOwnerPlayerId(m_PlayerId);
+    pMissile->SetDamage(m_iAtk);
+    pMissile->SetName(L"Missile_Player");
+    
 
 	CreateObject(pMissile,GROUP_TYPE::PROJ_PLAYER);
 }

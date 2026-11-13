@@ -15,6 +15,7 @@ private:
 	Vec2	m_vPos;
 	Vec2	m_vScale;
 
+    
 
 
 	// Component
@@ -23,11 +24,15 @@ private:
 
 	bool	   m_bAlive;
 	bool	   m_bCollideroff;
+
+    std::uint32_t m_objectId = 0;
 public:
 	void SetPos(Vec2 _vPos) { m_vPos = _vPos; }
 	void SetScale(Vec2 _vScale) { m_vScale = _vScale; }
 	void SetName(const wstring& _strName) { m_strName = _strName; }
-	
+    void SetObjectId(std::uint32_t _id) { m_objectId = _id; }
+    std::uint32_t GetObjectId() { return m_objectId; }
+
 	bool IsDead() { return !m_bAlive; }
 	bool IsCollideroff() { return m_bCollideroff; }
 

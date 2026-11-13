@@ -27,6 +27,7 @@ private:
 public:
     virtual void update();
     void Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt);
+
     void SetPlayerId(PlayerId id) { m_PlayerId = id; }
     PlayerId GetPlayerId() { return m_PlayerId; }
     protocol::ObjectStateRecord ExportStateRecord(protocol::ObjectId objectId) const;
@@ -41,6 +42,11 @@ public:
     void setclear() { m_clear = true; }
     void setdead() { m_dead = true; }
     int GetPlayerAtk() { return m_iAtk; }
+    void SetPlayerAtk(int _atk) { m_iAtk = _atk; }
+
+
+
+
 
     bool isMujeok = false;
 private:
