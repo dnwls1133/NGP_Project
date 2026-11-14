@@ -531,6 +531,42 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1114Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. P0·P1 동시 이동·발사(9틱=150ms) 후 틱/ID/HP/발사 일치 및 P1 입력 단절(300ms 경과) 후 중립화 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 50'000 }, {}, 3, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 50'000 }, {}, 3, 2);
+            engine.FlushLifecycleAtTickEnd(sink);
+            script.ScheduleInput(1, 0, MoveBit::RIGHT, 1, 1, 16);
+            script.ScheduleInput(1, 1, MoveBit::LEFT, 1, 1, 16);
+            script.ScheduleInput(10, 0, MoveBit::RIGHT, 1, 2, 166);
+            engine.StepFrame(75'000, script, sink);
+            engine.StepFrame(75'000, script, sink);
+            const HostObjectValue* p0After9 = engine.FindObjectById(p0Id);
+            const HostObjectValue* p1After9 = engine.FindObjectById(p1Id);
+            const bool syncedAtTick9 = (engine.GetHostTick() == 9)
+                && (p0After9 != nullptr && p1After9 != nullptr)
+                && (p0After9->hp == 3 && p1After9->hp == 3)
+                && (p0After9->pos.x == 12'700 && p1After9->pos.x == 17'300);
+            engine.StepFrame(83'334, script, sink);
+            engine.StepFrame(83'334, script, sink);
+            Check(syncedAtTick9
+                && engine.GetHostTick() == 19
+                && engine.GetLastAppliedMoveBits(0) == MoveBit::RIGHT
+                && engine.GetLastAppliedFireHeld(0) == 1
+                && engine.GetLastAppliedMoveBits(1) == MoveBit::NONE
+                && engine.GetLastAppliedFireHeld(1) == 0,
+                "HostSim1114: Verifies P0/P1 tick/ID/HP/fire parity and neutralizes disconnected P1 after 300ms",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -544,6 +580,7 @@ int main()
     RunHostSim1111Suite(counters);
     RunHostSim1112Suite(counters);
     RunHostSim1113Suite(counters);
+    RunHostSim1114Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

@@ -40,6 +40,9 @@ private:
 
     std::array<protocol::ObjectId, protocol::MAX_PROTOCOL_PLAYERS> m_playerObjectIds{};
     std::uint32_t m_hostTick = 0;
+    protocol::EventId m_nextSpawnEventId = 2;
+    protocol::ObjectId m_lastSyncedMissileObjectId = 0;
+
     bool m_playerSpawnsQueued = false;
 
 public:

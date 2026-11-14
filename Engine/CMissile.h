@@ -1,5 +1,7 @@
 ﻿#pragma once
 #include "CObject.h"
+#include "../shared/protocol/ProtocolTypes.h"
+
 class CCollider;
 class CTexture;
 class CMissile :
@@ -12,6 +14,7 @@ private:
     float     m_fTheta; // 위아래 방향 개념
     float     m_fVec;
     int       m_iType;
+    MISSILE_TYPE m_eMissileType = MISSILE_TYPE::LVL1;
     Vec2      m_vDir;
     PlayerId  m_ownerPlayerId = 0xFF;
     int       m_iDamage = 1;
@@ -27,6 +30,8 @@ public:
     PlayerId GetOwnerPlayerId() const { return m_ownerPlayerId; }
     void SetDamage(int _iDamage) { m_iDamage = _iDamage; }
     int GetDamage() const { return m_iDamage; }
+
+    protocol::SpawnPayload ExportSpawnPayload(protocol::EventId eventId) const;
 
 public:
     virtual void update();

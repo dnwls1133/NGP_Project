@@ -31,14 +31,14 @@ public:
 	void SetScale(Vec2 _vScale) { m_vScale = _vScale; }
 	void SetName(const wstring& _strName) { m_strName = _strName; }
     void SetObjectId(std::uint32_t _id) { m_objectId = _id; }
-    std::uint32_t GetObjectId() { return m_objectId; }
+    std::uint32_t GetObjectId() const { return m_objectId; }
 
 	bool IsDead() { return !m_bAlive; }
 	bool IsCollideroff() { return m_bCollideroff; }
 
 
-	Vec2 GetPos() { return m_vPos; }
-	Vec2 GetScale() { return m_vScale; }
+	Vec2 GetPos() const { return m_vPos; }
+	Vec2 GetScale() const { return m_vScale; }
 	const wstring& GetName() { return m_strName; }
 	
 	CCollider* GetCollider() { return m_pCollider; }

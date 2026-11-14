@@ -4,6 +4,7 @@
 
 #include "CPlayer.h"
 #include "CMonster.h"
+#include "CMissile.h"
 #include "CBackground.h"
 
 #include "CCore.h"
@@ -138,6 +139,24 @@ void CScene_Stage01::update()
                 }
                 m_hostTickAccumulator -= host::SIM_FIXED_DT;
             }
+
+            for (CObject* obj : GetGroupObject(GROUP_TYPE::PROJ_PLAYER)) {
+                if (obj == nullptr || obj->IsDead() ||
+                    obj->GetObjectId() <= m_lastSyncedMissileObjectId)
+                    continue;
+
+                auto* missile = static_cast<CMissile*>(obj);
+                m_lastSyncedMissileObjectId = missile->GetObjectId();
+
+                protocol::Message message{};
+                message.header.type = protocol::MessageType::SPAWN;
+                message.header.sessionId = session.GetSessionId();
+                message.header.hostTick = m_hostTick;
+                message.header.sequence = ++m_nextSpawnEventId;
+                message.payload = missile->ExportSpawnPayload(message.header.sequence);
+
+                session.EnqueueSend(net::Channel::Tcp, message);
+            }
         }
     }
     else
@@ -170,6 +189,26 @@ void CScene_Stage01::update()
                         remote.objectId = spawn->objectId;
                         remote.lastSnapshotTick.reset();
                     }
+                }
+                else if (spawn->kind == protocol::NetObjectKind::PROJ_PLAYER)
+                {
+                    Vec2 vel(spawn->vel.x / 100.f, spawn->vel.y / 100.f);
+
+                    float speed = vel.Length();
+
+                    CMissile* pMissile = new CMissile();
+                    pMissile->SetObjectId(spawn->objectId);
+                    pMissile->init(GROUP_TYPE::PROJ_PLAYER);
+                    pMissile->SetPos(Vec2(spawn->pos.x / 100.f, spawn->pos.y / 100.f));
+                    pMissile->SetScale(Vec2(25.f, 25.f));
+                    pMissile->SetDir(speed > 0.f ? vel : Vec2(0.f, 1.f));
+                    pMissile->ChangemType(static_cast<MISSILE_TYPE>(spawn->subType));
+                    pMissile->SetVec(static_cast<int>(speed));
+                    pMissile->SetType(spawn->patternType);
+                    pMissile->SetOwnerPlayerId(spawn->ownerPlayerId);
+                    pMissile->SetDamage(spawn->damage);
+                    pMissile->SetName(L"Missile_Player");
+                    AddObject(pMissile, GROUP_TYPE::PROJ_PLAYER);
                 }
                 continue;
             }
@@ -458,10 +497,14 @@ void CScene_Stage01::Enter()
 
     // 충돌 지정
     // Player 그룹과 Monster 그룹간의 충돌체크
-    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::PROJ_MONSTER);
-    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::MONSTER, GROUP_TYPE::PROJ_PLAYER);
-    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::ITEM);
-    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::MONSTER);
+    if (session.IsHost())
+    {
+        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::PROJ_MONSTER);
+        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::MONSTER, GROUP_TYPE::PROJ_PLAYER);
+        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::ITEM);
+        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::MONSTER);
+    }
+    
     //Camera 지정
 
     CCamera::GetInst()->SetLookAt(vResolution / 2.f);
@@ -483,6 +526,8 @@ void CScene_Stage01::Enter()
     m_playerObjectIds = {};
     m_hostTick = 0;
     m_playerSpawnsQueued = false;
+    m_nextSpawnEventId = 2;
+    m_lastSyncedMissileObjectId = 0;
 
     if (session.IsHost() && session.GetState() == network::SessionState::Started)
     {
