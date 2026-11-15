@@ -96,8 +96,8 @@ namespace
 
         std::cout
             << "\nSession data test:\n"
-            << "  NetHarness.exe session-data-host\n"
-            << "  NetHarness.exe session-data-client <Host-IP>\n"
+            << "  NetHarness.exe session-data-host [--spawn]\n"
+            << "  NetHarness.exe session-data-client <Host-IP> [--spawn]\n"
             << "  NetHarness.exe session-data-compare <host-trace> <client-trace>\n";
 
         std::cout
@@ -333,8 +333,24 @@ namespace
             { "flow-host", 2, 2, [](int, char**) { return Run(true, "", TCP_PORT, UDP_PORT, TestMode::GameFlow) ? 0 : 1; } },
             { "flow-client", 3, 3, [](int, char** args) { return Run(false, args[2], TCP_PORT, UDP_PORT, TestMode::GameFlow) ? 0 : 1; } },
             { "pong", 2, 2, [](int, char**) { return pong_test::Run(TCP_PORT, UDP_PORT) ? 0 : 1; } },
-            { "session-data-host", 2, 2, [](int, char**) { return session_data_test::Run(true, "", TCP_PORT, UDP_PORT) ? 0 : 1; } },
-            { "session-data-client", 3, 3, [](int, char** args) { return session_data_test::Run(false, args[2], TCP_PORT, UDP_PORT) ? 0 : 1; } },
+            { "session-data-host", 2, 3, [](int count, char** args) {
+                const bool spawnOnly = count == 3;
+
+                if (spawnOnly && std::string_view(args[2]) != "--spawn")
+                    return InvalidArguments();
+
+                    return session_data_test::Run(true, "", TCP_PORT, UDP_PORT, spawnOnly) ? 0 : 1;
+                }
+            },
+            { "session-data-client", 3, 4, [](int count, char** args) {
+                const bool spawnOnly = count == 4;
+
+                if (spawnOnly && std::string_view(args[3]) != "--spawn")
+                    return InvalidArguments();
+
+                return session_data_test::Run(false, args[2], TCP_PORT, UDP_PORT, spawnOnly) ? 0 : 1;
+                }
+            },
             { "session-data-compare", 4, 4, [](int, char** args) { return session_data_test::Compare(args[2], args[3]) ? 0 : 1; } },
         };
 

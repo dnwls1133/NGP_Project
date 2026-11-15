@@ -4,6 +4,7 @@
 #include "../Engine/CNetworkMgr.h"
 #include "../Engine/CSessionMgr.h"
 #include "../shared/protocol/PacketCodec.h"
+#include "../tests/CodecTests/fixtures/ProtocolV1Fixtures.h"
 
 #include <algorithm>
 #include <chrono>
@@ -406,7 +407,70 @@ namespace session_data_test
         return true;
     }
 
-    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort)
+    bool RunSpawnPhase(network::CSessionMgr& session)
+    {
+        auto expected = protocol::fixtures::MakeValidSpawnMessage();
+        expected.header.sessionId = session.GetSessionId();
+        expected.header.hostTick = session.GetStartInfo().startHostTick;
+
+        const bool host = session.IsHost();
+
+        if (host)
+        {
+            const auto result = session.EnqueueSend(net::Channel::Tcp, expected);
+            if (result != net::SendResult::Queued)
+            {
+                std::cerr << "[FAIL] SPAWN enqueue failed, result=" << static_cast<int>(result) << '\n';
+                return false;
+            }
+
+            std::cout << "[HOST] TCP SPAWN queued\n";
+        }
+
+        const auto deadline = Clock::now() + std::chrono::seconds(5);
+
+        while (Clock::now() < deadline)
+        {
+            session.Update();
+            const auto state = session.GetState();
+
+            if (host && state == SessionState::Disconnected)
+            {
+                std::cout << "[HOST] Client disconnected. Check client verification result.\n";
+                return true;
+            }
+
+            if (state != SessionState::Started)
+            {
+                const auto& event = session.GetLastNetworkEvent();
+                std::cerr << "[FAIL] Session ended during SPAWN test, state=" << static_cast<int>(state) << ", socketError=" << event.socketError << ", codecError=" << static_cast<int>(event.codecError) << '\n';
+                return false;
+            }
+
+            if (!host)
+            {
+                network::ReceivedMessage received{};
+                if (session.TryReceiveGame(received))
+                {
+                    if (received.transport != network::TransportType::TCP || received.message != expected)
+                    {
+                        std::cerr << "[FAIL] SPAWN transport, header or payload mismatch\n";
+                        return false;
+                    }
+
+                    std::cout << "[PASS] TCP SPAWN reached client session with matching fields\n";
+                    return true;
+                }
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        std::cerr << (host ? "[FAIL] Timed out waiting for client to close\n" : "[FAIL] Timed out waiting for TCP SPAWN\n");
+        return false;
+    }
+
+    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, bool spawnOnly)
     {
         network::CSessionMgr session(*network::CNetworkMgr::GetInst());
 
@@ -499,9 +563,16 @@ namespace session_data_test
                     gameSince = now;
                     nextSend = now;
 
-                    std::cout
-                        << "[PASS] Session started, sessionId="
-                        << trace.sessionId << '\n';
+                    std::cout << "[PASS] Session started, sessionId=" << trace.sessionId << '\n';
+
+                    if (spawnOnly)
+                    {
+                        const bool spawnPassed = RunSpawnPhase(session);
+                        session.Stop();
+
+                        std::cout << (spawnPassed ? "[LOCAL] PASS\n" : "[LOCAL] FAIL\n");
+                        return spawnPassed;
+                    }
                 }
                 else
                 {
