@@ -97,6 +97,9 @@ namespace network
         void HandleGameMessage(ReceivedMessage received);
         bool CanProcessReceivedMessage() const;
         void HandleReceivedMessage(ReceivedMessage received);
+        void EnterStarted();
+        void UpdateHeartbeat();
+
         std::deque<ReceivedMessage> gameReceiveQueue;
 
         sockaddr_in peerTcpAddress{};
@@ -124,5 +127,8 @@ namespace network
         protocol::RejectReason rejectReason = protocol::RejectReason::NONE;
 
         std::uint32_t playerInputSequence = 0;
+
+        std::uint64_t lastValidReceiveMs = 0;
+        std::uint64_t lastHeartbeatQueuedMs = 0;
     };
 }

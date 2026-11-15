@@ -820,6 +820,8 @@ namespace network
             return;
         }
 
+        const auto receivedTimeMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+
         std::span<const std::uint8_t> remaining(buffer.data(), static_cast<std::size_t>(received));
 
         const auto appendUntil = [this, &remaining](std::size_t targetBytes)
@@ -871,7 +873,7 @@ namespace network
                 return;
             }
 
-            if (!PushReceived(ReceivedMessage{ TransportType::TCP, peerTcpAddress, std::move(message) }))
+            if (!PushReceived(ReceivedMessage{ TransportType::TCP, peerTcpAddress, std::move(message), receivedTimeMs }))
                 return;
 
             tcpPartialFrame.clear();
@@ -977,7 +979,8 @@ namespace network
         }
 
         const auto byteCount = static_cast<std::size_t>(received);
-        const auto receivedTimeMs = static_cast<std::uint64_t>( std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now().time_since_epoch()).count());
+        const auto receivedTimeMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+
         if (byteCount < protocol::HEADER_BYTES || byteCount > protocol::MAX_UDP_BYTES)
             return;
 

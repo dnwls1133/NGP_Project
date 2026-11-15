@@ -316,6 +316,61 @@ namespace network_mgr_test
                 });
         }
 
+        bool RunHeartbeatPhase(network::CSessionMgr& session, SessionHeartbeatTest mode)
+        {
+            using Clock = std::chrono::steady_clock;
+            using network::SessionState;
+
+            const auto idleDeadline = Clock::now() + 6s;
+
+            while (Clock::now() < idleDeadline)
+            {
+                session.Update();
+
+                if (session.GetState() != SessionState::Started)
+                {
+                    std::cerr << "[FAIL] Session disconnected during idle test\n";
+                    return false;
+                }
+
+                std::this_thread::sleep_for(5ms);
+            }
+
+            std::cout << "[PASS] Idle session stayed Started for 6 seconds\n";
+
+            if (mode == SessionHeartbeatTest::Silent)
+            {
+                std::cout << "[TEST] Pausing session updates with TCP socket open\n";
+
+                // 통신 스레드는 유지하고, 새 heartbeat를 만드는 Update만 멈춘다.
+                NetworkEvent event{};
+                return WaitEvent(*CNetworkMgr::GetInst(), NetworkEventType::Disconnected, event, "Observer closed the TCP connection", 8s);
+            }
+
+            const auto observeStarted = Clock::now();
+
+            return WaitFor("Peer heartbeat timeout detected", 8s, [&]
+                {
+                    session.Update();
+
+                    if (session.GetState() == SessionState::Started)
+                        return PollResult::Pending;
+
+                    const auto& event = session.GetLastNetworkEvent();
+                    const auto elapsed = Clock::now() - observeStarted;
+
+                    std::cout << "[TEST] Elapsed since observation began: " << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << " ms, socketError=" << event.socketError << '\n';
+
+                    if (session.GetState() != SessionState::Disconnected || event.type != NetworkEventType::Disconnected ||
+                        event.socketError != WSAETIMEDOUT || elapsed < 3s)
+                    {
+                        return PollResult::Failed;
+                    }
+
+                    return PollResult::Passed;
+                });
+        }
+
         bool WaitForSessionState(network::CSessionMgr& session, network::SessionState expected, const char* step, std::chrono::milliseconds timeout)
         {
             using network::SessionState;
@@ -1577,7 +1632,7 @@ namespace network_mgr_test
         return passed;
     }
 
-    bool RunSessionApproval(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, SessionJoinTest joinTest)
+    bool RunSessionApproval(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, SessionJoinTest joinTest, SessionHeartbeatTest heartbeatTest)
     {
         using network::SessionState;
         using namespace std::chrono_literals;
@@ -1679,7 +1734,7 @@ namespace network_mgr_test
             if (passed)
                 passed = check(session.GetState() == SessionState::Started, "Host entered Started");
 
-            if (passed)
+            if (passed && heartbeatTest == SessionHeartbeatTest::None)
                 passed = WaitForSessionState(session, SessionState::Disconnected, "Client disconnected after start test", 5s);
         }
         else
@@ -1690,7 +1745,7 @@ namespace network_mgr_test
                 passed = CheckQueued(session.RequestReady(true), "Queue READY");
 
             if (passed)
-                passed = WaitFor("Client applied ROOM_STATE", 5s, pollReady);
+                passed = WaitForSessionState(session, SessionState::Loading, "Client applied ROOM_STATE and LOAD", 5s);
 
             if (passed)
                 passed = WaitForSessionState(session, SessionState::Loading, "Client received LOAD", 5s);
@@ -1704,6 +1759,9 @@ namespace network_mgr_test
             if (passed)
                 passed = check(session.GetStartInfo().startHostTick == TEST_START_TICK, "Client verified startHostTick");
         }
+
+        if (passed && heartbeatTest != SessionHeartbeatTest::None)
+            passed = RunHeartbeatPhase(session, heartbeatTest);
 
         session.Stop();
         std::cout << (passed ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");
