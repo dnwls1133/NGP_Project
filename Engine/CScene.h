@@ -45,6 +45,7 @@ public:
 	UINT GetTileY() { return m_iTileY; }
 
     CPlayer* GetPlayer(PlayerId id) const;
+    CPlayer* SelectNearestAlivePlayer(Vec2 fromPos) const;
     CObject* FindObjectById(std::uint32_t objectId) const;
     CObject* GetBackground() { return m_pBackground; }
 

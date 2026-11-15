@@ -5,6 +5,7 @@
 #include "CPathMgr.h"
 
 #include "CObject.h"
+#include "CPlayer.h"
 #include "CTile.h"
 
 #include "CCamera.h"
@@ -38,6 +39,28 @@ CPlayer* CScene::GetPlayer(PlayerId id) const
     if (id >= m_players.size()) return nullptr;
 
     return m_players[id];
+}
+
+CPlayer* CScene::SelectNearestAlivePlayer(Vec2 fromPos) const
+{
+    CPlayer* bestPlayer = nullptr;
+    float bestDistSq = 0.f;
+
+    for (PlayerId slot = 0; slot < m_players.size(); ++slot) {
+        CPlayer* candidate = m_players[slot];
+        if (candidate == nullptr || candidate->IsDead() || !candidate->IsAlivePlayer())
+            continue;
+
+        Vec2 diff = candidate->GetPos() - fromPos;
+        float distSq = diff.x * diff.x + diff.y * diff.y;
+
+        if (bestPlayer == nullptr || distSq < bestDistSq) {
+            bestPlayer = candidate;
+            bestDistSq = distSq;
+        }
+
+    }
+    return bestPlayer;
 }
 
 CObject* CScene::FindObjectById(std::uint32_t objectId) const

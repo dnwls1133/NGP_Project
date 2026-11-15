@@ -133,7 +133,7 @@ void CMonster::CreateMissile(int type)
 	vMissilePos.y += GetScale().y / 2.f;
 	vMissilePos.x += GetScale().x * type;
 	CScene* CurScene = CSceneMgr::GetInst()->GetCurScene();
-    CPlayer* pInfo = CurScene->GetPlayer(0);
+    CPlayer* pInfo = CurScene->SelectNearestAlivePlayer(vMissilePos);
     if (pInfo == nullptr)
     {
         return;

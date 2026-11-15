@@ -32,6 +32,9 @@ namespace host
     // 플레이어 기본 발사 간격: 0.15초 = 60Hz 기준 9틱
     inline constexpr std::uint32_t PLAYER_FIRE_INTERVAL_TICKS = 9;
 
+    // 일반 적 기본 FSM 전환 간격: IDLE(0) -> PAROL/RUN(1) (0.5초 = 30틱)
+    inline constexpr std::uint32_t MONSTER_IDLE_TO_PATROL_TICKS = 30;
+
     // 고정 틱 시뮬레이션 dt (전역 fDT와 분리된 호스트 계산 전용 고정 시간 간격)
     inline constexpr float SIM_FIXED_DT = 1.0f / static_cast<float>(SIM_TICK_HZ);
 
@@ -162,6 +165,7 @@ namespace host
         std::int32_t hp = 3;
         std::int32_t maxHp = 3;
         std::int32_t damage = 1;
+        std::uint32_t stateTickAccum = 0; // 추가 (틱 기반 FSM 전환 누적기)
         bool pendingDestroy = false; // 첫 삭제 요청 시 true -> 같은 틱 충돌/피해/조준에서 즉시 제외
     };
 
@@ -437,6 +441,63 @@ namespace host
             return false;
         }
 
+        // 11/15: 생존 타깃 선택 (가까운 생존자 우선, 동률이면 낮은 PlayerId, 생존자 없으면
+        // INVALID_PLAYER_SLOT)
+        protocol::PlayerSlot SelectNearestAlivePlayerId(protocol::FixedVec2 fromPos) const noexcept
+        {
+            protocol::PlayerSlot bestSlot = protocol::INVALID_PLAYER_SLOT;
+            std::int64_t bestDistSq = 0;
+
+            for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS; ++slot) {
+                const protocol::ObjectId objId = m_playerSlotObjectIds[slot];
+                const HostObjectValue* player = FindObjectById(objId);
+                if (player == nullptr || player->pendingDestroy || player->hp <= 0) {
+                    continue;
+                }
+
+                const std::int64_t dx = static_cast<std::int64_t>(player->pos.x) - fromPos.x;
+                const std::int64_t dy = static_cast<std::int64_t>(player->pos.y) - fromPos.y;
+                const std::int64_t distSq = (dx * dx) + (dy * dy);
+
+                if (bestSlot == protocol::INVALID_PLAYER_SLOT || distSq < bestDistSq) {
+                    bestSlot = slot;
+                    bestDistSq = distSq;
+                }
+            }
+            return bestSlot;
+        }
+
+        // 11/15: 적 조준 발사 (타깃이 없으면 안전하게 발사 생략하고 0 반환)
+        protocol::ObjectId TryFireEnemyAimedProjectile(protocol::ObjectId monsterId)
+        {
+            const HostObjectValue* monster = FindObjectById(monsterId);
+            if (monster == nullptr || monster->pendingDestroy || monster->kind !=
+                protocol::NetObjectKind::MONSTER || monster->hp <= 0) {
+                return 0;
+            }
+
+            const protocol::PlayerSlot targetSlot = SelectNearestAlivePlayerId(monster->pos);
+            if (targetSlot == protocol::INVALID_PLAYER_SLOT) {
+                return 0; // 생존자 없음 -> 발사 생략
+            }
+
+            const HostObjectValue* target = FindObjectById(m_playerSlotObjectIds[targetSlot]);
+            const protocol::FixedVec2 vel{
+                target->pos.x - monster->pos.x,
+                target->pos.y - monster->pos.y
+            };
+            return RequestSpawn(
+                protocol::NetObjectKind::PROJ_MONSTER,
+                1, // subType
+                targetSlot, // ownerPlayerId
+                monster->pos,
+                vel,
+                1,
+                monster->damage);
+
+        }
+
+
         // 11/11: 마지막 유효 입력 시각 기준 300ms 경과 시 이동·발사 중립화
         // - 경계 직전(elapsedMs == 299): 유지
         // - 정확한 경계(elapsedMs == 300) 및 직후(elapsedMs >= 301) :
@@ -659,6 +720,13 @@ namespace host
                         }
                     }
 
+                }
+                else if (obj.kind == protocol::NetObjectKind::MONSTER && obj.fsmState == 0)
+                {
+                    ++obj.stateTickAccum;
+                    if (obj.stateTickAccum >= MONSTER_IDLE_TO_PATROL_TICKS) {
+                        obj.fsmState = 1; // 30틱(0.5초) 경과 후 IDLE -> PATROL/RUN(1) 전환
+                    }
                 }
 
                 obj.pos.x += (obj.vel.x / static_cast<std::int32_t>(SIM_TICK_HZ));

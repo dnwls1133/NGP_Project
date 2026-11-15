@@ -567,6 +567,58 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1115Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. 일반 적 FSM의 고정 틱(30틱 = 500ms) 전환 확인 (29틱에는 IDLE=0, 30틱에 PATROL/RUN=1)
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 20'000, 10'000 }, {}, 20, 1);
+            engine.FlushLifecycleAtTickEnd(sink);
+            // 29틱(483,334us) 진행 -> 아직 IDLE(fsmState == 0)
+            for (int i = 0; i < 5; ++i) engine.StepFrame(83'334, script, sink); // 25틱
+            engine.StepFrame(66'667, script, sink);                             // +4틱 = 29틱
+            const std::uint8_t stateAt29 = engine.FindObjectById(monId)->fsmState;
+            // +1틱(16,667us) 진행 -> 총 30틱에서 fsmState == 1 전환
+            engine.StepFrame(16'667, script, sink);
+            const std::uint8_t stateAt30 = engine.FindObjectById(monId)->fsmState;
+            Check(stateAt29 == 0 && stateAt30 == 1,
+                "HostSim1115: Transitions enemy FSM on exact fixed host tick (tick 29=IDLE, tick 30=PATROL/RUN)",
+                counters);
+        }
+        // 2. 생존 타깃 선택: 가까운 생존자 우선, 동률 시 낮은 PlayerId(P0), 전원 사망 시 발사 안전 생략
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 2);
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 18'000, 30'000 }, {}, 20, 1);
+            engine.FlushLifecycleAtTickEnd(sink);
+            // (a) 적 위치(18,000)에서 P1(20,000, 거리 2,000)이 P0(10,000, 거리 8,000)보다 가까움 -> P1(1) 선택
+            const PlayerSlot nearestWhenBothAlive = engine.SelectNearestAlivePlayerId(FixedVec2{ 18'000, 30'000 });
+            // (b) 적 위치가 정중앙(15,000)이어서 P0·P1 거리가 5,000으로 동률일 때 -> 낮은 PlayerId인 P0(0) 선택
+            const PlayerSlot tieBreakSlot = engine.SelectNearestAlivePlayerId(FixedVec2{ 15'000, 30'000 });
+            // (c) 가까운 P1이 사망(hp=0)하면 생존한 P0(0) 선택
+            engine.SetObjectHp(p1Id, 0);
+            const PlayerSlot afterP1Dead = engine.SelectNearestAlivePlayerId(FixedVec2{ 18'000, 30'000 });
+            // (d) P0도 사망(hp=0)하여 생존 타깃이 없으면 INVALID_PLAYER_SLOT 반환 및 적 탄환 발사 안전 생략(0 반환)
+            engine.SetObjectHp(p0Id, 0);
+            const PlayerSlot whenAllDead = engine.SelectNearestAlivePlayerId(FixedVec2{ 18'000, 30'000 });
+            const ObjectId skippedProjId = engine.TryFireEnemyAimedProjectile(monId);
+            engine.FlushLifecycleAtTickEnd(sink);
+            Check(nearestWhenBothAlive == 1
+                && tieBreakSlot == 0
+                && afterP1Dead == 0
+                && whenAllDead == INVALID_PLAYER_SLOT
+                && skippedProjId == 0,
+                "HostSim1115: Selects nearest alive player, breaks ties by lower PlayerId, and safely skips firing when no target is alive",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -581,6 +633,7 @@ int main()
     RunHostSim1112Suite(counters);
     RunHostSim1113Suite(counters);
     RunHostSim1114Suite(counters);
+    RunHostSim1115Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

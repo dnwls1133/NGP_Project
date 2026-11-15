@@ -36,7 +36,7 @@ public:
 
     int getHP() { return m_iHp; }
     int getLv() { return m_iLvl; }
-
+    bool IsAlivePlayer() { return !m_dead && m_iHp > 0; }
 
     void FullHP() { m_iHp = 3; }
     void setclear() { m_clear = true; }

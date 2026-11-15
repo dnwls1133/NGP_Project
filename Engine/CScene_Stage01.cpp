@@ -349,23 +349,32 @@ void CScene_Stage01::update()
             }
         }
 
-        for (auto& evt : m_vEvents)
+        if (session.IsHost())
         {
-            if (!evt.triggered && m_dAcc >= evt.triggerTime)
+            const double hostElapsedSec =
+                static_cast<double>(m_hostTick - session.GetStartInfo().startHostTick)
+                * host::SIM_FIXED_DT;
+            for (auto& evt : m_vEvents)
             {
-                static bool trigger = false;
-                if (m_dAcc >= 130.f && !trigger)
+                if (!evt.triggered && hostElapsedSec >= evt.triggerTime) // 11/15 m_dAcc를 hostElapsedSec으로 수정
                 {
-                    CSoundMgr::GetInst()->PlayBGM(m_pBossTheme);
-                    trigger = true;
-                }
+                    static bool trigger = false;
+                    if (hostElapsedSec >= 130.f && !trigger)
+                    {
+                        CSoundMgr::GetInst()->PlayBGM(m_pBossTheme);
+                        trigger = true;
+                    }
 
-                CMonster* pMon = CMonFactory::CreateMonster(evt.type, evt.mtype, evt.spawnPos, evt.targetPos, evt.exitPos);
-                pMon->SetName(L"Monster");
-                AddObject(pMon, GROUP_TYPE::MONSTER);
-                evt.triggered = true;
+                    CMonster* pMon = CMonFactory::CreateMonster(evt.type, evt.mtype, evt.spawnPos, evt.targetPos, evt.exitPos);
+                    pMon->SetName(L"Monster");
+                    AddObject(pMon, GROUP_TYPE::MONSTER);
+                    evt.triggered = true;
+                }
             }
+            
         }
+
+        
     }
 
 
@@ -797,7 +806,7 @@ void CScene_Stage01::InitEvents()
 
 
 
-    m_vEvents.push_back({ 10.f,MON_TYPE::BOSS,MISSILE_PTRN::PTRN1,Vec2(vBackPos.x,  (float)rBackrect.top - 200.f),Vec2((float)vBackPos.x, (float)rBackrect.bottom / 2.f - 300.f),Vec2((float)vBackPos.x, -400.f) });
+    m_vEvents.push_back({ 130.f,MON_TYPE::BOSS,MISSILE_PTRN::PTRN1,Vec2(vBackPos.x,  (float)rBackrect.top - 200.f),Vec2((float)vBackPos.x, (float)rBackrect.bottom / 2.f - 300.f),Vec2((float)vBackPos.x, -400.f) });
 
 }
 
