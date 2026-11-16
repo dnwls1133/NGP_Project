@@ -407,27 +407,63 @@ namespace session_data_test
         return true;
     }
 
-    bool RunSpawnPhase(network::CSessionMgr& session)
+    protocol::Message MakeDespawnAfterSpawn(const protocol::Message& spawn)
+    {
+        const auto& spawnPayload = std::get<protocol::SpawnPayload>(spawn.payload);
+
+        protocol::DespawnPayload payload{};
+        payload.eventId = spawnPayload.eventId + 1;
+        payload.objectId = spawnPayload.objectId;
+        payload.reason = protocol::DespawnReason::DESTROYED;
+
+        protocol::Message message{};
+        message.header = spawn.header;
+        message.header.type = protocol::MessageType::DESPAWN;
+        message.header.totalBytes = 44;
+        message.header.sequence = spawn.header.sequence + 1;
+        message.payload = payload;
+
+        return message;
+    }
+
+    bool RunSpawnPhase(network::CSessionMgr& session, bool includeDespawn = false)
     {
         auto expected = protocol::fixtures::MakeValidSpawnMessage();
         expected.header.sessionId = session.GetSessionId();
         expected.header.hostTick = session.GetStartInfo().startHostTick;
 
+        const auto despawn = MakeDespawnAfterSpawn(expected);
+
         const bool host = session.IsHost();
 
         if (host)
         {
-            const auto result = session.EnqueueSend(net::Channel::Tcp, expected);
-            if (result != net::SendResult::Queued)
-            {
-                std::cerr << "[FAIL] SPAWN enqueue failed, result=" << static_cast<int>(result) << '\n';
-                return false;
-            }
+            const auto queueTcp = [&session](const protocol::Message& message, const char* name) {
+                const auto result = session.EnqueueSend(net::Channel::Tcp, message);
 
-            std::cout << "[HOST] TCP SPAWN queued\n";
+                if (result != net::SendResult::Queued)
+                {
+                    std::cerr << "[FAIL] " << name << " enqueue failed, result=" << static_cast<int>(result) << '\n';
+                    return false;
+                }
+
+                std::cout << "[HOST] TCP " << name << " queued\n";
+                return true;
+                };
+
+            if (!queueTcp(expected, "SPAWN"))
+                return false;
+
+            if (includeDespawn)
+            {
+                if (!queueTcp(despawn, "DESPAWN"))
+                    return false;
+            }
         }
 
         const auto deadline = Clock::now() + std::chrono::seconds(5);
+
+        bool spawnReceived = false;
 
         while (Clock::now() < deadline)
         {
@@ -452,25 +488,42 @@ namespace session_data_test
                 network::ReceivedMessage received{};
                 if (session.TryReceiveGame(received))
                 {
-                    if (received.transport != network::TransportType::TCP || received.message != expected)
+                    const auto& expectedMessage = spawnReceived ? despawn : expected;
+                    const char* expectedName = spawnReceived ? "DESPAWN" : "SPAWN";
+
+                    if (received.transport != network::TransportType::TCP || received.message != expectedMessage)
                     {
-                        std::cerr << "[FAIL] SPAWN transport, header or payload mismatch\n";
+                        std::cerr << "[FAIL] Expected TCP " << expectedName << ", received type=" << static_cast<int>(received.message.header.type) << ", sequence=" << received.message.header.sequence << '\n';
                         return false;
                     }
 
+                    if (spawnReceived)
+                    {
+                        std::cout << "[PASS] TCP SPAWN -> DESPAWN received in order with matching fields\n";
+                        return true;
+                    }
+
                     std::cout << "[PASS] TCP SPAWN reached client session with matching fields\n";
-                    return true;
+
+                    if (!includeDespawn)
+                        return true;
+
+                    spawnReceived = true;
                 }
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
 
-        std::cerr << (host ? "[FAIL] Timed out waiting for client to close\n" : "[FAIL] Timed out waiting for TCP SPAWN\n");
+        if (host)
+            std::cerr << "[FAIL] Timed out waiting for client to close\n";
+        else
+            std::cerr << "[FAIL] Timed out waiting for TCP " << (spawnReceived ? "DESPAWN" : "SPAWN") << '\n';
+
         return false;
     }
 
-    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, bool spawnOnly)
+    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, Mode mode)
     {
         network::CSessionMgr session(*network::CNetworkMgr::GetInst());
 
@@ -565,13 +618,13 @@ namespace session_data_test
 
                     std::cout << "[PASS] Session started, sessionId=" << trace.sessionId << '\n';
 
-                    if (spawnOnly)
+                    if (mode != Mode::Data)
                     {
-                        const bool spawnPassed = RunSpawnPhase(session);
+                        const bool eventPassed = RunSpawnPhase(session, mode == Mode::Lifecycle);
                         session.Stop();
 
-                        std::cout << (spawnPassed ? "[LOCAL] PASS\n" : "[LOCAL] FAIL\n");
-                        return spawnPassed;
+                        std::cout << (eventPassed ? "[LOCAL] PASS\n" : "[LOCAL] FAIL\n");
+                        return eventPassed;
                     }
                 }
                 else
