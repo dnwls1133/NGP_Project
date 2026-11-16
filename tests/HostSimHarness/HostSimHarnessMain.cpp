@@ -619,6 +619,63 @@ namespace
                 counters);
         }
     }
+    void RunHostSim1116Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. 피해 2(P0)와 피해 7(P1) 탄환의 Spawn/Combat 데이터 보존 및 GetPlayer(0) 공격력 미참조 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 50'000 }, {}, 3, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 50'000 }, {}, 3, 7);
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 20'000 }, {}, 20, 1);
+            engine.FlushLifecycleAtTickEnd(sink);
+            script.ScheduleInput(1, 0, MoveBit::NONE, 1, 1, 16);
+            script.ScheduleInput(1, 1, MoveBit::NONE, 1, 1, 16);
+            // 9틱(150ms) 진행 -> P0 탄환(피해 2)과 P1 탄환(피해 7) 각각 생성 및 SPAWN 메시지 기록
+            engine.StepFrame(75'000, script, sink);
+            engine.StepFrame(75'000, script, sink);
+            ObjectId projP0 = 0;
+            ObjectId projP1 = 0;
+            for (const auto& entry : sink.GetCapturedMessages())
+            {
+                if (const auto* sp = std::get_if<SpawnPayload>(&entry.message.payload))
+                {
+                    if (sp->kind == NetObjectKind::PROJ_PLAYER && sp->ownerPlayerId == 0 && sp->damage == 2)
+                        projP0 = sp->objectId;
+                    if (sp->kind == NetObjectKind::PROJ_PLAYER && sp->ownerPlayerId == 1 && sp->damage == 7)
+                        projP1 = sp->objectId;
+                }
+            }
+            // P0 객체를 제거한 뒤에도(적이 GetPlayer(0)을 읽지 않음), 이미 발사된 P0 탄환(2)과 P1 탄환(7)의 피해가 그대로 적용되는지 확인
+            engine.RequestDestroy(p0Id, DespawnReason::DESTROYED);
+            engine.FlushLifecycleAtTickEnd(sink);
+            const bool hit0 = engine.ApplyProjectileHit(projP0, monId, sink); // 20 - 2 = 18
+            const std::int32_t hpAfterHit0 = engine.FindObjectById(monId)->hp;
+            const bool hit1 = engine.ApplyProjectileHit(projP1, monId, sink); // 18 - 7 = 11
+            const std::int32_t hpAfterHit1 = engine.FindObjectById(monId)->hp;
+            bool combat0Ok = false;
+            bool combat1Ok = false;
+            for (const auto& entry : sink.GetCapturedMessages())
+            {
+                if (const auto* ce = std::get_if<CombatEventPayload>(&entry.message.payload))
+                {
+                    if (ce->kind == CombatEventKind::DAMAGE_APPLIED && ce->instigatorPlayerId == 0 && ce->confirmedHp == 18)
+                        combat0Ok = true;
+                    if (ce->kind == CombatEventKind::DAMAGE_APPLIED && ce->instigatorPlayerId == 1 && ce->confirmedHp == 11)
+                        combat1Ok = true;
+                }
+            }
+            Check(projP0 != 0 && projP1 != 0 && p1Id != 0
+                && hit0 && hit1
+                && hpAfterHit0 == 18 && hpAfterHit1 == 11
+                && combat0Ok && combat1Ok,
+                "HostSim1116: Preserves projectile owner/damage (2 and 7) across Spawn/Combat without reading GetPlayer(0)",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -634,6 +691,7 @@ int main()
     RunHostSim1113Suite(counters);
     RunHostSim1114Suite(counters);
     RunHostSim1115Suite(counters);
+    RunHostSim1116Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';
