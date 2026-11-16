@@ -98,7 +98,8 @@ namespace
             << "\nSession data test:\n"
             << "  NetHarness.exe session-data-host [--spawn|--lifecycle]\n"
             << "  NetHarness.exe session-data-client <Host-IP> [--spawn|--lifecycle]\n"
-            << "  NetHarness.exe session-data-compare <host-trace> <client-trace>\n";
+            << "  NetHarness.exe session-data-compare <host-trace> <client-trace>\n"
+            << "  NetHarness.exe snapshot-replay-test\n";
 
         std::cout
             << "\nConcurrent queue test:\n"
@@ -358,6 +359,7 @@ namespace
             { "session-data-host", 2, 3, [](int count, char** args) { return RunSessionDataCommand(true, count, args); } },
             { "session-data-client", 3, 4, [](int count, char** args) { return RunSessionDataCommand(false, count, args); } },
             { "session-data-compare", 4, 4, [](int, char** args) { return session_data_test::Compare(args[2], args[3]) ? 0 : 1; } },
+            { "snapshot-replay-test", 2, 2, [](int, char**) { return session_data_test::RunSnapshotReplayTest() ? 0 : 1; } },
         };
 
         const std::string_view name = argv[1];
