@@ -793,6 +793,72 @@ namespace network
         return EnqueueSend(net::Channel::Udp, message);
     }
 
+    net::SendResult CSessionMgr::SendSpawn(const protocol::SpawnPayload& spawn, std::uint32_t hostTick)
+    {
+        protocol::Message message{};
+        message.header.type = protocol::MessageType::SPAWN;
+        message.header.sessionId = sessionId;
+        message.header.sequence = spawn.eventId;
+        message.header.hostTick = hostTick;
+        message.payload = spawn;
+
+        return EnqueueSend(net::Channel::Tcp, message);
+    }
+
+    net::SendResult CSessionMgr::SendSnapshot(std::span<const protocol::ObjectStateRecord> states, std::uint32_t hostTick)
+    {
+        if (state != SessionState::Started)
+            return net::SendResult::NotRunning;
+
+        if (!IsHost())
+            return net::SendResult::InvalidRequest;
+
+        constexpr std::size_t objectsPerPart = protocol::MAX_SNAPSHOT_OBJECTS_PER_PACKET;
+        constexpr std::size_t maxObjects = objectsPerPart * net::MAX_SNAPSHOT_PARTS_PER_BATCH;
+
+        if (states.size() > maxObjects)
+            return net::SendResult::TooLarge;
+
+        const std::size_t partCount = states.empty() ? 1 : (states.size() + objectsPerPart - 1) / objectsPerPart;
+
+        try
+        {
+            net::SnapshotBatch batch{};
+            batch.parts.reserve(partCount);
+
+            for (std::size_t partIndex = 0; partIndex < partCount; ++partIndex)
+            {
+                protocol::StateSnapshotPayload snapshot{};
+                snapshot.snapshotTick = hostTick;
+                snapshot.partIndex = static_cast<std::uint8_t>(partIndex);
+                snapshot.partCount = static_cast<std::uint8_t>(partCount);
+
+                if (!states.empty())
+                {
+                    const std::size_t offset = partIndex * objectsPerPart;
+                    const std::size_t count = (std::min)(objectsPerPart, states.size() - offset);
+                    const auto part = states.subspan(offset, count);
+                    snapshot.objects.assign(part.begin(), part.end());
+                }
+
+                protocol::Message message{};
+                message.header.type = protocol::MessageType::STATE_SNAPSHOT;
+                message.header.sessionId = sessionId;
+                message.header.sequence = hostTick;
+                message.header.hostTick = hostTick;
+                message.payload = std::move(snapshot);
+
+                batch.parts.push_back(std::move(message));
+            }
+
+            return EnqueueSnapshotBatch(batch);
+        }
+        catch (const std::bad_alloc&)
+        {
+            return net::SendResult::NoMemory;
+        }
+    }
+
     bool CSessionMgr::TryReceiveGame(ReceivedMessage& out)
     {
         if (state != SessionState::Started || gameReceiveQueue.empty())

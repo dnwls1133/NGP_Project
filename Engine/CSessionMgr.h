@@ -2,7 +2,9 @@
 
 #include "NetworkTypes.h"
 #include "../net/SendContract.h"
+
 #include <deque>
+#include <span>
 
 namespace network
 {
@@ -76,7 +78,8 @@ namespace network
         net::SendResult EnqueueSend(net::Channel channel, const protocol::Message& message);
         net::SendResult EnqueueSnapshotBatch(const net::SnapshotBatch& batch);
         net::SendResult SendPlayerInput(std::uint8_t moveBits, std::uint8_t fireHeld);
-
+        net::SendResult SendSpawn(const protocol::SpawnPayload& spawn, std::uint32_t hostTick);
+        net::SendResult SendSnapshot(std::span<const protocol::ObjectStateRecord> states, std::uint32_t hostTick);
         bool TryReceiveGame(network::ReceivedMessage& out);
         bool TryReceivePlayerInput(protocol::PlayerInputPayload& outInput, std::uint64_t& outReceivedTimeMs);
     private:
