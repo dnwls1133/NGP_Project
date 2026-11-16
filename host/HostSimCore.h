@@ -497,6 +497,57 @@ namespace host
 
         }
 
+        // 11/16: 탄환 소유자·피해 정보 기반 피격 처리 (GetPlayer(0)을 읽지 않고 탄환의
+        // ownerPlayerId·damage 사용)
+        bool ApplyProjectileHit(
+            protocol::ObjectId projectileId,
+            protocol::ObjectId monsterId,
+            net::ISendSink& sendSink)
+        {
+            HostObjectValue* proj = nullptr;
+            HostObjectValue* monster = nullptr;
+            for (HostObjectValue& obj : m_objects)
+            {
+                if (!obj.pendingDestroy)
+                {
+                    if (obj.objectId == projectileId && obj.kind == protocol::NetObjectKind::PROJ_PLAYER)
+                        proj = &obj;
+                    else if (obj.objectId == monsterId && obj.kind == protocol::NetObjectKind::MONSTER)
+                        monster = &obj;
+                }
+            }
+            if (proj == nullptr || monster == nullptr || monster->hp <= 0)
+            {
+                return false;
+            }
+            monster->hp = std::max<std::int32_t>(0, monster->hp - proj->damage);
+            RequestDestroy(projectileId, protocol::DespawnReason::DESTROYED);
+            protocol::Message combatMsg{};
+            combatMsg.header.magic = protocol::MAGIC;
+            combatMsg.header.version = protocol::VERSION;
+            combatMsg.header.type = protocol::MessageType::COMBAT_EVENT;
+            combatMsg.header.flags = protocol::FLAGS_NONE;
+            combatMsg.header.totalBytes = 60;
+            combatMsg.header.sessionId = m_sessionId;
+            combatMsg.header.roundId = 1;
+            combatMsg.header.sequence = m_nextSequence++;
+            combatMsg.header.hostTick = m_hostTick;
+            combatMsg.header.reserved = protocol::RESERVED_VALUE;
+            protocol::CombatEventPayload payload{};
+            payload.eventId = m_nextEventId++;
+            payload.kind = protocol::CombatEventKind::DAMAGE_APPLIED;
+            payload.instigatorPlayerId = proj->ownerPlayerId;
+            payload.updatedPlayerLevel = 0;
+            payload.reserved = 0;
+            payload.sourceObjectId = projectileId;
+            payload.targetObjectId = monsterId;
+            payload.confirmedHp = monster->hp;
+            payload.scoreDelta = 0;
+            payload.teamScore = 0;
+            combatMsg.payload = payload;
+            sendSink.EnqueueSend(net::Channel::Tcp, combatMsg);
+            return true;
+        }
 
         // 11/11: 마지막 유효 입력 시각 기준 300ms 경과 시 이동·발사 중립화
         // - 경계 직전(elapsedMs == 299): 유지
