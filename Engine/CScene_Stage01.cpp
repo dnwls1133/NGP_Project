@@ -110,24 +110,13 @@ void CScene_Stage01::update()
 
                     if (p0 && p1)
                     {
-                        protocol::StateSnapshotPayload snapshot{};
-                        snapshot.snapshotTick = m_hostTick;
-                        snapshot.partIndex = 0;
-                        snapshot.partCount = 1;
-                        snapshot.objects.push_back(p0->ExportStateRecord(m_playerObjectIds[0]));
-                        snapshot.objects.push_back(p1->ExportStateRecord(m_playerObjectIds[1]));
+                        std::vector<protocol::ObjectStateRecord> states;
+                        states.push_back(p0->ExportStateRecord(m_playerObjectIds[0]));
+                        states.push_back(p1->ExportStateRecord(m_playerObjectIds[1]));
 
-                        protocol::Message message{};
-                        message.header.type = protocol::MessageType::STATE_SNAPSHOT;
-                        message.header.sessionId = session.GetSessionId();
-                        message.header.sequence = m_hostTick;
-                        message.header.hostTick = m_hostTick;
-                        message.payload = std::move(snapshot);
+                        // 몬스터의 상태 추출 함수가 준비되면 같은 틱의 레코드를 여기에 추가한다.
 
-                        net::SnapshotBatch batch{};
-                        batch.parts.push_back(std::move(message));
-
-                        const auto result = session.EnqueueSnapshotBatch(batch);
+                        const auto result = session.SendSnapshot(states, m_hostTick);
 
 #ifdef _DEBUG
                         if (result != net::SendResult::Queued && result != net::SendResult::ReplacedPending && result != net::SendResult::QueueFull)
@@ -146,16 +135,19 @@ void CScene_Stage01::update()
                     continue;
 
                 auto* missile = static_cast<CMissile*>(obj);
-                m_lastSyncedMissileObjectId = missile->GetObjectId();
+                const auto spawn = missile->ExportSpawnPayload(m_nextSpawnEventId + 1);
+                const auto result = session.SendSpawn(spawn, m_hostTick);
 
-                protocol::Message message{};
-                message.header.type = protocol::MessageType::SPAWN;
-                message.header.sessionId = session.GetSessionId();
-                message.header.hostTick = m_hostTick;
-                message.header.sequence = ++m_nextSpawnEventId;
-                message.payload = missile->ExportSpawnPayload(message.header.sequence);
+                if (result != net::SendResult::Queued)
+                {
+#ifdef _DEBUG
+                    std::cerr << "[HOST] Missile SPAWN enqueue failed, objectId=" << spawn.objectId << ", result=" << static_cast<int>(result) << '\n';
+#endif
+                    break;
+                }
 
-                session.EnqueueSend(net::Channel::Tcp, message);
+                m_nextSpawnEventId = spawn.eventId;
+                m_lastSyncedMissileObjectId = spawn.objectId;
             }
         }
     }
@@ -210,6 +202,10 @@ void CScene_Stage01::update()
                     pMissile->SetName(L"Missile_Player");
                     AddObject(pMissile, GROUP_TYPE::PROJ_PLAYER);
                 }
+                else if (spawn->kind == protocol::NetObjectKind::MONSTER)
+                {
+                    // spawn.objectId를 기준으로 중복 생성을 막고, 호스트와 같은 ID와 초기 위치로 몬스터를 등록
+                }
                 continue;
             }
 
@@ -219,27 +215,34 @@ void CScene_Stage01::update()
 
             for (const auto& object : snapshot->objects)
             {
-                if (object.kind != protocol::NetObjectKind::PLAYER)
-                    continue;
-
-                for (protocol::PlayerSlot slot = 0; slot < m_remotePlayers.size(); ++slot)
+                if (object.kind == protocol::NetObjectKind::MONSTER)
                 {
-                    auto& remote = m_remotePlayers[slot];
-                    if (remote.objectId == 0 || remote.objectId != object.objectId)
-                        continue;
+                    // object.objectId로 생성된 몬스터를 찾고, 위치와 snapshotTick을 보간용 샘플로 저장
+                    // UDP 스냅샷이 TCP SPAWN보다 먼저 도착하면, 아직 등록되지 않은 ID의 샘플은 건너뛰고 생성 이후 들어오는 샘플부터 사용
+                    continue;
+                }
 
-                    if (remote.lastSnapshotTick && snapshot->snapshotTick <= *remote.lastSnapshotTick)
+                if (object.kind == protocol::NetObjectKind::PLAYER)
+                {
+                    for (protocol::PlayerSlot slot = 0; slot < m_remotePlayers.size(); ++slot)
                     {
+                        auto& remote = m_remotePlayers[slot];
+                        if (remote.objectId == 0 || remote.objectId != object.objectId)
+                            continue;
+
+                        if (remote.lastSnapshotTick && snapshot->snapshotTick <= *remote.lastSnapshotTick)
+                        {
+                            break;
+                        }
+
+                        if (auto* player = GetPlayer(slot))
+                        {
+                            // 프로토콜 좌표는 1/100 픽셀 단위다.
+                            player->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
+                            remote.lastSnapshotTick = snapshot->snapshotTick;
+                        }
                         break;
                     }
-
-                    if (auto* player = GetPlayer(slot))
-                    {
-                        // 프로토콜 좌표는 1/100 픽셀 단위다.
-                        player->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
-                        remote.lastSnapshotTick = snapshot->snapshotTick;
-                    }
-                    break;
                 }
             }
         }
@@ -371,10 +374,10 @@ void CScene_Stage01::update()
                     evt.triggered = true;
                 }
             }
-            
+
         }
 
-        
+
     }
 
 
@@ -513,7 +516,7 @@ void CScene_Stage01::Enter()
         CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::ITEM);
         CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::MONSTER);
     }
-    
+
     //Camera 지정
 
     CCamera::GetInst()->SetLookAt(vResolution / 2.f);
@@ -568,14 +571,7 @@ void CScene_Stage01::Enter()
             spawn.vel = record.vel;
             spawn.hp = record.hp;
 
-            protocol::Message message{};
-            message.header.type = protocol::MessageType::SPAWN;
-            message.header.sessionId = session.GetSessionId();
-            message.header.hostTick = m_hostTick;
-            message.header.sequence = spawn.eventId;
-            message.payload = spawn;
-
-            const auto result = session.EnqueueSend(net::Channel::Tcp, message);
+            const auto result = session.SendSpawn(spawn, m_hostTick);
             if (result != net::SendResult::Queued)
             {
 #ifdef _DEBUG
