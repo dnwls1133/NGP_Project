@@ -260,6 +260,8 @@ namespace host
             m_clampedFrameCount = 0;
             m_lifecycleFlushCount = 0;
             m_totalDestroyedCount = 0;
+            m_deathCandiateCount = 0;
+            m_teamScore = 0;
             m_lastAppliedMoveBits.fill(protocol::MoveBit::NONE);
             m_lastAppliedFireHeld.fill(0);
             m_fireTickAccum.fill(0);
@@ -402,6 +404,8 @@ namespace host
         std::uint32_t GetClampedFrameCount() const noexcept { return m_clampedFrameCount; }
         std::uint32_t GetLifecycleFlushCount() const noexcept { return m_lifecycleFlushCount; }
         std::uint32_t GetTotalDestroyedCount() const noexcept { return m_totalDestroyedCount; }
+        std::uint32_t GetDeathCandidateCount() const noexcept { return m_deathCandiateCount; }
+        std::uint32_t GetTeamScore() const noexcept { return m_teamScore; }
         const std::vector<HostObjectValue>& GetActiveObjects() const noexcept { return m_objects; }
 
         protocol::ObjectId GetPlayerSlotObjectId(protocol::PlayerSlot slot) const noexcept
@@ -522,6 +526,16 @@ namespace host
             }
             monster->hp = std::max<std::int32_t>(0, monster->hp - proj->damage);
             RequestDestroy(projectileId, protocol::DespawnReason::DESTROYED);
+
+            // 11/17: HP==0 도달 시 사망 후보 1회 및 점수 처리 추가
+            std::int32_t scoreDelta = 0;
+            if (monster->hp == 0) {
+                ++m_deathCandiateCount;
+                scoreDelta = static_cast<std::int32_t>(monster->subType) * 250;
+                m_teamScore += static_cast<std::int32_t>(scoreDelta);
+                RequestDestroy(monsterId, protocol::DespawnReason::DESTROYED);
+            }
+
             protocol::Message combatMsg{};
             combatMsg.header.magic = protocol::MAGIC;
             combatMsg.header.version = protocol::VERSION;
@@ -542,8 +556,8 @@ namespace host
             payload.sourceObjectId = projectileId;
             payload.targetObjectId = monsterId;
             payload.confirmedHp = monster->hp;
-            payload.scoreDelta = 0;
-            payload.teamScore = 0;
+            payload.scoreDelta = scoreDelta;
+            payload.teamScore = m_teamScore;
             combatMsg.payload = payload;
             sendSink.EnqueueSend(net::Channel::Tcp, combatMsg);
             return true;
@@ -855,6 +869,8 @@ namespace host
         std::uint32_t m_clampedFrameCount = 0;
         std::uint32_t m_lifecycleFlushCount = 0;
         std::uint32_t m_totalDestroyedCount = 0;
+        std::uint32_t m_deathCandiateCount = 0;
+        std::uint32_t m_teamScore = 0;
 
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedMoveBits{};
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedFireHeld{};

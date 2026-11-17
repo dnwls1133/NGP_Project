@@ -676,6 +676,50 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1117Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. HP=10에 피해 6+4면 HP=0, 사망 확정 후보 1회, 이미 사망·삭제 예정인
+        // 적 피격 제외 및 추가 점수 없음
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER,
+                1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 20'000 }, {}, 10, 1);
+            const ObjectId proj6 = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER,
+                1, 0, FixedVec2{ 15'000, 20'000 }, {}, 1, 6);
+            const ObjectId proj4 = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER,
+                1, 0, FixedVec2{ 15'000, 20'000 }, {}, 1, 4);
+            const ObjectId projExtra = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER,
+                1, 0, FixedVec2{ 15'000, 20'000 }, {}, 1, 5);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // 첫 피격(6): HP 10 -> 4, 아직 생존(사망 후보 0회, 점수 0)
+            const bool firstHit = engine.ApplyProjectileHit(proj6, monId, sink);
+            const std::int32_t hpAfter6 = engine.FindObjectById(monId)->hp;
+            const std::uint32_t deathAfter6 = engine.GetDeathCandidateCount();
+
+            // 두 번째 피격(4): HP 4 -> 0, 사망 확정 후보 1회 등록, 점수 +250
+            const bool secondHit = engine.ApplyProjectileHit(proj4, monId, sink);
+            const std::int32_t hpAfter6Plus4 = engine.FindObjectById(monId)->hp;
+            const std::uint32_t deathAfter10 = engine.GetDeathCandidateCount();
+            const std::uint32_t scoreAfter10 = engine.GetTeamScore();
+
+            // 이미 사망(HP==0, pendingDestroy)한 적에게 추가 탄환(5) 피격 시도 -> 피격 제외(false), 사망 후보 1회 유지, 추가 점수 없음
+            const bool extraHitOnDead = engine.ApplyProjectileHit(projExtra, monId, sink);
+            Check(firstHit && hpAfter6 == 4 && deathAfter6 == 0
+                && secondHit && hpAfter6Plus4 == 0 && deathAfter10 == 1 && scoreAfter10 == 250
+                && !extraHitOnDead
+                && engine.GetDeathCandidateCount() == 1
+                && engine.GetTeamScore() == 250,
+                "HostSim1117: HP=10 hit by 6+4 becomes HP=0 with 1 death candidate and excludes dead/pendingDestroy targets without extra score",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -692,6 +736,7 @@ int main()
     RunHostSim1114Suite(counters);
     RunHostSim1115Suite(counters);
     RunHostSim1116Suite(counters);
+    RunHostSim1117Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';
