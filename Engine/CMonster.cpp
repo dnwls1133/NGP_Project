@@ -172,6 +172,9 @@ void CMonster::OnCollisionEnter(CCollider* _pOther)
     int iPAtk = pPlayerobj->GetPlayerAtk();*/
     if (pOtherobj->GetName() == L"Missile_Player")
     {
+        if (IsDead() || m_signaldead || m_tInfo.fHP <= 0 || pOtherobj->IsDead())
+            return;
+
         CMissile* pMissile = static_cast<CMissile*>(pOtherobj); // 충돌한 탄환에서 직접 피해량 읽기
         const int iDamage = pMissile->GetDamage();
 
@@ -224,9 +227,9 @@ void CMonster::OnCollisionEnter(CCollider* _pOther)
         default:
             break;
         }
-        m_tInfo.fHP -= iDamage; 
+        m_tInfo.fHP = max(0.f, m_tInfo.fHP - iDamage);
 
-        if (m_tInfo.fHP < 0 && m_signaldead == false)
+        if (m_tInfo.fHP <= 0 && m_signaldead == false)
         {
             CSoundMgr::GetInst()->PlaySE(m_pDeadSE);
             m_pAI->ChangeState(MON_STATE::DEAD);
