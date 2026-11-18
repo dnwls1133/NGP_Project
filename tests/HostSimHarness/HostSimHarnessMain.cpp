@@ -720,6 +720,40 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1118Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. 동시 접촉 충돌 순서를 뒤집어도({0, 1} vs {1, 0}) 동률 시 작은 PlayerId(P0) 단일 획득 확정 및 동시 보상 없음 확인
+        {
+            CaptureSink sinkA;
+            HostSimEngine engineA{ 1000 };
+            const ObjectId p0A = engineA.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 2);
+            const ObjectId p1A = engineA.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 2);
+            const ObjectId itemA = engineA.RequestSpawn(NetObjectKind::ITEM, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 30'000 }, {}, 1, 0);
+            engineA.FlushLifecycleAtTickEnd(sinkA);
+            CaptureSink sinkB;
+            HostSimEngine engineB{ 1000 };
+            const ObjectId p0B = engineB.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 2);
+            const ObjectId p1B = engineB.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 2);
+            const ObjectId itemB = engineB.RequestSpawn(NetObjectKind::ITEM, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 30'000 }, {}, 1, 0);
+            engineB.FlushLifecycleAtTickEnd(sinkB);
+            // engineA는 {0, 1} 순서, engineB는 뒤집힌 {1, 0} 순서로 동시 접촉 주입
+            const PlayerSlot winnerA = engineA.ResolveItemPickup(itemA, { 0, 1 }, sinkA);
+            const PlayerSlot winnerB = engineB.ResolveItemPickup(itemB, { 1, 0 }, sinkB);
+            // 이미 획득된 아이템에 재접촉 시도 시 거부(INVALID_PLAYER_SLOT)
+            const PlayerSlot duplicateAttempt = engineA.ResolveItemPickup(itemA, { 1 }, sinkA);
+            Check(winnerA == 0 && winnerB == 0
+                && duplicateAttempt == INVALID_PLAYER_SLOT
+                && engineA.FindObjectById(p0A)->subType == 2
+                && engineA.FindObjectById(p1A)->subType == 1
+                && engineB.FindObjectById(p0B)->subType == 2
+                && engineB.FindObjectById(p1B)->subType == 1,
+                "HostSim1118: Resolves simultaneous item pickup to single winner (smaller PlayerId on tie) regardless of collision order without double reward",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -737,6 +771,7 @@ int main()
     RunHostSim1115Suite(counters);
     RunHostSim1116Suite(counters);
     RunHostSim1117Suite(counters);
+    RunHostSim1118Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

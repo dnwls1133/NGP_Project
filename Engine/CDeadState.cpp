@@ -136,6 +136,7 @@ void CDeadState::Enter()
         item->SetPos(vMpos);
         item->SetScale(Vec2(0, 0));
         item->SetName(L"Item");
+        item->InitAfterPlacement();
         CreateObject(item, GROUP_TYPE::ITEM);
         GetMonster()->GetAnimator()->LoadAnimation(L"animation\\N34Enemy_Dead.anim");
         GetMonster()->GetAnimator()->Play(L"N34Enemy_Dead", false);

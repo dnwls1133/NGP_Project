@@ -563,6 +563,99 @@ namespace host
             return true;
         }
 
+        // 11/18: 동시 접촉을 모아 단일 획득자 결정 (충돌 순서 무관, 가까운 생존자 우선,
+        // 동률시 작은 PlayerId, 동시 보상 없음)
+        protocol::PlayerSlot ResolveItemPickup(
+            protocol::ObjectId itemId,
+            const std::vector<protocol::PlayerSlot>& touchingSlots,
+            net::ISendSink& sendSink) {
+            HostObjectValue* item = nullptr;
+            for (HostObjectValue& obj : m_objects) {
+                if (!obj.pendingDestroy && obj.objectId == itemId
+                    && obj.kind == protocol::NetObjectKind::ITEM) {
+                    item = &obj;
+                    break;
+                }
+            }
+            if (item == nullptr || touchingSlots.empty())
+            {
+                return protocol::INVALID_PLAYER_SLOT;
+            }
+
+            protocol::PlayerSlot winnerSlot = protocol::INVALID_PLAYER_SLOT;
+            HostObjectValue* winnerObj = nullptr;
+            std::int64_t bestDistSq = 0;
+
+            for (const protocol::PlayerSlot slot : touchingSlots) {
+                if (slot >= protocol::MAX_PROTOCOL_PLAYERS)
+                    continue;
+
+                const protocol::ObjectId playerObjId = m_playerSlotObjectIds[slot];
+                HostObjectValue* candidate = nullptr;
+                for (HostObjectValue& obj : m_objects)
+                {
+                    if (!obj.pendingDestroy && obj.objectId == playerObjId && obj.hp > 0)
+                    {
+                        candidate = &obj;
+                        break;
+                    }
+                }
+                if (candidate == nullptr)
+                    continue;
+                const std::int64_t dx = static_cast<std::int64_t>(candidate->pos.x) - item->pos.x;
+                const std::int64_t dy = static_cast<std::int64_t>(candidate->pos.y) - item->pos.y;
+                const std::int64_t distSq = (dx * dx) + (dy * dy);
+                if (winnerObj == nullptr
+                    || distSq < bestDistSq
+                    || (distSq == bestDistSq && slot < winnerSlot))
+                {
+                    winnerSlot = slot;
+                    winnerObj = candidate;
+                    bestDistSq = distSq;
+                }
+            }
+            if (winnerObj == nullptr)
+            {
+                return protocol::INVALID_PLAYER_SLOT;
+            }
+            std::int32_t scoreDelta = 0;
+            if (winnerObj->subType < 5)
+            {
+                winnerObj->subType += 1;
+            }
+            else
+            {
+                scoreDelta = 100;
+                m_teamScore += 100;
+            }
+            RequestDestroy(itemId, protocol::DespawnReason::COLLECTED);
+            protocol::Message combatMsg{};
+            combatMsg.header.magic = protocol::MAGIC;
+            combatMsg.header.version = protocol::VERSION;
+            combatMsg.header.type = protocol::MessageType::COMBAT_EVENT;
+            combatMsg.header.flags = protocol::FLAGS_NONE;
+            combatMsg.header.totalBytes = 60;
+            combatMsg.header.sessionId = m_sessionId;
+            combatMsg.header.roundId = 1;
+            combatMsg.header.sequence = m_nextSequence++;
+            combatMsg.header.hostTick = m_hostTick;
+            combatMsg.header.reserved = protocol::RESERVED_VALUE;
+            protocol::CombatEventPayload payload{};
+            payload.eventId = m_nextEventId++;
+            payload.kind = protocol::CombatEventKind::ITEM_PICKED;
+            payload.instigatorPlayerId = winnerSlot;
+            payload.updatedPlayerLevel = winnerObj->subType;
+            payload.reserved = 0;
+            payload.sourceObjectId = itemId;
+            payload.targetObjectId = winnerObj->objectId;
+            payload.confirmedHp = winnerObj->hp;
+            payload.scoreDelta = scoreDelta;
+            payload.teamScore = m_teamScore;
+            combatMsg.payload = payload;
+            sendSink.EnqueueSend(net::Channel::Tcp, combatMsg);
+            return winnerSlot;
+        }
+
         // 11/11: 마지막 유효 입력 시각 기준 300ms 경과 시 이동·발사 중립화
         // - 경계 직전(elapsedMs == 299): 유지
         // - 정확한 경계(elapsedMs == 300) 및 직후(elapsedMs >= 301) :

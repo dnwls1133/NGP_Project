@@ -275,6 +275,8 @@ void CPlayer::render(HDC _dc)
         , bf);*/
 }
 
+
+
 void CPlayer::CreateMissile(int type,  float _fVec,MISSILE_TYPE _eType)
 {
 	Vec2 vMissilePos = GetPos();
@@ -347,7 +349,18 @@ void CPlayer::CreateMissile(int type,  float _fVec,MISSILE_TYPE _eType)
 	CreateObject(pMissile,GROUP_TYPE::PROJ_PLAYER);
 }
 
-
+void CPlayer::ApplyItemReward()
+{
+    CSoundMgr::GetInst()->PlaySE(m_pLvUpSE);
+    if (m_iLvl < 5)
+    {
+        m_iLvl += 1;
+    }
+    else
+    {
+        CRankMgr::GetInst()->CurrentRanking.Score += 100;
+    }
+}
 
 void CPlayer::OnCollisionEnter(CCollider* _pOther)
 {
@@ -380,7 +393,7 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
         m_iBoomb = 1;
 	}
 
-    if (pOtherObj->GetName() == L"Item")
+    /*if (pOtherObj->GetName() == L"Item")
     {
         CSoundMgr::GetInst()->PlaySE(m_pLvUpSE);
         if (m_iLvl < 5)
@@ -391,7 +404,7 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
         {
             CRankMgr::GetInst()->CurrentRanking.Score += 100;
         }
-    }
+    }*/
     if (pOtherObj->GetName() == L"Monster")
     {
         if (isMujeok)

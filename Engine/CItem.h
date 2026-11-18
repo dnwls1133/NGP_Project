@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "CObject.h"
+class CPlayer;
 class CItem :
     public CObject
 {
@@ -10,7 +11,11 @@ private:
     float     m_fVec;
     int       m_iType;
     Vec2      m_vDir;
+    bool      m_bCollected = false;
+    vector<CPlayer*> m_TouchPlayers;
 public:
+    void InitAfterPlacement();
+    void ResolveSimultaneousPickup();
     virtual void update();
     virtual void render(HDC _dc);
 public:

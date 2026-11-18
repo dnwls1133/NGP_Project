@@ -26,25 +26,6 @@ CItem::CItem()
     , m_vDir(Vec2(1.f, 1.f))
     , m_fVec(200.f)
 {
-    Vec2 vIpos = GetPos();
-    Vec2 vPpos = CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0)->GetPos();
-    double dx = vIpos.x;
-    double dy = vPpos.y;
-    double distance = sqrt(dx * dx + dy * dy);
-    if (vIpos.x - vPpos.x < 0)
-    {
-        vPpos.x = -(vIpos.x - vPpos.x);
-    }
-    else if (vIpos.x - vPpos.x > 0)
-    {
-        vPpos.x = -(vIpos.x - vPpos.x);
-    }
-    vPpos.y = vIpos.y - vPpos.y;
-    m_vDir = vPpos.Normalize();
-   
-
-
-
     CreaeteCollider();
     GetCollider()->SetScale(Vec2(20.f, 20.f));
     CTexture* m_pTex = CResMgr::GetInst()->LoadTexture(L"ItemTex0", L"texture\\Item.png");
@@ -60,10 +41,65 @@ CItem::~CItem()
 
 
 
-void CItem::update()
+void CItem::InitAfterPlacement()
 {
     Vec2 vIpos = GetPos();
-    Vec2 vPpos = CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0)->GetPos();
+    CScene* pCurScene = CSceneMgr::GetInst()->GetCurScene();
+    CPlayer* pTarget = (pCurScene != nullptr) ? pCurScene->
+        SelectNearestAlivePlayer(vIpos) : nullptr;
+    if (pTarget == nullptr) {
+        m_vDir = Vec2(0.f, -1.f);
+        return;
+    }
+
+    Vec2 vPpos = pTarget->GetPos();
+    vPpos.x -= vIpos.x;
+    vPpos.y = vIpos.y - vPpos.y;
+    m_vDir = vPpos.Normalize();
+
+}
+
+void CItem::ResolveSimultaneousPickup()
+{
+    if (m_bCollected || IsDead() || m_TouchPlayers.empty())
+        return;
+
+    CPlayer* winner = nullptr;
+    float bestDistSq = 0.0f;
+    const Vec2 itemPos = GetPos();
+    for (CPlayer* candidate : m_TouchPlayers) {
+        if (candidate == nullptr || candidate->IsDead() ||
+            !candidate->IsAlivePlayer())
+            continue;
+        Vec2 diff = candidate->GetPos() - itemPos;
+        float distSq = diff.x * diff.x + diff.y * diff.y;
+
+        if (winner == nullptr
+            || distSq < bestDistSq
+            || (distSq == bestDistSq &&
+                candidate->GetPlayerId() < winner->GetPlayerId())) {
+            winner = candidate;
+            bestDistSq = distSq;
+        }
+    }
+
+    m_TouchPlayers.clear();
+
+    if (winner != nullptr) {
+        m_bCollected = true;
+        SetCollideroff();
+        winner->ApplyItemReward();
+        DeleteObject(this);
+    }
+}
+
+void CItem::update()
+{
+    ResolveSimultaneousPickup(); // 이전 충돌 단계에서 모인 동시 접촉 후보가 있으면 단일 획득자 확정
+    if (m_bCollected || IsDead())
+        return;
+    Vec2 vIpos = GetPos();
+    
     Vec2 resolution = CCore::GetInst()->GetResolution();
     CBackground* Background = (CBackground*)CSceneMgr::GetInst()->GetCurScene()->GetBackground();
     Vec2 vBackPos = Background->GetPos();
@@ -100,11 +136,18 @@ void CItem::render(HDC _dc)
 
 void CItem::OnCollisionEnter(CCollider* _pOther)
 {
+    if (m_bCollected || IsDead())
+        return;
     CObject* pOtherObj = _pOther->GetObj();
 
-    if (pOtherObj->GetName() == L"Player")
+    if (pOtherObj != nullptr && pOtherObj->GetName() == L"Player")
     {
-        DeleteObject(this);
+        CPlayer* pPlayer = static_cast<CPlayer*>(pOtherObj);
+        for (CPlayer* existing : m_TouchPlayers) {
+            if (existing == pPlayer)
+                return; // 이미 후보 목록에 있음
+        }
+        m_TouchPlayers.push_back(pPlayer);
     }
 }
 
