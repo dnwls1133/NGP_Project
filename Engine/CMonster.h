@@ -57,6 +57,9 @@ public:
     const tMonInfo& GetInfo() { return m_tInfo; }
     void SetAnim(MON_TYPE eType);
     bool GetsignalDead() { return m_signaldead; }
+    protocol::SpawnPayload
+        ExportSpawnPayload(protocol::EventId eventId) const override;
+
 
     void SetMissiletype(MISSILE_PTRN eType)
     {

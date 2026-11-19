@@ -58,6 +58,13 @@ namespace session_data_test
         std::size_t queueFull = 0;
     };
 
+    struct ReplayAppliedState
+    {
+        std::vector<std::uint32_t> ticks;
+        protocol::ObjectStateRecord object{};
+    };
+
+
     protocol::Message MakeInput(std::uint32_t sessionId, protocol::PlayerSlot playerId, std::uint32_t number)
     {
         const bool odd = number % 2 != 0;
@@ -273,6 +280,20 @@ namespace session_data_test
         return true;
     }
 
+    void ApplyReplaySnapshot(const protocol::StateSnapshotPayload& snapshot, std::map<protocol::ObjectId, ReplayAppliedState>& applied)
+    {
+        for (const auto& object : snapshot.objects)
+        {
+            auto& state = applied[object.objectId];
+
+            if (!state.ticks.empty() && snapshot.snapshotTick <= state.ticks.back())
+                continue;
+
+            state.ticks.push_back(snapshot.snapshotTick);
+            state.object = object;
+        }
+    }
+
     bool CheckSnapshotReplay(const std::array<std::vector<std::uint8_t>, REPLAY_FRAME_COUNT>& frames, const std::array<std::size_t, REPLAY_FRAME_COUNT>& order, const std::vector<std::uint32_t>& expectedAppliedTicks)
     {
         std::cout << "[TEST] Replay order:";
@@ -284,30 +305,19 @@ namespace session_data_test
         if (!DecodeSnapshotReplay(frames, order, decoded))
             return false;
 
-        struct AppliedState
-        {
-            std::vector<std::uint32_t> ticks;
-            protocol::FixedVec2 position{};
-        };
-
-        std::map<protocol::ObjectId, AppliedState> applied;
+        std::map<protocol::ObjectId, ReplayAppliedState> applied;
 
         std::cout << "  Received ticks:";
+
         for (const auto& message : decoded)
         {
-            const auto& snapshot = std::get<protocol::StateSnapshotPayload>(message.payload);
+            const auto& snapshot =
+                std::get<protocol::StateSnapshotPayload>(message.payload);
+
             std::cout << ' ' << snapshot.snapshotTick;
-
-            for (const auto& object : snapshot.objects)
-            {
-                auto& state = applied[object.objectId];
-                if (!state.ticks.empty() && snapshot.snapshotTick <= state.ticks.back())
-                    continue;
-
-                state.ticks.push_back(snapshot.snapshotTick);
-                state.position = object.pos;
-            }
+            ApplyReplaySnapshot(snapshot, applied);
         }
+
         std::cout << '\n';
 
         const auto finalBatch = MakeSnapshot(REPLAY_SESSION_ID, REPLAY_FRAME_COUNT);
@@ -322,14 +332,96 @@ namespace session_data_test
                 std::cout << ' ' << tick;
             std::cout << '\n';
 
-            if (state.ticks != expectedAppliedTicks || state.position != object.pos)
+            if (state.ticks != expectedAppliedTicks || state.object != object)
             {
-                std::cerr << "[FAIL] Applied ticks or final position mismatch, objectId=" << object.objectId << '\n';
+                std::cerr << "[FAIL] Applied ticks or object state mismatch, objectId=" << object.objectId << '\n';
                 return false;
             }
         }
 
         std::cout << "[PASS] Applied ticks and final positions matched\n";
+        return true;
+    }
+
+    bool CheckSplitSnapshotReplay(const std::array<std::size_t, 2>& order)
+    {
+        const auto batch = MakeSnapshot(REPLAY_SESSION_ID, 10);
+        const auto& source = batch.parts.front();
+        const auto& sourceSnapshot = std::get<protocol::StateSnapshotPayload>(source.payload);
+
+        std::array<protocol::Message, 2> expected{};
+        std::array<std::vector<std::uint8_t>, 2> frames{};
+
+        for (std::size_t index = 0; index < expected.size(); ++index)
+        {
+            auto& message = expected[index];
+            message.header = source.header;
+            message.header.totalBytes = static_cast<std::uint32_t>(
+                protocol::HEADER_BYTES +
+                protocol::SNAPSHOT_HEADER_BYTES +
+                protocol::OBJECT_STATE_RECORD_BYTES);
+
+            protocol::StateSnapshotPayload snapshot{};
+            snapshot.snapshotTick = sourceSnapshot.snapshotTick;
+            snapshot.partIndex = static_cast<std::uint8_t>(index);
+            snapshot.partCount = 2;
+            snapshot.objects.push_back(sourceSnapshot.objects[index]);
+            message.payload = std::move(snapshot);
+
+            const auto error = protocol::CPacketCodec::Encode(message, frames[index]);
+            if (error != protocol::CodecError::NONE)
+            {
+                std::cerr << "[FAIL] Split snapshot encode failed, part=" << index << ", codecError=" << static_cast<int>(error) << '\n';
+                return false;
+            }
+        }
+        std::cout << "[TEST] Split snapshot order: " << order[0] << ' ' << order[1] << '\n';
+
+        std::map<protocol::ObjectId, ReplayAppliedState> applied;
+
+        for (const auto index : order)
+        {
+            protocol::Message decoded{};
+            const auto error = protocol::CPacketCodec::Decode(frames[index], decoded);
+
+            if (error != protocol::CodecError::NONE || decoded != expected[index])
+            {
+                std::cerr << "[FAIL] Split snapshot decode or field mismatch, part=" << index << '\n';
+                return false;
+            }
+
+            const auto& snapshot = std::get<protocol::StateSnapshotPayload>(decoded.payload);
+
+            ApplyReplaySnapshot(snapshot, applied);
+        }
+
+        if (applied.size() != sourceSnapshot.objects.size())
+        {
+            std::cerr << "[FAIL] Missing objects after split snapshot replay\n";
+            return false;
+        }
+
+        for (const auto& object : sourceSnapshot.objects)
+        {
+            const auto found = applied.find(object.objectId);
+            if (found == applied.end())
+            {
+                std::cerr << "[FAIL] Object not applied, objectId=" << object.objectId << '\n';
+                return false;
+            }
+
+            const auto& state = found->second;
+            if (state.ticks != std::vector<std::uint32_t>{ sourceSnapshot.snapshotTick } ||
+                state.object != object)
+            {
+                std::cerr << "[FAIL] Split snapshot application mismatch, objectId=" << object.objectId << '\n';
+                return false;
+            }
+
+            std::cout << "  Object " << object.objectId << " applied tick=" << state.ticks.back() << '\n';
+        }
+
+        std::cout << "[PASS] Both snapshot parts applied with matching object states\n";
         return true;
     }
 
@@ -361,13 +453,27 @@ namespace session_data_test
             }
 
             ++total;
+
             if (CheckSnapshotReplay(frames, order, expectedAppliedTicks))
                 ++passed;
         } while (std::next_permutation(order.begin(), order.end()));
 
+        const std::array<std::array<size_t, 2>, 2> splitOrders({
+            {1, 0},
+            {0, 1}
+            });
+
+        for (const auto& splitOrder : splitOrders)
+        {
+            ++total;
+
+            if (CheckSplitSnapshotReplay(splitOrder))
+                ++passed;
+        }
+
         std::cout << "[SUMMARY] total=" << total << " passed=" << passed << " failed=" << total - passed << '\n';
 
-        const bool success = total == 24 && passed == total;
+        const bool success = total == 26 && passed == total;
         std::cout << (success ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");
         return success;
     }

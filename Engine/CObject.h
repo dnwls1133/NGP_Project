@@ -2,6 +2,7 @@
 
 
 #include "CCamera.h"
+#include "../shared/protocol/ProtocolTypes.h"
 
 class CCollider;
 class CAnimator;
@@ -33,13 +34,24 @@ public:
     void SetObjectId(std::uint32_t _id) { m_objectId = _id; }
     std::uint32_t GetObjectId() const { return m_objectId; }
 
+    virtual protocol::SpawnPayload ExportSpawnPayload(protocol::EventId eventId) const
+    {
+        protocol::SpawnPayload spawn{};
+        spawn.eventId = eventId;
+        spawn.objectId = m_objectId;
+        spawn.pos.x = static_cast<std::int32_t>(m_vPos.x * 100.f);
+        spawn.pos.y = static_cast<std::int32_t>(m_vPos.y * 100.f);
+        return spawn;
+    }
+   
+
 	bool IsDead() { return !m_bAlive; }
 	bool IsCollideroff() { return m_bCollideroff; }
 
 
 	Vec2 GetPos() const { return m_vPos; }
 	Vec2 GetScale() const { return m_vScale; }
-	const wstring& GetName() { return m_strName; }
+	const wstring& GetName() const { return m_strName; }
 	
 	CCollider* GetCollider() { return m_pCollider; }
 	CAnimator* GetAnimator() { return m_pAnimator; }

@@ -166,6 +166,7 @@ namespace host
         std::int32_t maxHp = 3;
         std::int32_t damage = 1;
         std::uint32_t stateTickAccum = 0; // 추가 (틱 기반 FSM 전환 누적기)
+        bool deathConfirmed = false; // 추가 사망,점수,eventId 1회 확정 플래그
         bool pendingDestroy = false; // 첫 삭제 요청 시 true -> 같은 틱 충돌/피해/조준에서 즉시 제외
     };
 
@@ -260,6 +261,8 @@ namespace host
             m_clampedFrameCount = 0;
             m_lifecycleFlushCount = 0;
             m_totalDestroyedCount = 0;
+            m_deathCandiateCount = 0;
+            m_teamScore = 0;
             m_lastAppliedMoveBits.fill(protocol::MoveBit::NONE);
             m_lastAppliedFireHeld.fill(0);
             m_fireTickAccum.fill(0);
@@ -402,6 +405,8 @@ namespace host
         std::uint32_t GetClampedFrameCount() const noexcept { return m_clampedFrameCount; }
         std::uint32_t GetLifecycleFlushCount() const noexcept { return m_lifecycleFlushCount; }
         std::uint32_t GetTotalDestroyedCount() const noexcept { return m_totalDestroyedCount; }
+        std::uint32_t GetDeathCandidateCount() const noexcept { return m_deathCandiateCount; }
+        std::uint32_t GetTeamScore() const noexcept { return m_teamScore; }
         const std::vector<HostObjectValue>& GetActiveObjects() const noexcept { return m_objects; }
 
         protocol::ObjectId GetPlayerSlotObjectId(protocol::PlayerSlot slot) const noexcept
@@ -522,6 +527,20 @@ namespace host
             }
             monster->hp = std::max<std::int32_t>(0, monster->hp - proj->damage);
             RequestDestroy(projectileId, protocol::DespawnReason::DESTROYED);
+
+            // 11/17: HP==0 도달 시 사망 후보 1회 및 점수 처리 추가
+            std::int32_t scoreDelta = 0;
+            bool justDied = false;
+            if (monster->hp == 0 && !monster->deathConfirmed) {
+                monster->deathConfirmed = true;
+                monster->fsmState = 2; // MON_STATE::DEAD
+                justDied = true;
+                ++m_deathCandiateCount;
+                scoreDelta = static_cast<std::int32_t>(monster->subType) * 250;
+                m_teamScore += static_cast<std::int32_t>(scoreDelta);
+                RequestDestroy(monsterId, protocol::DespawnReason::DESTROYED);
+            }
+
             protocol::Message combatMsg{};
             combatMsg.header.magic = protocol::MAGIC;
             combatMsg.header.version = protocol::VERSION;
@@ -542,11 +561,114 @@ namespace host
             payload.sourceObjectId = projectileId;
             payload.targetObjectId = monsterId;
             payload.confirmedHp = monster->hp;
-            payload.scoreDelta = 0;
-            payload.teamScore = 0;
+            payload.scoreDelta = scoreDelta;
+            payload.teamScore = m_teamScore;
             combatMsg.payload = payload;
             sendSink.EnqueueSend(net::Channel::Tcp, combatMsg);
+
+            if (justDied) { // 사망 확정 시 고유 eventId를 가진 ENTITY_DIED 이벤트 1회 발생
+                protocol::Message diedMsg = combatMsg;
+                diedMsg.header.sequence = m_nextSequence++;
+                protocol::CombatEventPayload& diedPayload = payload;
+                diedPayload.eventId = m_nextEventId++;
+                diedPayload.kind = protocol::CombatEventKind::ENTITY_DIED;
+                diedMsg.payload = diedPayload;
+                sendSink.EnqueueSend(net::Channel::Tcp, diedMsg);
+            }
             return true;
+        }
+
+        // 11/18: 동시 접촉을 모아 단일 획득자 결정 (충돌 순서 무관, 가까운 생존자 우선,
+        // 동률시 작은 PlayerId, 동시 보상 없음)
+        protocol::PlayerSlot ResolveItemPickup(
+            protocol::ObjectId itemId,
+            const std::vector<protocol::PlayerSlot>& touchingSlots,
+            net::ISendSink& sendSink) {
+            HostObjectValue* item = nullptr;
+            for (HostObjectValue& obj : m_objects) {
+                if (!obj.pendingDestroy && obj.objectId == itemId
+                    && obj.kind == protocol::NetObjectKind::ITEM) {
+                    item = &obj;
+                    break;
+                }
+            }
+            if (item == nullptr || touchingSlots.empty())
+            {
+                return protocol::INVALID_PLAYER_SLOT;
+            }
+
+            protocol::PlayerSlot winnerSlot = protocol::INVALID_PLAYER_SLOT;
+            HostObjectValue* winnerObj = nullptr;
+            std::int64_t bestDistSq = 0;
+
+            for (const protocol::PlayerSlot slot : touchingSlots) {
+                if (slot >= protocol::MAX_PROTOCOL_PLAYERS)
+                    continue;
+
+                const protocol::ObjectId playerObjId = m_playerSlotObjectIds[slot];
+                HostObjectValue* candidate = nullptr;
+                for (HostObjectValue& obj : m_objects)
+                {
+                    if (!obj.pendingDestroy && obj.objectId == playerObjId && obj.hp > 0)
+                    {
+                        candidate = &obj;
+                        break;
+                    }
+                }
+                if (candidate == nullptr)
+                    continue;
+                const std::int64_t dx = static_cast<std::int64_t>(candidate->pos.x) - item->pos.x;
+                const std::int64_t dy = static_cast<std::int64_t>(candidate->pos.y) - item->pos.y;
+                const std::int64_t distSq = (dx * dx) + (dy * dy);
+                if (winnerObj == nullptr
+                    || distSq < bestDistSq
+                    || (distSq == bestDistSq && slot < winnerSlot))
+                {
+                    winnerSlot = slot;
+                    winnerObj = candidate;
+                    bestDistSq = distSq;
+                }
+            }
+            if (winnerObj == nullptr)
+            {
+                return protocol::INVALID_PLAYER_SLOT;
+            }
+            std::int32_t scoreDelta = 0;
+            if (winnerObj->subType < 5)
+            {
+                winnerObj->subType += 1;
+            }
+            else
+            {
+                scoreDelta = 100;
+                m_teamScore += 100;
+            }
+            RequestDestroy(itemId, protocol::DespawnReason::COLLECTED);
+            protocol::Message combatMsg{};
+            combatMsg.header.magic = protocol::MAGIC;
+            combatMsg.header.version = protocol::VERSION;
+            combatMsg.header.type = protocol::MessageType::COMBAT_EVENT;
+            combatMsg.header.flags = protocol::FLAGS_NONE;
+            combatMsg.header.totalBytes = 60;
+            combatMsg.header.sessionId = m_sessionId;
+            combatMsg.header.roundId = 1;
+            combatMsg.header.sequence = m_nextSequence++;
+            combatMsg.header.hostTick = m_hostTick;
+            combatMsg.header.reserved = protocol::RESERVED_VALUE;
+            protocol::CombatEventPayload payload{};
+            payload.eventId = m_nextEventId++;
+            payload.kind = protocol::CombatEventKind::ITEM_PICKED;
+            payload.instigatorPlayerId = winnerSlot;
+            payload.updatedPlayerLevel = winnerObj->subType;
+            payload.reserved = 0;
+            payload.sourceObjectId = itemId;
+            payload.targetObjectId = winnerObj->objectId;
+            payload.confirmedHp = winnerObj->hp;
+            payload.scoreDelta = scoreDelta;
+            payload.teamScore = m_teamScore;
+            combatMsg.payload = payload;
+            sendSink.EnqueueSend(net::Channel::Tcp, combatMsg);
+            return winnerSlot;
         }
 
         // 11/11: 마지막 유효 입력 시각 기준 300ms 경과 시 이동·발사 중립화
@@ -855,6 +977,8 @@ namespace host
         std::uint32_t m_clampedFrameCount = 0;
         std::uint32_t m_lifecycleFlushCount = 0;
         std::uint32_t m_totalDestroyedCount = 0;
+        std::uint32_t m_deathCandiateCount = 0;
+        std::uint32_t m_teamScore = 0;
 
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedMoveBits{};
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedFireHeld{};
