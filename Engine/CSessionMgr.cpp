@@ -557,6 +557,7 @@ namespace network
         peerTcpAddress = {};
         peerUdpAddress = {};
         gameReceiveQueue.clear();
+        acceptedEventIds.clear();
         playerInputSequence = 0;
         lastValidReceiveMs = 0;
         lastHeartbeatQueuedMs = 0;
@@ -1036,6 +1037,23 @@ namespace network
         }
     }
 
+    static protocol::EventId GetGameEventId(const protocol::Message& message) noexcept
+    {
+        if (const auto* spawn = std::get_if<protocol::SpawnPayload>(&message.payload))
+            return spawn->eventId;
+
+        if (const auto* despawn = std::get_if<protocol::DespawnPayload>(&message.payload))
+            return despawn->eventId;
+
+        if (const auto* combat = std::get_if<protocol::CombatEventPayload>(&message.payload))
+            return combat->eventId;
+
+        if (const auto* result = std::get_if<protocol::ResultPayload>(&message.payload))
+            return result->eventId;
+
+        return 0;
+    }
+
     void CSessionMgr::HandleGameMessage(ReceivedMessage received)
     {
         const NetworkRole senderRole = IsHost() ? NetworkRole::Client : NetworkRole::Host;
@@ -1072,17 +1090,28 @@ namespace network
         if (isHeartbeat)
             return;
 
+        const auto eventId = GetGameEventId(message);
+
+        if (eventId != 0 && acceptedEventIds.contains(eventId))
+            return;
+
         int error = WSAENOBUFS;
 
         if (gameReceiveQueue.size() < net::MAX_RECV_QUEUE_ENTRIES)
         {
             try
             {
+                if (eventId != 0)
+                    acceptedEventIds.insert(eventId);
+
                 gameReceiveQueue.push_back(std::move(received));
                 return;
             }
             catch (const std::bad_alloc&)
             {
+                if (eventId != 0)
+                    acceptedEventIds.erase(eventId);
+
                 error = WSA_NOT_ENOUGH_MEMORY;
             }
         }

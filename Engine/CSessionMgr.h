@@ -5,6 +5,7 @@
 
 #include <deque>
 #include <span>
+#include <unordered_set>
 
 namespace network
 {
@@ -120,15 +121,16 @@ namespace network
         bool TryReceiveGamePayload(Payload& out, protocol::PacketHeader* outHeader, std::uint64_t* outReceivedTimeMs);
 
         std::deque<ReceivedMessage> gameReceiveQueue;
+        std::unordered_set<protocol::EventId> acceptedEventIds;
 
         sockaddr_in peerTcpAddress{};
         sockaddr_in peerUdpAddress{};
-
 
         bool clientReady = false;
 
         bool localLoaded = false;
         bool clientLoaded = false;
+
         protocol::StartPayload startInfo{};
 
         CNetworkMgr& network;
