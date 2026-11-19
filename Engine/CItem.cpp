@@ -93,6 +93,22 @@ void CItem::ResolveSimultaneousPickup()
     }
 }
 
+protocol::SpawnPayload CItem::ExportSpawnPayload(protocol::EventId eventId) const
+{
+    protocol::SpawnPayload spawn{};
+    spawn.eventId = eventId;
+    spawn.objectId = GetObjectId();
+    spawn.kind = protocol::NetObjectKind::ITEM;
+    spawn.subType = static_cast<std::uint8_t>(m_iType);
+    spawn.ownerPlayerId = protocol::INVALID_PLAYER_SLOT;
+    spawn.pos.x = static_cast<std::int32_t>(GetPos().x * 100.f);
+    spawn.pos.y = static_cast<std::int32_t>(GetPos().y  * 100.f);
+    spawn.vel.x = static_cast<std::int32_t>(m_vDir.x * m_fVec * 100.f);
+    spawn.vel.y = static_cast<std::int32_t>(m_vDir.y * m_fVec * 100.f);
+    spawn.hp = 1;
+    return spawn;
+}
+
 void CItem::update()
 {
     ResolveSimultaneousPickup(); // 이전 충돌 단계에서 모인 동시 접촉 후보가 있으면 단일 획득자 확정

@@ -230,6 +230,21 @@ protocol::ObjectStateRecord CPlayer::ExportStateRecord(protocol::ObjectId object
     return rec;
 }
 
+protocol::SpawnPayload CPlayer::ExportSpawnPayload(protocol::EventId eventId) const
+{
+    protocol::SpawnPayload spawn{};
+    spawn.eventId = eventId;
+    spawn.objectId = GetObjectId();
+    spawn.kind = protocol::NetObjectKind::PLAYER;
+    spawn.subType = static_cast<std::uint8_t>(m_iLvl);
+    spawn.ownerPlayerId = m_PlayerId;
+    spawn.pos.x = static_cast<std::int32_t>(GetPos().x * 100.f);
+    spawn.pos.y = static_cast<std::int32_t>(GetPos().y * 100.f);
+    spawn.hp = m_iHp;
+    spawn.damage = m_iAtk;
+    return spawn;
+}
+
 void CPlayer::render(HDC _dc)
 {
 	/*int iWidith = (int)m_pTex->Width();

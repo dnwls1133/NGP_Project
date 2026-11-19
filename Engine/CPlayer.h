@@ -31,6 +31,7 @@ public:
     void SetPlayerId(PlayerId id) { m_PlayerId = id; }
     PlayerId GetPlayerId() { return m_PlayerId; }
     protocol::ObjectStateRecord ExportStateRecord(protocol::ObjectId objectId) const;
+    protocol::SpawnPayload ExportSpawnPayload(protocol::EventId eventId) const override;
 
     virtual void render(HDC _dc);
 

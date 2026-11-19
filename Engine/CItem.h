@@ -16,6 +16,8 @@ private:
 public:
     void InitAfterPlacement();
     void ResolveSimultaneousPickup();
+
+    protocol::SpawnPayload ExportSpawnPayload(protocol::EventId eventId) const override;
     virtual void update();
     virtual void render(HDC _dc);
 public:

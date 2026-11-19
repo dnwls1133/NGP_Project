@@ -166,6 +166,7 @@ namespace host
         std::int32_t maxHp = 3;
         std::int32_t damage = 1;
         std::uint32_t stateTickAccum = 0; // 추가 (틱 기반 FSM 전환 누적기)
+        bool deathConfirmed = false; // 추가 사망,점수,eventId 1회 확정 플래그
         bool pendingDestroy = false; // 첫 삭제 요청 시 true -> 같은 틱 충돌/피해/조준에서 즉시 제외
     };
 
@@ -529,7 +530,11 @@ namespace host
 
             // 11/17: HP==0 도달 시 사망 후보 1회 및 점수 처리 추가
             std::int32_t scoreDelta = 0;
-            if (monster->hp == 0) {
+            bool justDied = false;
+            if (monster->hp == 0 && !monster->deathConfirmed) {
+                monster->deathConfirmed = true;
+                monster->fsmState = 2; // MON_STATE::DEAD
+                justDied = true;
                 ++m_deathCandiateCount;
                 scoreDelta = static_cast<std::int32_t>(monster->subType) * 250;
                 m_teamScore += static_cast<std::int32_t>(scoreDelta);
@@ -560,6 +565,16 @@ namespace host
             payload.teamScore = m_teamScore;
             combatMsg.payload = payload;
             sendSink.EnqueueSend(net::Channel::Tcp, combatMsg);
+
+            if (justDied) { // 사망 확정 시 고유 eventId를 가진 ENTITY_DIED 이벤트 1회 발생
+                protocol::Message diedMsg = combatMsg;
+                diedMsg.header.sequence = m_nextSequence++;
+                protocol::CombatEventPayload& diedPayload = payload;
+                diedPayload.eventId = m_nextEventId++;
+                diedPayload.kind = protocol::CombatEventKind::ENTITY_DIED;
+                diedMsg.payload = diedPayload;
+                sendSink.EnqueueSend(net::Channel::Tcp, diedMsg);
+            }
             return true;
         }
 

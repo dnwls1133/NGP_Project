@@ -47,7 +47,13 @@ CState* AI::GetState(MON_STATE _eState)
 void AI::ChangeState(MON_STATE _eNextState)
 {
     CState* pNextState = GetState(_eNextState);
-    assert(m_pCurState != pNextState);
+
+    if (pNextState == nullptr || m_pCurState == pNextState)
+        return;
+    if (m_pCurState != nullptr && m_pCurState->GetType() == MON_STATE::DEAD)
+        return;
+
+    //assert(m_pCurState != pNextState);
 
     m_pCurState->Exit();
     

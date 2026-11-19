@@ -303,3 +303,19 @@ void CMonster::SetAnim(MON_TYPE eType)
    
 }
 
+protocol::SpawnPayload CMonster::ExportSpawnPayload(protocol::EventId eventId) const
+{
+    protocol::SpawnPayload spawn{};
+    spawn.eventId = eventId;
+    spawn.objectId = GetObjectId();
+    spawn.kind = protocol::NetObjectKind::MONSTER;
+    spawn.subType = static_cast<std::uint8_t>(m_tInfo.eMType);
+    spawn.ownerPlayerId = protocol::INVALID_PLAYER_SLOT;
+    spawn.patternType = static_cast<std::uint8_t>(m_tInfo.ePattern);
+    spawn.pos.x = static_cast<std::int32_t>(GetPos().x * 100.f);
+    spawn.pos.y = static_cast<std::int32_t>(GetPos().y * 100.f);
+    spawn.hp = static_cast<std::int32_t>(m_tInfo.fHP);
+    spawn.damage = static_cast<std::int32_t>(m_tInfo.fAtt);
+    return spawn;
+}
+

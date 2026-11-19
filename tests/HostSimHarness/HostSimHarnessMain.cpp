@@ -754,6 +754,53 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1119Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. 중복 접촉·중복 삭제 요청·사망 애니메이션 틱 진행에도 사망(ENTITY_DIED)·점수·고유 eventId 1회 확정 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 2, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 20'000 }, {}, 10, 1);
+            const ObjectId proj1 = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 0, FixedVec2{ 15'000, 20'000 }, {}, 1, 10);
+            const ObjectId proj2 = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 1, FixedVec2{ 15'000, 20'000 }, {}, 1, 10);
+            engine.FlushLifecycleAtTickEnd(sink);
+            // 첫 치명타 접촉(피해 10 -> HP 0): 사망·점수(+500) 1회 확정
+            const bool hit1 = engine.ApplyProjectileHit(proj1, monId, sink);
+            // 동일 틱 중복 접촉 및 중복 삭제 요청 주입 -> 모두 무시되어야 함
+            const bool hit2 = engine.ApplyProjectileHit(proj2, monId, sink);
+            const bool dupDestroy = engine.RequestDestroy(monId, DespawnReason::DESTROYED);
+            // 이후 여러 틱(애니메이션 재생 시간) 진행해도 판정이 반복되지 않아야 함
+            engine.StepFrame(50'000, script, sink);
+            engine.StepFrame(50'000, script, sink);
+            int diedEventCount = 0;
+            EventId damageEventId = 0;
+            EventId diedEventId = 0;
+            for (const auto& entry : sink.GetCapturedMessages())
+            {
+                if (const auto* ce = std::get_if<CombatEventPayload>(&entry.message.payload))
+                {
+                    if (ce->targetObjectId == monId && ce->kind == CombatEventKind::DAMAGE_APPLIED)
+                        damageEventId = ce->eventId;
+                    if (ce->targetObjectId == monId && ce->kind == CombatEventKind::ENTITY_DIED)
+                    {
+                        ++diedEventCount;
+                        diedEventId = ce->eventId;
+                    }
+                }
+            }
+            Check(hit1 && !hit2 && !dupDestroy
+                && diedEventCount == 1
+                && damageEventId != 0 && diedEventId == damageEventId + 1
+                && engine.GetDeathCandidateCount() == 1
+                && engine.GetTeamScore() == 500,
+                "HostSim1119: Confirms ENTITY_DIED, score, and monotonic eventId exactly once despite duplicate hits, destroy requests, or animation ticks",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -772,6 +819,7 @@ int main()
     RunHostSim1116Suite(counters);
     RunHostSim1117Suite(counters);
     RunHostSim1118Suite(counters);
+    RunHostSim1119Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

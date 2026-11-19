@@ -145,15 +145,15 @@ void CScene_Stage01::update()
                     obj->GetObjectId() <= m_lastSyncedMissileObjectId)
                     continue;
 
-                auto* missile = static_cast<CMissile*>(obj);
-                m_lastSyncedMissileObjectId = missile->GetObjectId();
+                
+                m_lastSyncedMissileObjectId = obj->GetObjectId();
 
                 protocol::Message message{};
                 message.header.type = protocol::MessageType::SPAWN;
                 message.header.sessionId = session.GetSessionId();
                 message.header.hostTick = m_hostTick;
                 message.header.sequence = ++m_nextSpawnEventId;
-                message.payload = missile->ExportSpawnPayload(message.header.sequence);
+                message.payload = obj->ExportSpawnPayload(message.header.sequence);
 
                 session.EnqueueSend(net::Channel::Tcp, message);
             }
