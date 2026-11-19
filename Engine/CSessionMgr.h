@@ -77,31 +77,47 @@ namespace network
 
         net::SendResult EnqueueSend(net::Channel channel, const protocol::Message& message);
         net::SendResult EnqueueSnapshotBatch(const net::SnapshotBatch& batch);
+
         net::SendResult SendPlayerInput(std::uint8_t moveBits, std::uint8_t fireHeld);
         net::SendResult SendSpawn(const protocol::SpawnPayload& spawn, std::uint32_t hostTick);
         net::SendResult SendSnapshot(std::span<const protocol::ObjectStateRecord> states, std::uint32_t hostTick);
+
         bool TryReceiveGame(network::ReceivedMessage& out);
         bool TryReceivePlayerInput(protocol::PlayerInputPayload& outInput, std::uint64_t& outReceivedTimeMs);
+        bool TryReceiveSpawn(protocol::SpawnPayload& out, protocol::PacketHeader& outHeader);
+        bool TryReceiveDespawn(protocol::DespawnPayload& out, protocol::PacketHeader& outHeader);
+        bool TryReceiveCombatEvent(protocol::CombatEventPayload& out, protocol::PacketHeader& outHeader);
+        bool TryReceiveSnapshot(protocol::StateSnapshotPayload& out, protocol::PacketHeader& outHeader);
+        bool TryReceiveResult(protocol::ResultPayload& out, protocol::PacketHeader& outHeader);
+
     private:
+        void ResetHandshake();
         void BeginSession(NetworkRole newRole);
+
         void HandleNetworkEvent(const NetworkEvent& event);
         void HandleJoin(const ReceivedMessage& received);
         void HandleJoinReply(const ReceivedMessage& received);
-        void SendReject(protocol::RejectReason reason);
-        void ResetHandshake();
-        void SendUdpRegister();
         void HandleUdpRegister(const ReceivedMessage& received);
         void HandleUdpAck(const ReceivedMessage& received);
         void HandleReady(const ReceivedMessage& received);
         void HandleRoomState(const ReceivedMessage& received);
         void HandleLoad(const ReceivedMessage& received);
         void HandleLoadingMessage(const ReceivedMessage& received);
-        bool IsGameMessageAllowed(NetworkRole senderRole, TransportType transport, const protocol::Message& message) const;
         void HandleGameMessage(ReceivedMessage received);
-        bool CanProcessReceivedMessage() const;
         void HandleReceivedMessage(ReceivedMessage received);
+
+        bool IsGameMessageAllowed(NetworkRole senderRole, TransportType transport, const protocol::Message& message) const;
+
+        void SendReject(protocol::RejectReason reason);
+        void SendUdpRegister();
+
+        bool CanProcessReceivedMessage() const;
+
         void EnterStarted();
         void UpdateHeartbeat();
+
+        template<typename Payload>
+        bool TryReceiveGamePayload(Payload& out, protocol::PacketHeader* outHeader, std::uint64_t* outReceivedTimeMs);
 
         std::deque<ReceivedMessage> gameReceiveQueue;
 

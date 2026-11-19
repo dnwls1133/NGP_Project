@@ -134,8 +134,8 @@ void CScene_Stage01::update()
                     obj->GetObjectId() <= m_lastSyncedMissileObjectId)
                     continue;
 
-                const auto spawn = missile->ExportSpawnPayload(m_nextSpawnEventId + 1);
-                const auto result = session.SendSpawn(spawn, m_hostTick);                                
+                const auto spawn = obj->ExportSpawnPayload(m_nextSpawnEventId + 1);
+                const auto result = session.SendSpawn(spawn, m_hostTick);
 
                 if (result != net::SendResult::Queued)
                 {
@@ -150,7 +150,7 @@ void CScene_Stage01::update()
             }
         }
     }
-    else
+    else // Client
     {
         const auto inputRate = session.GetStartInfo().inputRateHz;
         if (inputRate > 0)
@@ -168,95 +168,125 @@ void CScene_Stage01::update()
         }
 
         network::ReceivedMessage received{};
-        while (session.TryReceiveGame(received))
+        protocol::SpawnPayload spawn{};
+        protocol::DespawnPayload despawn{};
+        protocol::CombatEventPayload combat{};
+        protocol::StateSnapshotPayload snapshot{};
+        protocol::ResultPayload result{};
+        protocol::PacketHeader header{};
+
+        while (true)
         {
-            if (const auto* spawn = std::get_if<protocol::SpawnPayload>(&received.message.payload))
+            bool consumed = false;
+
+            if (session.TryReceiveSpawn(spawn, header))
             {
-                if (spawn->kind == protocol::NetObjectKind::PLAYER && spawn->ownerPlayerId < m_remotePlayers.size())
+                consumed = true;
+
+                if (spawn.kind == protocol::NetObjectKind::PLAYER && spawn.ownerPlayerId < m_remotePlayers.size())
                 {
-                    auto& remote = m_remotePlayers[spawn->ownerPlayerId];
-                    if (remote.objectId != spawn->objectId)
+                    auto& remote = m_remotePlayers[spawn.ownerPlayerId];
+                    if (remote.objectId != spawn.objectId)
                     {
-                        remote.objectId = spawn->objectId;
+                        remote.objectId = spawn.objectId;
                         remote.lastSnapshotTick.reset();
                     }
                 }
-                else if (spawn->kind == protocol::NetObjectKind::PROJ_PLAYER)
+                else if (spawn.kind == protocol::NetObjectKind::PROJ_PLAYER)
                 {
-                    Vec2 vel(spawn->vel.x / 100.f, spawn->vel.y / 100.f);
+                    Vec2 vel(spawn.vel.x / 100.f, spawn.vel.y / 100.f);
 
                     float speed = vel.Length();
 
                     CMissile* pMissile = new CMissile();
-                    pMissile->SetObjectId(spawn->objectId);
+                    pMissile->SetObjectId(spawn.objectId);
                     pMissile->init(GROUP_TYPE::PROJ_PLAYER);
-                    pMissile->SetPos(Vec2(spawn->pos.x / 100.f, spawn->pos.y / 100.f));
+                    pMissile->SetPos(Vec2(spawn.pos.x / 100.f, spawn.pos.y / 100.f));
                     pMissile->SetScale(Vec2(25.f, 25.f));
                     pMissile->SetDir(speed > 0.f ? vel : Vec2(0.f, 1.f));
-                    pMissile->ChangemType(static_cast<MISSILE_TYPE>(spawn->subType));
+                    pMissile->ChangemType(static_cast<MISSILE_TYPE>(spawn.subType));
                     pMissile->SetVec(static_cast<int>(speed));
-                    pMissile->SetType(spawn->patternType);
-                    pMissile->SetOwnerPlayerId(spawn->ownerPlayerId);
-                    pMissile->SetDamage(spawn->damage);
+                    pMissile->SetType(spawn.patternType);
+                    pMissile->SetOwnerPlayerId(spawn.ownerPlayerId);
+                    pMissile->SetDamage(spawn.damage);
                     pMissile->SetName(L"Missile_Player");
                     AddObject(pMissile, GROUP_TYPE::PROJ_PLAYER);
                 }
-                else if (spawn->kind == protocol::NetObjectKind::MONSTER)
+                else if (spawn.kind == protocol::NetObjectKind::MONSTER)
                 {
                     // spawn.objectId를 기준으로 중복 생성을 막고, 호스트와 같은 ID와 초기 위치로 몬스터를 등록
                 }
                 continue;
             }
-            else if (const auto* result = std::get_if<protocol::ResultPayload>(&received.message.payload))
+
+            if (session.TryReceiveDespawn(despawn, header))
             {
-                CRankMgr::GetInst()->CurrentRanking.Score = static_cast<int>(result->finalTeamScore);
-                if (result->outcome == protocol::MatchOutcome::DEFEAT)
-                {
-                    Fail();
-                }
-                else if (result->outcome == protocol::MatchOutcome::VICTORY)
-                {
-                    Clear();
-                }
-                continue;
+                consumed = true;
+
+                // despawn.objectId의 객체를 제거하는 코드 연결
             }
 
-            const auto* snapshot = std::get_if<protocol::StateSnapshotPayload>(&received.message.payload);
-            if (!snapshot)
-                continue;
-
-            for (const auto& object : snapshot->objects)
+            if (session.TryReceiveCombatEvent(combat, header))
             {
-                if (object.kind == protocol::NetObjectKind::MONSTER)
-                {
-                    // object.objectId로 생성된 몬스터를 찾고, 위치와 snapshotTick을 보간용 샘플로 저장
-                    // UDP 스냅샷이 TCP SPAWN보다 먼저 도착하면, 아직 등록되지 않은 ID의 샘플은 건너뛰고 생성 이후 들어오는 샘플부터 사용
-                    continue;
-                }
+                consumed = true;
 
-                if (object.kind == protocol::NetObjectKind::PLAYER)
+                // combat.kind에 따라 피해·사망·획득·점수 적용 코드 연결
+            }
+
+            if (session.TryReceiveSnapshot(snapshot, header))
+            {
+                consumed = true;
+
+                for (const auto& object : snapshot.objects)
                 {
+                    if (object.kind == protocol::NetObjectKind::MONSTER)
+                    {
+                        // 생성된 몬스터를 object.objectId로 찾아 보간 샘플 등록
+                        // 생성 전 도착한 상태는 건너뛰고 다음 스냅샷부터 적용
+                        continue;
+                    }
+
+                    if (object.kind != protocol::NetObjectKind::PLAYER)
+                        continue;
+
                     for (protocol::PlayerSlot slot = 0; slot < m_remotePlayers.size(); ++slot)
                     {
                         auto& remote = m_remotePlayers[slot];
+
                         if (remote.objectId == 0 || remote.objectId != object.objectId)
                             continue;
 
-                        if (remote.lastSnapshotTick && snapshot->snapshotTick <= *remote.lastSnapshotTick)
-                        {
+                        if (remote.lastSnapshotTick && snapshot.snapshotTick <= *remote.lastSnapshotTick)
                             break;
-                        }
 
                         if (auto* player = GetPlayer(slot))
                         {
-                            // 프로토콜 좌표는 1/100 픽셀 단위다.
                             player->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
-                            remote.lastSnapshotTick = snapshot->snapshotTick;
+                            remote.lastSnapshotTick = snapshot.snapshotTick;
                         }
+
                         break;
                     }
                 }
             }
+
+            if (session.TryReceiveResult(result, header))
+            {
+                consumed = true;
+
+                CRankMgr::GetInst()->CurrentRanking.Score = static_cast<int>(result.finalTeamScore);
+
+                if (result.outcome == protocol::MatchOutcome::DEFEAT)
+                    Fail();
+
+                else if (result.outcome == protocol::MatchOutcome::VICTORY)
+                    Clear();
+
+                continue;
+            }
+
+            if (!consumed)
+                break;
         }
     }
 

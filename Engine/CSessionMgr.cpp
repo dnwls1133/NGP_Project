@@ -918,21 +918,71 @@ namespace network
         return true;
     }
 
-    bool CSessionMgr::TryReceivePlayerInput(protocol::PlayerInputPayload& outInput, std::uint64_t& outReceivedTimeMs)
+    template<typename Payload>
+    bool CSessionMgr::TryReceiveGamePayload(Payload& out, protocol::PacketHeader* outHeader, std::uint64_t* outReceivedTimeMs)
     {
-        if (!IsHost() || state != SessionState::Started || gameReceiveQueue.empty())
+        if (state != SessionState::Started || gameReceiveQueue.empty())
             return false;
 
-        const auto& received = gameReceiveQueue.front();
-        const auto* input = std::get_if<protocol::PlayerInputPayload>(&received.message.payload);
+        auto& received = gameReceiveQueue.front();
+        auto* payload = std::get_if<Payload>(&received.message.payload);
 
-        if (!input)
+        if (!payload)
             return false;
 
-        outInput = *input;
-        outReceivedTimeMs = received.receivedTimeMs;
+        out = std::move(*payload);
+
+        if (outHeader)
+            *outHeader = received.message.header;
+
+        if (outReceivedTimeMs)
+            *outReceivedTimeMs = received.receivedTimeMs;
+
         gameReceiveQueue.pop_front();
         return true;
+    }
+
+    bool CSessionMgr::TryReceivePlayerInput(protocol::PlayerInputPayload& outInput, std::uint64_t& outReceivedTimeMs)
+    {
+        if (!IsHost())
+            return false;
+
+        return TryReceiveGamePayload(outInput, nullptr, &outReceivedTimeMs);
+    }
+
+    bool CSessionMgr::TryReceiveSpawn(protocol::SpawnPayload& out, protocol::PacketHeader& outHeader) {
+        if (IsHost())
+            return false;
+
+        return TryReceiveGamePayload(out, &outHeader, nullptr);
+    }
+
+    bool CSessionMgr::TryReceiveDespawn(protocol::DespawnPayload& out, protocol::PacketHeader& outHeader) {
+        if (IsHost())
+            return false;
+
+        return TryReceiveGamePayload(out, &outHeader, nullptr);
+    }
+
+    bool CSessionMgr::TryReceiveCombatEvent(protocol::CombatEventPayload& out, protocol::PacketHeader& outHeader) {
+        if (IsHost())
+            return false;
+
+        return TryReceiveGamePayload(out, &outHeader, nullptr);
+    }
+
+    bool CSessionMgr::TryReceiveSnapshot(protocol::StateSnapshotPayload& out, protocol::PacketHeader& outHeader) {
+        if (IsHost())
+            return false;
+
+        return TryReceiveGamePayload(out, &outHeader, nullptr);
+    }
+
+    bool CSessionMgr::TryReceiveResult(protocol::ResultPayload& out, protocol::PacketHeader& outHeader) {
+        if (IsHost())
+            return false;
+
+        return TryReceiveGamePayload(out, &outHeader, nullptr);
     }
 
     bool CSessionMgr::IsGameMessageAllowed(NetworkRole senderRole, TransportType transport, const protocol::Message& message) const
