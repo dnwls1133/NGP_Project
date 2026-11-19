@@ -230,6 +230,21 @@ protocol::ObjectStateRecord CPlayer::ExportStateRecord(protocol::ObjectId object
     return rec;
 }
 
+protocol::SpawnPayload CPlayer::ExportSpawnPayload(protocol::EventId eventId) const
+{
+    protocol::SpawnPayload spawn{};
+    spawn.eventId = eventId;
+    spawn.objectId = GetObjectId();
+    spawn.kind = protocol::NetObjectKind::PLAYER;
+    spawn.subType = static_cast<std::uint8_t>(m_iLvl);
+    spawn.ownerPlayerId = m_PlayerId;
+    spawn.pos.x = static_cast<std::int32_t>(GetPos().x * 100.f);
+    spawn.pos.y = static_cast<std::int32_t>(GetPos().y * 100.f);
+    spawn.hp = m_iHp;
+    spawn.damage = m_iAtk;
+    return spawn;
+}
+
 void CPlayer::render(HDC _dc)
 {
 	/*int iWidith = (int)m_pTex->Width();
@@ -274,6 +289,8 @@ void CPlayer::render(HDC _dc)
         , 0, 0, width, height
         , bf);*/
 }
+
+
 
 void CPlayer::CreateMissile(int type,  float _fVec,MISSILE_TYPE _eType)
 {
@@ -347,7 +364,18 @@ void CPlayer::CreateMissile(int type,  float _fVec,MISSILE_TYPE _eType)
 	CreateObject(pMissile,GROUP_TYPE::PROJ_PLAYER);
 }
 
-
+void CPlayer::ApplyItemReward()
+{
+    CSoundMgr::GetInst()->PlaySE(m_pLvUpSE);
+    if (m_iLvl < 5)
+    {
+        m_iLvl += 1;
+    }
+    else
+    {
+        CRankMgr::GetInst()->CurrentRanking.Score += 100;
+    }
+}
 
 void CPlayer::OnCollisionEnter(CCollider* _pOther)
 {
@@ -380,7 +408,7 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
         m_iBoomb = 1;
 	}
 
-    if (pOtherObj->GetName() == L"Item")
+    /*if (pOtherObj->GetName() == L"Item")
     {
         CSoundMgr::GetInst()->PlaySE(m_pLvUpSE);
         if (m_iLvl < 5)
@@ -391,7 +419,7 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
         {
             CRankMgr::GetInst()->CurrentRanking.Score += 100;
         }
-    }
+    }*/
     if (pOtherObj->GetName() == L"Monster")
     {
         if (isMujeok)

@@ -476,6 +476,13 @@ namespace protocol
         bool operator==(const EndPayload&) const = default;
     };
 
+    struct ClearPayload
+    {
+    };
+
+    struct FailPayload
+    {
+    };
 
     // ─────────────────────────────
     // 통합 메시지 표현

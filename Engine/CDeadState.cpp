@@ -26,6 +26,9 @@ CDeadState::~CDeadState()
 }
 void CDeadState::update()
 {
+    if (m_bExited) // 이미 Exit()가 1회 실행되었으면 애니메이션 프레임이 더돌아도 반복 실행 안함
+        return;
+
     m_fAdt += fDT;
     switch (GetMonster()->GetInfo().eMType)
     {
@@ -108,6 +111,12 @@ void CDeadState::update()
 
 void CDeadState::Enter()
 {
+
+    if (m_bEntered) // 중복 진입으로 아이템이나 사망 애니메이션이 두 번 실행되는 것 방지
+        return;
+
+    m_bEntered = true;
+
     MON_TYPE eType = GetMonster()->GetInfo().eMType;
     switch (eType)
     {
@@ -136,6 +145,7 @@ void CDeadState::Enter()
         item->SetPos(vMpos);
         item->SetScale(Vec2(0, 0));
         item->SetName(L"Item");
+        item->InitAfterPlacement();
         CreateObject(item, GROUP_TYPE::ITEM);
         GetMonster()->GetAnimator()->LoadAnimation(L"animation\\N34Enemy_Dead.anim");
         GetMonster()->GetAnimator()->Play(L"N34Enemy_Dead", false);
@@ -190,6 +200,10 @@ void CDeadState::Enter()
 
 void CDeadState::Exit()
 {
+    if (m_bExited) // 중복 종료로 아이템이나 사망 애니메이션이 두 번 실행되는 것 방지
+        return;
+    m_bExited = true;
+
     if (GetMonster()->GetInfo().eMType == MON_TYPE::BOSS)
     {
         CScene_Stage01* curscene = (CScene_Stage01*)CSceneMgr::GetInst()->GetCurScene();

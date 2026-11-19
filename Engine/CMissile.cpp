@@ -183,7 +183,9 @@ protocol::SpawnPayload CMissile::ExportSpawnPayload(protocol::EventId eventId) c
     protocol::SpawnPayload spawn{};
     spawn.eventId = eventId;
     spawn.objectId = GetObjectId();
-    spawn.kind = protocol::NetObjectKind::PROJ_PLAYER;
+    wstring name = GetName();
+    spawn.kind = (name == L"MsMissile") ? protocol::NetObjectKind::PROJ_MONSTER
+        : protocol::NetObjectKind::PROJ_PLAYER;
     spawn.subType = static_cast<std::uint8_t>(m_eMissileType);
     spawn.ownerPlayerId = m_ownerPlayerId;
     spawn.patternType = static_cast<std::uint8_t>(m_iType);

@@ -31,7 +31,7 @@ public:
     void SetDamage(int _iDamage) { m_iDamage = _iDamage; }
     int GetDamage() const { return m_iDamage; }
 
-    protocol::SpawnPayload ExportSpawnPayload(protocol::EventId eventId) const;
+    protocol::SpawnPayload ExportSpawnPayload(protocol::EventId eventId) const override;
 
 public:
     virtual void update();
