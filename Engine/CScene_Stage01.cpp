@@ -4,6 +4,7 @@
 
 #include "CPlayer.h"
 #include "CMonster.h"
+#include "CMissile.h"
 #include "CBackground.h"
 
 #include "CCore.h"
@@ -18,6 +19,7 @@
 #include "CTexture.h"
 #include "CSound.h"
 #include "CSoundMgr.h"
+#include "CSessionMgr.h"
 #include "CCamera.h"
 
 #include "SelectGDI.h"
@@ -31,10 +33,16 @@
 #include "CStageHUD.h"
 #include "CAnimator.h"
 
+#ifdef _DEBUG
+#include <iostream>
+#endif
+#include <cmath>
+#include <utility>
+
 CScene_Stage01::CScene_Stage01()
     :m_bClear(false)
-    ,m_bFail(false)
-    ,m_fClearAcc(0.f)
+    , m_bFail(false)
+    , m_fClearAcc(0.f)
 {
     m_pStageTheme = CResMgr::GetInst()->LoadSound(L"Stage Theme", L"sound\\BGM\\BGM_StageTheme.mp3");
     m_pBossTheme = CResMgr::GetInst()->LoadSound(L"Boss Theme", L"sound\\BGM\\BGM_BossTheme.mp3");
@@ -48,17 +56,207 @@ CScene_Stage01::~CScene_Stage01()
 
 void CScene_Stage01::update()
 {
-   
-   
+    auto& session = CCore::GetInst()->GetSession();
+
+    if (session.GetState() != network::SessionState::Started)
+        return;
+
+    // 입력 생성
+    std::uint8_t moveBits = protocol::MoveBit::NONE;
+    std::uint8_t fireHeld = 0;
+    if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
+    if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
+    if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
+    if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
+    if (KEY_HOLD(KEY::S)) fireHeld = 1;
+
+    if (session.IsHost())
+    {
+        using Clock = std::chrono::steady_clock;
+        const auto nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count());
+
+        // 세션이 승인한 참가자 입력을 호스트 입력 처리기에 전달한다.
+        protocol::PlayerInputPayload input{};
+        std::uint64_t receivedTimeMs = 0;
+        while (session.TryReceivePlayerInput(input, receivedTimeMs)) { m_hostInput.SubmitPlayerInput(input, receivedTimeMs); }
+
+        if (!m_bFail)
+        {
+            m_hostTickAccumulator += CTimeMgr::GetInst()->GetDT();
+
+            for (std::uint32_t tick = 0; tick < host::MAX_TICKS_PER_FRAME && m_hostTickAccumulator >= host::SIM_FIXED_DT; ++tick)
+            {
+                m_hostInput.ApplyInputNeutralization(nowMs);
+
+                if (auto* p0 = GetPlayer(0); p0 && !p0->IsDead())
+                    p0->Simulate(moveBits, fireHeld, host::SIM_FIXED_DT);
+
+                if (auto* p1 = GetPlayer(1); p1 && !p1->IsDead())
+                {
+                    p1->Simulate(
+                        m_hostInput.GetLastAppliedMoveBits(1),
+                        m_hostInput.GetLastAppliedFireHeld(1),
+                        host::SIM_FIXED_DT
+                    );
+                }
+
+                ++m_hostTick;
+
+                const auto ticksSinceStart = m_hostTick - session.GetStartInfo().startHostTick;
+                if (m_playerSpawnsQueued && ticksSinceStart % host::STATE_PUBLISH_INTERVAL_TICKS == 0)
+                {
+                    const auto* p0 = GetPlayer(0);
+                    const auto* p1 = GetPlayer(1);
+
+                    if (p0 && p1)
+                    {
+                        std::vector<protocol::ObjectStateRecord> states;
+                        states.push_back(p0->ExportStateRecord(m_playerObjectIds[0]));
+                        states.push_back(p1->ExportStateRecord(m_playerObjectIds[1]));
+
+                        // 몬스터의 상태 추출 함수가 준비되면 같은 틱의 레코드를 여기에 추가한다.
+
+                        const auto result = session.SendSnapshot(states, m_hostTick);
+
+#ifdef _DEBUG
+                        if (result != net::SendResult::Queued && result != net::SendResult::ReplacedPending && result != net::SendResult::QueueFull)
+                            std::cerr << "[HOST] STATE_SNAPSHOT enqueue failed, tick=" << m_hostTick << ", result=" << static_cast<int>(result) << '\n';
+#else
+                        (void)result;
+#endif
+                    }
+                }
+                m_hostTickAccumulator -= host::SIM_FIXED_DT;
+            }
+
+            for (CObject* obj : GetGroupObject(GROUP_TYPE::PROJ_PLAYER)) {
+                if (obj == nullptr || obj->IsDead() ||
+                    obj->GetObjectId() <= m_lastSyncedMissileObjectId)
+                    continue;
+
+                auto* missile = static_cast<CMissile*>(obj);
+                const auto spawn = missile->ExportSpawnPayload(m_nextSpawnEventId + 1);
+                const auto result = session.SendSpawn(spawn, m_hostTick);
+
+                if (result != net::SendResult::Queued)
+                {
+#ifdef _DEBUG
+                    std::cerr << "[HOST] Missile SPAWN enqueue failed, objectId=" << spawn.objectId << ", result=" << static_cast<int>(result) << '\n';
+#endif
+                    break;
+                }
+
+                m_nextSpawnEventId = spawn.eventId;
+                m_lastSyncedMissileObjectId = spawn.objectId;
+            }
+        }
+    }
+    else
+    {
+        const auto inputRate = session.GetStartInfo().inputRateHz;
+        if (inputRate > 0)
+        {
+            const double interval = 1.0 / inputRate;
+            m_inputSendAccumulator += CTimeMgr::GetInst()->GetDT();
+
+            if (m_inputSendAccumulator >= interval)
+            {
+                // 프레임이 밀려도 이번 키 상태는 한 번만 등록한다.
+                m_inputSendAccumulator = std::fmod(m_inputSendAccumulator, interval);
+
+                const auto result = session.SendPlayerInput(moveBits, fireHeld);
+            }
+        }
+
+        network::ReceivedMessage received{};
+        while (session.TryReceiveGame(received))
+        {
+            if (const auto* spawn = std::get_if<protocol::SpawnPayload>(&received.message.payload))
+            {
+                if (spawn->kind == protocol::NetObjectKind::PLAYER && spawn->ownerPlayerId < m_remotePlayers.size())
+                {
+                    auto& remote = m_remotePlayers[spawn->ownerPlayerId];
+                    if (remote.objectId != spawn->objectId)
+                    {
+                        remote.objectId = spawn->objectId;
+                        remote.lastSnapshotTick.reset();
+                    }
+                }
+                else if (spawn->kind == protocol::NetObjectKind::PROJ_PLAYER)
+                {
+                    Vec2 vel(spawn->vel.x / 100.f, spawn->vel.y / 100.f);
+
+                    float speed = vel.Length();
+
+                    CMissile* pMissile = new CMissile();
+                    pMissile->SetObjectId(spawn->objectId);
+                    pMissile->init(GROUP_TYPE::PROJ_PLAYER);
+                    pMissile->SetPos(Vec2(spawn->pos.x / 100.f, spawn->pos.y / 100.f));
+                    pMissile->SetScale(Vec2(25.f, 25.f));
+                    pMissile->SetDir(speed > 0.f ? vel : Vec2(0.f, 1.f));
+                    pMissile->ChangemType(static_cast<MISSILE_TYPE>(spawn->subType));
+                    pMissile->SetVec(static_cast<int>(speed));
+                    pMissile->SetType(spawn->patternType);
+                    pMissile->SetOwnerPlayerId(spawn->ownerPlayerId);
+                    pMissile->SetDamage(spawn->damage);
+                    pMissile->SetName(L"Missile_Player");
+                    AddObject(pMissile, GROUP_TYPE::PROJ_PLAYER);
+                }
+                else if (spawn->kind == protocol::NetObjectKind::MONSTER)
+                {
+                    // spawn.objectId를 기준으로 중복 생성을 막고, 호스트와 같은 ID와 초기 위치로 몬스터를 등록
+                }
+                continue;
+            }
+
+            const auto* snapshot = std::get_if<protocol::StateSnapshotPayload>(&received.message.payload);
+            if (!snapshot)
+                continue;
+
+            for (const auto& object : snapshot->objects)
+            {
+                if (object.kind == protocol::NetObjectKind::MONSTER)
+                {
+                    // object.objectId로 생성된 몬스터를 찾고, 위치와 snapshotTick을 보간용 샘플로 저장
+                    // UDP 스냅샷이 TCP SPAWN보다 먼저 도착하면, 아직 등록되지 않은 ID의 샘플은 건너뛰고 생성 이후 들어오는 샘플부터 사용
+                    continue;
+                }
+
+                if (object.kind == protocol::NetObjectKind::PLAYER)
+                {
+                    for (protocol::PlayerSlot slot = 0; slot < m_remotePlayers.size(); ++slot)
+                    {
+                        auto& remote = m_remotePlayers[slot];
+                        if (remote.objectId == 0 || remote.objectId != object.objectId)
+                            continue;
+
+                        if (remote.lastSnapshotTick && snapshot->snapshotTick <= *remote.lastSnapshotTick)
+                        {
+                            break;
+                        }
+
+                        if (auto* player = GetPlayer(slot))
+                        {
+                            // 프로토콜 좌표는 1/100 픽셀 단위다.
+                            player->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
+                            remote.lastSnapshotTick = snapshot->snapshotTick;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
 
     if (!m_bFail)
     {
         CScene::update();
         m_dAcc += fDT;
     }
-    
-    
-  
+
+
+
     if (m_bClear)
     {
         if (m_fClearAcc == 0.f)
@@ -82,7 +280,7 @@ void CScene_Stage01::update()
         m_fClearAcc += fDT;
         if (m_fClearAcc > 3.f)
         {
-           
+
             ChangeScene(SCENE_TYPE::CREDITS);
             m_fClearAcc = 0;
         }
@@ -92,7 +290,7 @@ void CScene_Stage01::update()
         if (m_fClearAcc == 0.f)
         {
             m_pHud->SetActive(false);
-           
+
             CSoundMgr::GetInst()->PlayBGM(m_pFailTheme, false);
 
             // const Vec2 resolution = CCore::GetInst()->GetResolution();
@@ -106,7 +304,7 @@ void CScene_Stage01::update()
             m_pFailCard = CResMgr::GetInst()->LoadTexture(L"Fail Card", L"texture\\Stage Cards\\StageFail\\slice_16.png");
         }
         m_fClearAcc += fDT;
-      
+
         if (KEY_TAP(KEY::SPACE))
         {
             CPlayer* player = CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0);
@@ -122,14 +320,14 @@ void CScene_Stage01::update()
             {
                 CSoundMgr::GetInst()->PlayBGM(m_pStageTheme);
             }
-           
+
             m_pHud->SetActive(true);
 
             //CCamera::GetInst()->FadeIn(0.5f);
         }
         if (5.f + fDT >= m_fClearAcc && m_fClearAcc > 5.f)
         {
-           
+
             CCamera::GetInst()->FadeOut(5.f);
         }
         if (m_fClearAcc >= 10.f)
@@ -141,35 +339,47 @@ void CScene_Stage01::update()
 
 
         }
-        
+
     }
     else
     {
         if (KEY_TAP(KEY::SPACE))
         {
-            CPlayer* player = CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0);
-            player->isMujeok = true;
-        }
-
-        for (auto& evt : m_vEvents)
-        {
-            if (!evt.triggered && m_dAcc >= evt.triggerTime)
+            for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS; ++slot)
             {
-                static bool trigger = false;
-                if (m_dAcc >= 130.f && !trigger)
-                {
-                    CSoundMgr::GetInst()->PlayBGM(m_pBossTheme);
-                    trigger = true;
-                }
-
-                CMonster* pMon = CMonFactory::CreateMonster(evt.type, evt.mtype, evt.spawnPos, evt.targetPos, evt.exitPos);
-                pMon->SetName(L"Monster");
-                AddObject(pMon, GROUP_TYPE::MONSTER);
-                evt.triggered = true;
+                if (auto* player = GetPlayer(slot))
+                    player->isMujeok = true;
             }
         }
+
+        if (session.IsHost())
+        {
+            const double hostElapsedSec =
+                static_cast<double>(m_hostTick - session.GetStartInfo().startHostTick)
+                * host::SIM_FIXED_DT;
+            for (auto& evt : m_vEvents)
+            {
+                if (!evt.triggered && hostElapsedSec >= evt.triggerTime) // 11/15 m_dAcc를 hostElapsedSec으로 수정
+                {
+                    static bool trigger = false;
+                    if (hostElapsedSec >= 130.f && !trigger)
+                    {
+                        CSoundMgr::GetInst()->PlayBGM(m_pBossTheme);
+                        trigger = true;
+                    }
+
+                    CMonster* pMon = CMonFactory::CreateMonster(evt.type, evt.mtype, evt.spawnPos, evt.targetPos, evt.exitPos);
+                    pMon->SetName(L"Monster");
+                    AddObject(pMon, GROUP_TYPE::MONSTER);
+                    evt.triggered = true;
+                }
+            }
+
+        }
+
+
     }
-   
+
 
 
 }
@@ -281,11 +491,17 @@ void CScene_Stage01::Enter()
     AddObject(pPlayer1, GROUP_TYPE::PLAYER);
     RegisterPlayer(1, pPlayer1);
 
+    auto& session = CCore::GetInst()->GetSession();
+
+    m_hostTickAccumulator = 0.0;
+    m_hostInput.ResetSession(session.GetSessionId());
+    m_inputSendAccumulator = 0.0;
+    m_remotePlayers = {};
 
     // Monster Object 추가
-   
+
     InitEvents();
-    
+
 
     // 타일 로딩
     //LoadTile(L"Tile\\Start.tile");
@@ -293,10 +509,14 @@ void CScene_Stage01::Enter()
 
     // 충돌 지정
     // Player 그룹과 Monster 그룹간의 충돌체크
-    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::PROJ_MONSTER);
-    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::MONSTER, GROUP_TYPE::PROJ_PLAYER);
-    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::ITEM);
-    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::MONSTER);
+    if (session.IsHost())
+    {
+        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::PROJ_MONSTER);
+        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::MONSTER, GROUP_TYPE::PROJ_PLAYER);
+        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::ITEM);
+        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::MONSTER);
+    }
+
     //Camera 지정
 
     CCamera::GetInst()->SetLookAt(vResolution / 2.f);
@@ -309,11 +529,61 @@ void CScene_Stage01::Enter()
 
     CSoundMgr::GetInst()->PlayBGM(m_pStageTheme);
 
-   
+
 
     m_pHud = new CStageHUD;
     m_pHud->SetActive(true);
     AddObject(m_pHud, GROUP_TYPE::UI);
+
+    m_playerObjectIds = {};
+    m_hostTick = 0;
+    m_playerSpawnsQueued = false;
+    m_nextSpawnEventId = 2;
+    m_lastSyncedMissileObjectId = 0;
+
+    if (session.IsHost() && session.GetState() == network::SessionState::Started)
+    {
+        m_hostTick = session.GetStartInfo().startHostTick;
+
+        // 이번 위치 동기화에서 P0와 P1에 사용할 고정 ID.
+        m_playerObjectIds = { 1, 2 };
+
+        bool allQueued = true;
+
+        for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS; ++slot)
+        {
+            const auto* player = GetPlayer(slot);
+            if (!player)
+            {
+                allQueued = false;
+                break;
+            }
+
+            const auto record = player->ExportStateRecord(m_playerObjectIds[slot]);
+
+            protocol::SpawnPayload spawn{};
+            spawn.eventId = static_cast<protocol::EventId>(slot) + 1;
+            spawn.objectId = record.objectId;
+            spawn.kind = protocol::NetObjectKind::PLAYER;
+            spawn.subType = record.subType;
+            spawn.ownerPlayerId = slot;
+            spawn.pos = record.pos;
+            spawn.vel = record.vel;
+            spawn.hp = record.hp;
+
+            const auto result = session.SendSpawn(spawn, m_hostTick);
+            if (result != net::SendResult::Queued)
+            {
+#ifdef _DEBUG
+                std::cerr << "[HOST] Player SPAWN enqueue failed, slot=" << static_cast<int>(slot) << ", result=" << static_cast<int>(result) << '\n';
+#endif
+                allQueued = false;
+                break;
+            }
+        }
+
+        m_playerSpawnsQueued = allQueued;
+    }
 }
 
 void CScene_Stage01::Exit()
@@ -350,21 +620,21 @@ void CScene_Stage01::InitEvents()
             m_vEvents.push_back({ (5.0f * i) + 0.5f,MON_TYPE::NORMAL4,MISSILE_PTRN::NONE, Vec2((float)rBackrect.right - 150.f , -100.f),Vec2((float)rBackrect.right - 150.f,(float)rBackrect.top + 150.f),Vec2((float)rBackrect.left - 400.f,vResolution.y) });
             m_vEvents.push_back({ (5.0f * i) + 1.f,MON_TYPE::NORMAL4, MISSILE_PTRN::NONE,Vec2((float)rBackrect.right - 100.f , -100.f),Vec2((float)rBackrect.right - 100.f,(float)rBackrect.top + 100.f),Vec2((float)rBackrect.left - 400.f,vResolution.y) });
         }
-        
+
     }
-   
-  
+
+
     // PTRN 2
     {
         for (int i = 0; i < 10; ++i)
         {
             if (i % 2 == 0)
             {
-                m_vEvents.push_back({ 8.0f+0.2f*i,MON_TYPE::NORMAL2, MISSILE_PTRN::PTRN1,Vec2((float)rBackrect.left + 200.f , -100.f),Vec2((float)rBackrect.left + 200.f,(float)rBackrect.top + 500.f - 30.f*i),Vec2((float)rBackrect.right + 400.f,vResolution.y) });
+                m_vEvents.push_back({ 8.0f + 0.2f * i,MON_TYPE::NORMAL2, MISSILE_PTRN::PTRN1,Vec2((float)rBackrect.left + 200.f , -100.f),Vec2((float)rBackrect.left + 200.f,(float)rBackrect.top + 500.f - 30.f * i),Vec2((float)rBackrect.right + 400.f,vResolution.y) });
             }
             else
             {
-                m_vEvents.push_back({ 8.0f+0.2f*i,MON_TYPE::NORMAL2, MISSILE_PTRN::PTRN1,Vec2((float)rBackrect.left + 250.f , -100.f),Vec2((float)rBackrect.left + 150.f,(float)rBackrect.top + 500.f - 30.f*i),Vec2((float)rBackrect.right + 400.f,vResolution.y) });
+                m_vEvents.push_back({ 8.0f + 0.2f * i,MON_TYPE::NORMAL2, MISSILE_PTRN::PTRN1,Vec2((float)rBackrect.left + 250.f , -100.f),Vec2((float)rBackrect.left + 150.f,(float)rBackrect.top + 500.f - 30.f * i),Vec2((float)rBackrect.right + 400.f,vResolution.y) });
             }
         }
         for (int i = 0; i < 10; ++i)
@@ -378,15 +648,15 @@ void CScene_Stage01::InitEvents()
                 m_vEvents.push_back({ 13.0f + 0.2f * i,MON_TYPE::NORMAL2, MISSILE_PTRN::PTRN1,Vec2((float)rBackrect.right - 250.f , -100.f),Vec2((float)rBackrect.right - 150.f,(float)rBackrect.top + 500.f - 30.f * i),Vec2((float)rBackrect.left - 400.f,vResolution.y) });
             }
         }
-       
-      
+
+
     }
 
     // PTRN 3
     {
         for (int i = 0; i < 10; ++i)
         {
-            m_vEvents.push_back({ 15.0f + 0.4f*i,MON_TYPE::NORMAL5,MISSILE_PTRN::NONE, Vec2((float)rBackrect.left - 250.f,(float)rBackrect.bottom / 2.f),Vec2(vBackPos.x,(float)rBackrect.top + 150.f),Vec2((float)rBackrect.right + 250.f,(float)rBackrect.bottom / 2.f) });
+            m_vEvents.push_back({ 15.0f + 0.4f * i,MON_TYPE::NORMAL5,MISSILE_PTRN::NONE, Vec2((float)rBackrect.left - 250.f,(float)rBackrect.bottom / 2.f),Vec2(vBackPos.x,(float)rBackrect.top + 150.f),Vec2((float)rBackrect.right + 250.f,(float)rBackrect.bottom / 2.f) });
 
         }
         for (int i = 0; i < 10; ++i)
@@ -404,16 +674,16 @@ void CScene_Stage01::InitEvents()
         m_vEvents.push_back({ 25.0f,MON_TYPE::NORMAL1,MISSILE_PTRN::PTRN1,Vec2((float)rBackrect.right + 200.f, (float)rBackrect.top + 250.f),Vec2((float)rBackrect.right - 200.f,(float)rBackrect.top + 200.f),Vec2((float)rBackrect.right - 100.f, -400.f) });
 
     }
-  
+
     for (int i = 0; i < 4; ++i)
     {
         if (i % 2 == 0)
         {
-            m_vEvents.push_back({ 35.0f + 0.2f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2,Vec2((float)rBackrect.right - 200.f , -100.f),Vec2((float)rBackrect.right - 200.f,(float)rBackrect.top + 300.f - 50.f * i),Vec2((float)rBackrect.right + 400.f,vResolution.y/2.f) });
+            m_vEvents.push_back({ 35.0f + 0.2f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2,Vec2((float)rBackrect.right - 200.f , -100.f),Vec2((float)rBackrect.right - 200.f,(float)rBackrect.top + 300.f - 50.f * i),Vec2((float)rBackrect.right + 400.f,vResolution.y / 2.f) });
         }
         else
         {
-            m_vEvents.push_back({ 35.0f + 0.2f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2,Vec2((float)rBackrect.right - 250.f , -100.f),Vec2((float)rBackrect.right - 150.f,(float)rBackrect.top + 300.f - 50.f * i),Vec2((float)rBackrect.right + 400.f,vResolution.y/2.f) });
+            m_vEvents.push_back({ 35.0f + 0.2f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2,Vec2((float)rBackrect.right - 250.f , -100.f),Vec2((float)rBackrect.right - 150.f,(float)rBackrect.top + 300.f - 50.f * i),Vec2((float)rBackrect.right + 400.f,vResolution.y / 2.f) });
         }
     }
 
@@ -433,7 +703,7 @@ void CScene_Stage01::InitEvents()
 
     for (int i = 0; i < 10; ++i)
     {
-        m_vEvents.push_back({ 35.0f + 0.4f * i,MON_TYPE::NORMAL5,MISSILE_PTRN::NONE, Vec2((float)rBackrect.left - 250.f, (float)rBackrect.top - 100.f),Vec2(vBackPos.x + 200.f,(float)rBackrect.bottom/2.f),Vec2((float)rBackrect.left - 250.f, (float)rBackrect.bottom + 100.f) });
+        m_vEvents.push_back({ 35.0f + 0.4f * i,MON_TYPE::NORMAL5,MISSILE_PTRN::NONE, Vec2((float)rBackrect.left - 250.f, (float)rBackrect.top - 100.f),Vec2(vBackPos.x + 200.f,(float)rBackrect.bottom / 2.f),Vec2((float)rBackrect.left - 250.f, (float)rBackrect.bottom + 100.f) });
 
     }
     for (int i = 0; i < 10; ++i)
@@ -442,22 +712,22 @@ void CScene_Stage01::InitEvents()
     }
     for (int i = 0; i < 4; ++i)
     {
-        m_vEvents.push_back({ 45.0f + 0.4f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2, Vec2((float)rBackrect.left - 250.f, (float)rBackrect.bottom/2.f),Vec2(vBackPos.x,(float)rBackrect.bottom / 2.f - 50.f),Vec2((float)rBackrect.right + 250.f, (float)rBackrect.bottom/2.f) });
+        m_vEvents.push_back({ 45.0f + 0.4f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2, Vec2((float)rBackrect.left - 250.f, (float)rBackrect.bottom / 2.f),Vec2(vBackPos.x,(float)rBackrect.bottom / 2.f - 50.f),Vec2((float)rBackrect.right + 250.f, (float)rBackrect.bottom / 2.f) });
 
     }
     for (int i = 0; i < 4; ++i)
     {
-        m_vEvents.push_back({ 47.5f + 0.4f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2, Vec2((float)rBackrect.right + 250.f, (float)rBackrect.bottom / 2.f-100.f),Vec2(vBackPos.x,(float)rBackrect.bottom / 2.f - 150.f),Vec2((float)rBackrect.left - 250.f, (float)rBackrect.bottom / 2.f - 100.f) });
+        m_vEvents.push_back({ 47.5f + 0.4f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2, Vec2((float)rBackrect.right + 250.f, (float)rBackrect.bottom / 2.f - 100.f),Vec2(vBackPos.x,(float)rBackrect.bottom / 2.f - 150.f),Vec2((float)rBackrect.left - 250.f, (float)rBackrect.bottom / 2.f - 100.f) });
 
     }
     for (int i = 0; i < 4; ++i)
     {
-        m_vEvents.push_back({ 50.0f + 0.4f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2, Vec2((float)rBackrect.left - 250.f, (float)rBackrect.bottom / 2.f-300.f),Vec2(vBackPos.x,(float)rBackrect.bottom / 2.f - 350.f),Vec2((float)rBackrect.right + 250.f, (float)rBackrect.bottom / 2.f - 300.f)  });
+        m_vEvents.push_back({ 50.0f + 0.4f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2, Vec2((float)rBackrect.left - 250.f, (float)rBackrect.bottom / 2.f - 300.f),Vec2(vBackPos.x,(float)rBackrect.bottom / 2.f - 350.f),Vec2((float)rBackrect.right + 250.f, (float)rBackrect.bottom / 2.f - 300.f) });
 
     }
     for (int i = 0; i < 4; ++i)
     {
-        m_vEvents.push_back({ 52.5f + 0.4f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2, Vec2((float)rBackrect.right + 250.f, (float)rBackrect.bottom / 2.f- 500.f),Vec2(vBackPos.x,(float)rBackrect.bottom / 2.f -550.f),Vec2((float)rBackrect.left - 250.f, (float)rBackrect.bottom / 2.f- 500.f) });
+        m_vEvents.push_back({ 52.5f + 0.4f * i,MON_TYPE::NORMAL2,MISSILE_PTRN::PTRN2, Vec2((float)rBackrect.right + 250.f, (float)rBackrect.bottom / 2.f - 500.f),Vec2(vBackPos.x,(float)rBackrect.bottom / 2.f - 550.f),Vec2((float)rBackrect.left - 250.f, (float)rBackrect.bottom / 2.f - 500.f) });
 
     }
     for (int i = 0; i < 10; ++i)
@@ -472,7 +742,7 @@ void CScene_Stage01::InitEvents()
 
     // PTRN 3
     {
-        m_vEvents.push_back({ 60.0f,MON_TYPE::EPIC,MISSILE_PTRN::PTRN1, Vec2(vBackPos.x,  (float)rBackrect.top - 200.f),Vec2((float)vBackPos.x, (float)rBackrect.bottom/2.f-300.f),Vec2((float)vBackPos.x, -400.f) });
+        m_vEvents.push_back({ 60.0f,MON_TYPE::EPIC,MISSILE_PTRN::PTRN1, Vec2(vBackPos.x,  (float)rBackrect.top - 200.f),Vec2((float)vBackPos.x, (float)rBackrect.bottom / 2.f - 300.f),Vec2((float)vBackPos.x, -400.f) });
     }
 
     // PTRN 4
@@ -532,7 +802,7 @@ void CScene_Stage01::InitEvents()
 
 
 
-    m_vEvents.push_back({ 10.f,MON_TYPE::BOSS,MISSILE_PTRN::PTRN1,Vec2(vBackPos.x,  (float)rBackrect.top - 200.f),Vec2((float)vBackPos.x, (float)rBackrect.bottom / 2.f - 300.f),Vec2((float)vBackPos.x, -400.f) });
+    m_vEvents.push_back({ 130.f,MON_TYPE::BOSS,MISSILE_PTRN::PTRN1,Vec2(vBackPos.x,  (float)rBackrect.top - 200.f),Vec2((float)vBackPos.x, (float)rBackrect.bottom / 2.f - 300.f),Vec2((float)vBackPos.x, -400.f) });
 
 }
 

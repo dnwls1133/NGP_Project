@@ -1,4 +1,4 @@
-#include "pch.h"
+ï»¿#include "pch.h"
 #include "CColliderMgr.h"
 #include "CSceneMgr.h"
 
@@ -39,19 +39,19 @@ void CColliderMgr::CollisionGroupUpdate(GROUP_TYPE _eLeft, GROUP_TYPE _eRight)
 {
 	map< ULONGLONG, bool>::iterator iter;
 	CScene* pCurScene = CSceneMgr::GetInst()->GetCurScene();
-	const vector<CObject*>& vecLeft = pCurScene->GetGroupObject(_eLeft); // ÂüÁ¶·Î ¹Ş¾Æ¿À¸é ÂüÁ¶ ÀÚ·áÇüÀ» ±×´ë·Î ¹Ş¾Æ¾ßÇÑ´Ù.
+	const vector<CObject*>& vecLeft = pCurScene->GetGroupObject(_eLeft); // ì°¸ì¡°ë¡œ ë°›ì•„ì˜¤ë©´ ì°¸ì¡° ìë£Œí˜•ì„ ê·¸ëŒ€ë¡œ ë°›ì•„ì•¼í•œë‹¤.
 	const vector<CObject*>& vecRight = pCurScene->GetGroupObject(_eRight);
 
 	for (size_t i = 0; i < vecLeft.size(); ++i)
 	{
-		// Ãæµ¹Ã¼¸¦ º¸À¯ÇÏÁö ¾ÊÀº °æ¿ì
+		// ì¶©ëŒì²´ë¥¼ ë³´ìœ í•˜ì§€ ì•Šì€ ê²½ìš°
 		if (nullptr == vecLeft[i]->GetCollider() )
 		{
 			continue;
 		}
 		for (size_t j = 0; j < vecRight.size(); ++j)
 		{
-			// Ãæµ¹Ã¼°¡ ¾ø°Å³ª, ÀÚ±â ÀÚ½Å°úÀÇ Ãæµ¹ÀÎ °æ¿ì
+			// ì¶©ëŒì²´ê°€ ì—†ê±°ë‚˜, ìê¸° ìì‹ ê³¼ì˜ ì¶©ëŒì¸ ê²½ìš°
 			if (nullptr == vecRight[j]->GetCollider()
 				|| vecLeft[i] == vecRight[j])
 			{
@@ -59,7 +59,7 @@ void CColliderMgr::CollisionGroupUpdate(GROUP_TYPE _eLeft, GROUP_TYPE _eRight)
 			}
 			CCollider* pLeftCol = vecLeft[i]->GetCollider();
 			CCollider* pRightCol = vecRight[j]->GetCollider();
-			// µÎ Ãæµ¹Ã¼ Á¶ÇÕ ¾ÆÀÌµğ »ı¼º
+			// ë‘ ì¶©ëŒì²´ ì¡°í•© ì•„ì´ë”” ìƒì„±
 			
 
 			COLLIDER_ID ID;
@@ -67,7 +67,7 @@ void CColliderMgr::CollisionGroupUpdate(GROUP_TYPE _eLeft, GROUP_TYPE _eRight)
 			ID.Right_id = pRightCol->GetId();
 			
 			iter = m_mapCollInfo.find(ID.ID);
-			// Ãæµ¹ Á¤º¸°¡ ¹Ì µî·Ï »óÅÂÀÎ °æ¿ì µî·Ï(Ãæµ¹ÇÏÁö ¾Ê¾Ò´Ù ·Î)
+			// ì¶©ëŒ ì •ë³´ê°€ ë¯¸ ë“±ë¡ ìƒíƒœì¸ ê²½ìš° ë“±ë¡(ì¶©ëŒí•˜ì§€ ì•Šì•˜ë‹¤ ë¡œ)
 			if (m_mapCollInfo.end() == iter)
 			{
 				m_mapCollInfo.insert(make_pair(ID.ID, false));
@@ -75,14 +75,14 @@ void CColliderMgr::CollisionGroupUpdate(GROUP_TYPE _eLeft, GROUP_TYPE _eRight)
 
 			}
 
-			// Ãæµ¹ Ã¼Å©
+			// ì¶©ëŒ ì²´í¬
 			if (isCollision(pLeftCol, pRightCol, vecLeft[i]))
 			{
-				// ÇöÀç Ãæµ¹ ÁßÀÌ´Ù.
+				// í˜„ì¬ ì¶©ëŒ ì¤‘ì´ë‹¤.
 
 				if (iter->second)
 				{
-					// ÀÌÀü¿¡µµ Ãæµ¹ ÇÏ°í ÀÖ¾ú´Ù.
+					// ì´ì „ì—ë„ ì¶©ëŒ í•˜ê³  ìˆì—ˆë‹¤.
 					if (vecLeft[i]->IsDead() || vecRight[j]->IsDead())
 					{
 						pLeftCol->OnCollisionExit(pRightCol);
@@ -100,8 +100,8 @@ void CColliderMgr::CollisionGroupUpdate(GROUP_TYPE _eLeft, GROUP_TYPE _eRight)
 				}
 				else
 				{
-					// ÀÌÀü¿¡´Â Ãæµ¹ÇÏÁö ¾Ê¾Ò´Ù.
-					if (!vecLeft[i]->IsDead() || !vecRight[j]->IsDead())
+					// ì´ì „ì—ëŠ” ì¶©ëŒí•˜ì§€ ì•Šì•˜ë‹¤.
+					if (!vecLeft[i]->IsDead() && !vecRight[j]->IsDead())
 					{
 						pLeftCol->OnCollisionEnter(pRightCol);
 						pRightCol->OnCollisionEnter(pLeftCol);
@@ -113,10 +113,10 @@ void CColliderMgr::CollisionGroupUpdate(GROUP_TYPE _eLeft, GROUP_TYPE _eRight)
 			}
 			else
 			{
-				// ÇöÀç Ãæµ¹ ÇÏ°í ÀÖÁö ¾Ê´Ù.
+				// í˜„ì¬ ì¶©ëŒ í•˜ê³  ìˆì§€ ì•Šë‹¤.
 				if (iter->second)
 				{
-					// ÀÌÀü¿¡´Â Ãæµ¹ÇÏ°í ÀÖ¾ú´Ù.
+					// ì´ì „ì—ëŠ” ì¶©ëŒí•˜ê³  ìˆì—ˆë‹¤.
 					pLeftCol->OnCollisionExit(pRightCol);
 					pRightCol->OnCollisionExit(pLeftCol);
 					iter->second = false;
@@ -148,8 +148,8 @@ void CColliderMgr::update()
 
 void CColliderMgr::CheckGroup(GROUP_TYPE _eLeft, GROUP_TYPE _eRight)
 {
-	// ´õ ÀÛÀº °ªÀÇ ±×·ì Å¸ÀÔÀ» ÇàÀ¸·Î,
-	// Å« °ªÀ» ¿­(ºñÆ®)·Î »ç¿ë
+	// ë” ì‘ì€ ê°’ì˜ ê·¸ë£¹ íƒ€ì…ì„ í–‰ìœ¼ë¡œ,
+	// í° ê°’ì„ ì—´(ë¹„íŠ¸)ë¡œ ì‚¬ìš©
 
 	UINT iRow = (UINT)_eLeft;
 	UINT iCol = (UINT)_eRight;

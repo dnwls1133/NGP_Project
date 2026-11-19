@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 class CCollider;
 
 union COLLIDER_ID
@@ -14,14 +14,15 @@ class CColliderMgr
 {
 	SINGLE(CColliderMgr)
 private:
-	// Ãæµ¹Ã¼ °£ÀÇ ÀÌÀü ÇÁ·¹ÀÓ Ãæµ¹ Á¤º¸
+	// ì¶©ëŒì²´ ê°„ì˜ ì´ì „ í”„ë ˆì„ ì¶©ëŒ ì •ë³´
 	map<ULONGLONG, bool> m_mapCollInfo;
-	UINT m_arrCheck[(UINT)GROUP_TYPE::END]; // ±×·ì°£ÀÇ Ãæµ¹ Ã¼Å© ¸ŞÆ®¸¯½º
+	UINT m_arrCheck[(UINT)GROUP_TYPE::END]; // ê·¸ë£¹ê°„ì˜ ì¶©ëŒ ì²´í¬ ë©”íŠ¸ë¦­ìŠ¤
 public:
 	void update();
 	void CheckGroup(GROUP_TYPE _eLeft, GROUP_TYPE _eRight);
 	void Reset()
 	{
+        m_mapCollInfo.clear();
 		memset(m_arrCheck, 0, sizeof(UINT) * (UINT)GROUP_TYPE::END);
 	}
 

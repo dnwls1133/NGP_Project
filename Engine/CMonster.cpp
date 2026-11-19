@@ -133,7 +133,7 @@ void CMonster::CreateMissile(int type)
 	vMissilePos.y += GetScale().y / 2.f;
 	vMissilePos.x += GetScale().x * type;
 	CScene* CurScene = CSceneMgr::GetInst()->GetCurScene();
-    CPlayer* pInfo = CurScene->GetPlayer(0);
+    CPlayer* pInfo = CurScene->SelectNearestAlivePlayer(vMissilePos);
     if (pInfo == nullptr)
     {
         return;
@@ -168,10 +168,13 @@ void CMonster::CreateMissile(int type)
 void CMonster::OnCollisionEnter(CCollider* _pOther)
 {
 	CObject* pOtherobj = _pOther->GetObj();
-    CPlayer* pPlayerobj = (CPlayer*)CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0);
-    int iPAtk = pPlayerobj->GetPlayerAtk();
+    /*CPlayer* pPlayerobj = (CPlayer*)CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0);
+    int iPAtk = pPlayerobj->GetPlayerAtk();*/
     if (pOtherobj->GetName() == L"Missile_Player")
     {
+        CMissile* pMissile = static_cast<CMissile*>(pOtherobj); // 충돌한 탄환에서 직접 피해량 읽기
+        const int iDamage = pMissile->GetDamage();
+
         m_bHit = true;
         switch (m_tInfo.eMType)
         {
@@ -221,7 +224,7 @@ void CMonster::OnCollisionEnter(CCollider* _pOther)
         default:
             break;
         }
-        m_tInfo.fHP -= iPAtk;
+        m_tInfo.fHP -= iDamage; 
 
         if (m_tInfo.fHP < 0 && m_signaldead == false)
         {

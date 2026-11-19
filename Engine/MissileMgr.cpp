@@ -107,7 +107,8 @@ void CreateMissile(Vec2 vMonPos, Vec2 vMonScale,int _speedtype, MISSILE_TYPE _eT
     vMissilePos.y += vMonScale.y / 2.f;
 
     CScene* CurScene = CSceneMgr::GetInst()->GetCurScene();
-    CObject* pInfo = CurScene->GetPlayer(0);
+    CObject* pInfo = CurScene->SelectNearestAlivePlayer(vMissilePos);
+    if (pInfo == nullptr) return;
     Vec2 vpPos = pInfo->GetPos();
     Vec2 vMDPos = Vec2(0, 10);
     vMDPos.x += 2 * PI / 6.f;
@@ -162,7 +163,8 @@ void CreateMissile1(Vec2 vMonPos, Vec2 vMonScale, MISSILE_TYPE _eType)
     vMissilePos.y += vMonScale.y / 2.f;
     vMissilePos.x += vMonScale.x / 2.f;
     CScene* CurScene = CSceneMgr::GetInst()->GetCurScene();
-    CObject* pInfo = CurScene->GetPlayer(0);
+    CObject* pInfo = CurScene->SelectNearestAlivePlayer(vMissilePos);
+    if (pInfo == nullptr) return;
     Vec2 vpPos = pInfo->GetPos();
    
     Vec2 vMDPos = Vec2(0, 10);
@@ -215,7 +217,8 @@ void CreateMissile2(Vec2 vMonPos, Vec2 vMonScale, MISSILE_TYPE _eType)
     vMissilePos.y += vMonScale.y / 2.f;
     vMissilePos.x -= vMonScale.x / 2.f;
     CScene* CurScene = CSceneMgr::GetInst()->GetCurScene();
-    CObject* pInfo = CurScene->GetPlayer(0);
+    CObject* pInfo = CurScene->SelectNearestAlivePlayer(vMissilePos);
+    if (pInfo == nullptr) return;
     Vec2 vpPos = pInfo->GetPos();
    
     Vec2 vMDPos = Vec2(0, 10);
@@ -266,7 +269,8 @@ void CreateMissile3(Vec2 vMonPos, Vec2 vMonScale,float fXDir, MISSILE_TYPE _eTyp
     vMissilePos.y += 50.f;
 
     CScene* CurScene = CSceneMgr::GetInst()->GetCurScene();
-    CObject* pInfo = CurScene->GetPlayer(0);
+    CObject* pInfo = CurScene->SelectNearestAlivePlayer(vMissilePos);
+    if (pInfo == nullptr) return;
     Vec2 vpPos = Vec2(fXDir, -3*PI / 2.f);
    
     vpPos.Normalize();
@@ -348,7 +352,8 @@ void CreateMissile4(Vec2 vMonPos, Vec2 vMonScale,int _itype,  MISSILE_TYPE _eTyp
     vMissilePos.y += 100.f;
 
     CScene* CurScene = CSceneMgr::GetInst()->GetCurScene();
-    CObject* pInfo = CurScene->GetPlayer(0);
+    CObject* pInfo = CurScene->SelectNearestAlivePlayer(vMissilePos);
+    if (pInfo == nullptr) return;
     Vec2 vpPos = Vec2(-2*PI, -3 * PI / 2.f);
 
     
@@ -419,7 +424,8 @@ void CreateMissile5(Vec2 vMonPos, Vec2 vMonScale, MISSILE_TYPE _eType)
     vMissilePos.y += 100.f;
 
     CScene* CurScene = CSceneMgr::GetInst()->GetCurScene();
-    CObject* pInfo = CurScene->GetPlayer(0);
+    CObject* pInfo = CurScene->SelectNearestAlivePlayer(vMissilePos);
+    if (pInfo == nullptr) return;
     Vec2 vpPos = Vec2(-2 * PI, -3 * PI / 2.f);
 
 

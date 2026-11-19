@@ -5,6 +5,7 @@
 #include "CPathMgr.h"
 
 #include "CObject.h"
+#include "CPlayer.h"
 #include "CTile.h"
 
 #include "CCamera.h"
@@ -38,6 +39,40 @@ CPlayer* CScene::GetPlayer(PlayerId id) const
     if (id >= m_players.size()) return nullptr;
 
     return m_players[id];
+}
+
+CPlayer* CScene::SelectNearestAlivePlayer(Vec2 fromPos) const
+{
+    CPlayer* bestPlayer = nullptr;
+    float bestDistSq = 0.f;
+
+    for (PlayerId slot = 0; slot < m_players.size(); ++slot) {
+        CPlayer* candidate = m_players[slot];
+        if (candidate == nullptr || candidate->IsDead() || !candidate->IsAlivePlayer())
+            continue;
+
+        Vec2 diff = candidate->GetPos() - fromPos;
+        float distSq = diff.x * diff.x + diff.y * diff.y;
+
+        if (bestPlayer == nullptr || distSq < bestDistSq) {
+            bestPlayer = candidate;
+            bestDistSq = distSq;
+        }
+
+    }
+    return bestPlayer;
+}
+
+CObject* CScene::FindObjectById(std::uint32_t objectId) const
+{
+    if (objectId == 0) return nullptr;
+    for (UINT i = 0; i < (UINT)GROUP_TYPE::END; ++i) {
+        for (CObject* pObj : m_arrObj[i]) {
+            if (pObj != nullptr && pObj->GetObjectId() == objectId)
+                return pObj;
+        }
+    }
+    return nullptr;
 }
 
 void CScene::update()
@@ -89,6 +124,10 @@ void CScene::render(HDC _dc)
 			}
 			else
 			{
+                for (CPlayer* slotPlayer : m_players) {
+                    if ((CObject*)slotPlayer == *iter)
+                        slotPlayer = nullptr;
+                }
 				
 				iter = m_arrObj[i].erase(iter);
 			}
@@ -135,6 +174,15 @@ void CScene::render_tile(HDC _dc)
     }
 }
 
+
+void CScene::AddObject(CObject* _pObj, GROUP_TYPE _eType)
+{
+    if (_pObj == nullptr) return;
+    if (_pObj->GetObjectId() == 0) {
+        _pObj->SetObjectId(m_nexObjectId++);
+    }
+    m_arrObj[(UINT)_eType].push_back(_pObj);
+}
 
 void CScene::RegisterPlayer(PlayerId id, CPlayer* player)
 {

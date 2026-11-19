@@ -3,6 +3,7 @@
 #include <charconv>
 #include <cstdint>
 #include <iostream>
+#include <optional>
 #include <string_view>
 #include <system_error>
 
@@ -84,8 +85,8 @@ namespace
 
         std::cout
             << "\nCSessionMgr Test:\n"
-            << "  NetHarness.exe session-host\n"
-            << "  NetHarness.exe session-client <ip>\n"
+            << "  NetHarness.exe session-host [--heartbeat|--heartbeat-silent]\n"
+            << "  NetHarness.exe session-client <ip> [--heartbeat|--heartbeat-silent]\n"
             << "  NetHarness.exe session-bad-token-client <ip>\n"
             << "  NetHarness.exe session-room-test\n"
             << "  NetHarness.exe session-retry-client <ip>\n"
@@ -95,9 +96,10 @@ namespace
 
         std::cout
             << "\nSession data test:\n"
-            << "  NetHarness.exe session-data-host\n"
-            << "  NetHarness.exe session-data-client <Host-IP>\n"
-            << "  NetHarness.exe session-data-compare <host-trace> <client-trace>\n";
+            << "  NetHarness.exe session-data-host [--spawn|--lifecycle]\n"
+            << "  NetHarness.exe session-data-client <Host-IP> [--spawn|--lifecycle]\n"
+            << "  NetHarness.exe session-data-compare <host-trace> <client-trace>\n"
+            << "  NetHarness.exe snapshot-replay-test\n";
 
         std::cout
             << "\nConcurrent queue test:\n"
@@ -204,9 +206,7 @@ namespace
                 << "=== ScriptedPeer ===\n"
                 << "Role: " << (options.host ? "host" : "client") << "\n"
                 << "TCP port: " << TCP_PORT << "\n"
-                << "Behavior: "
-                << (options.peerBehavior == scripted_peer::Behavior::Close ? "close" : "silent")
-                << "\n\n";
+                << "Behavior: " << (options.peerBehavior == scripted_peer::Behavior::Close ? "close" : "silent") << "\n\n";
 
             return;
         }
@@ -239,142 +239,162 @@ namespace
 
         std::cout << "\n";
     }
-}
-
-int main(int argc, char* argv[])
-{
-    if (argc == 2 && std::string_view(argv[1]) == "mgr-overflow-test")
-        return network_mgr_test::RunReceiveOverflow(TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "mgr-stop-test")
-        return network_mgr_test::RunListeningShutdown(TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "mgr-host")
-        return network_mgr_test::Run(true, "", TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 3 && std::string_view(argv[1]) == "mgr-client")
-        return network_mgr_test::Run(false, argv[2], TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "mgr-queue-host")
-        return network_mgr_test::RunQueueTest(true, "", TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 3 && std::string_view(argv[1]) == "mgr-queue-client")
-        return network_mgr_test::RunQueueTest(false, argv[2], TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "mgr-batch-test")
-        return network_mgr_test::RunSnapshotBatchTest() ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "mgr-batch-host")
-        return network_mgr_test::Run(true, "", TCP_PORT, UDP_PORT, network_mgr_test::TestMode::SnapshotBatch) ? 0 : 1;
-
-    if (argc == 3 && std::string_view(argv[1]) == "mgr-batch-client")
-        return network_mgr_test::Run(false, argv[2], TCP_PORT, UDP_PORT, network_mgr_test::TestMode::SnapshotBatch) ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "mgr-active-stop-test")
-        return network_mgr_test::RunActiveShutdown(TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "session-host")
-        return network_mgr_test::RunSessionApproval(true, "", TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 3 && std::string_view(argv[1]) == "session-client")
-        return network_mgr_test::RunSessionApproval(false, argv[2], TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 3 && std::string(argv[1]) == "session-bad-token-client")
-        return network_mgr_test::RunSessionBadTokenClient(argv[2], TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "session-room-test")
-        return network_mgr_test::RunSessionRoomLifecycle(TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 3 && std::string_view(argv[1]) == "session-retry-client")
-        return network_mgr_test::RunSessionApproval(false, argv[2], TCP_PORT, UDP_PORT, network_mgr_test::SessionJoinTest::InvalidIp) ? 0 : 1;
-
-    if (argc == 3 && std::string_view(argv[1]) == "session-connect-failure-client")
-        return network_mgr_test::RunSessionApproval(false, argv[2], TCP_PORT, UDP_PORT, network_mgr_test::SessionJoinTest::ConnectionRefused) ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "flow-host")
-        return network_mgr_test::Run(true, "", TCP_PORT, UDP_PORT, network_mgr_test::TestMode::GameFlow) ? 0 : 1;
-
-    if (argc == 3 && std::string_view(argv[1]) == "flow-client")
-        return network_mgr_test::Run(false, argv[2], TCP_PORT, UDP_PORT, network_mgr_test::TestMode::GameFlow) ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "pong")
-        return pong_test::Run(TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "session-data-host")
-        return session_data_test::Run(true, "", TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 3 && std::string_view(argv[1]) == "session-data-client")
-        return session_data_test::Run(false, argv[2], TCP_PORT, UDP_PORT) ? 0 : 1;
-
-    if (argc == 4 && std::string_view(argv[1]) == "session-data-compare")
-        return session_data_test::Compare(argv[2], argv[3]) ? 0 : 1;
-
-    if (argc == 2 && std::string_view(argv[1]) == "mgr-concurrent-host")
-        return network_mgr_test::Run(true, "", TCP_PORT, UDP_PORT, network_mgr_test::TestMode::Concurrent) ? 0 : 1;
-
-    if (argc == 3 && std::string_view(argv[1]) == "mgr-concurrent-client")
-        return network_mgr_test::Run(false, argv[2], TCP_PORT, UDP_PORT, network_mgr_test::TestMode::Concurrent) ? 0 : 1;
-
-    if (argc == 2)
-    {
-        const std::string_view mode = argv[1];
-
-
-
-        if (mode == "framing-host" || mode == "framing-client" || mode == "send-host" || mode == "send-client")
-        {
-            WSADATA wsaData{};
-            const int startupError = WSAStartup(MAKEWORD(2, 2), &wsaData);
-
-            if (startupError != 0)
-            {
-                std::cerr << "WSAStartup failed: " << startupError << "\n";
-                return 1;
-            }
-
-            const bool sendTest = mode == "send-host" || mode == "send-client";
-            const bool host = mode == "framing-host" || mode == "send-host";
-
-            const bool passed = sendTest ? RunTcpSendTests(host, TCP_PORT) : RunTcpFramingNetworkTests(host, TCP_PORT);
-
-            if (WSACleanup() == SOCKET_ERROR)
-            {
-                std::cerr << "WSACleanup failed: " << WSAGetLastError() << "\n";
-                return 1;
-            }
-
-            if (!passed)
-                std::cerr << "[SUITE] FAIL\n";
-
-            return passed ? 0 : 1;
-        }
-        else if (mode == "--help")
-        {
-            PrintUsage();
-            return 0;
-        }
-        else if (mode == "framing-test")
-            return RunTcpFramingTests() ? 0 : 1;
-    }
-
-    Options options;
-
-    if (!ParseArguments(argc, argv, options))
+    int InvalidArguments()
     {
         std::cerr << "Invalid arguments.\n\n";
         PrintUsage();
         return 1;
     }
 
+    int RunSessionCommand(bool host, int argc, char* argv[])
+    {
+        using namespace network_mgr_test;
+
+        const int requiredArgc = host ? 2 : 3;
+        auto mode = SessionHeartbeatTest::None;
+        if (argc > requiredArgc)
+        {
+            const std::string_view option = argv[requiredArgc];
+            if (option == "--heartbeat")
+                mode = SessionHeartbeatTest::Observe;
+            else if (option == "--heartbeat-silent")
+                mode = SessionHeartbeatTest::Silent;
+            else
+                return InvalidArguments();
+        }
+
+        return RunSessionApproval(host, host ? "" : argv[2], TCP_PORT, UDP_PORT, SessionJoinTest::Normal, mode) ? 0 : 1;
+    }
+
+    int RunSessionDataCommand(bool host, int argc, char* argv[])
+    {
+        using session_data_test::Mode;
+
+        const int requiredArgc = host ? 2 : 3;
+        auto mode = Mode::Data;
+
+        if (argc > requiredArgc)
+        {
+            const std::string_view option = argv[requiredArgc];
+
+            if (option == "--spawn")
+                mode = Mode::Spawn;
+            else if (option == "--lifecycle")
+                mode = Mode::Lifecycle;
+            else
+                return InvalidArguments();
+        }
+
+        return session_data_test::Run(host, host ? "" : argv[2], TCP_PORT, UDP_PORT, mode) ? 0 : 1;
+    }
+
+    int RunTcpNetworkCommand(bool host, bool sendTest)
+    {
+        WSADATA wsaData{};
+        const int startupError = WSAStartup(MAKEWORD(2, 2), &wsaData);
+
+        if (startupError != 0)
+        {
+            std::cerr << "WSAStartup failed: " << startupError << '\n';
+            return 1;
+        }
+
+        const bool passed = sendTest ? RunTcpSendTests(host, TCP_PORT) : RunTcpFramingNetworkTests(host, TCP_PORT);
+
+        if (WSACleanup() == SOCKET_ERROR)
+        {
+            std::cerr << "WSACleanup failed: " << WSAGetLastError() << '\n';
+            return 1;
+        }
+
+        if (!passed)
+            std::cerr << "[SUITE] FAIL\n";
+
+        return passed ? 0 : 1;
+    }
+
+    std::optional<int> TryRunCommand(int argc, char* argv[])
+    {
+        using namespace network_mgr_test;
+
+        if (argc < 2)
+            return std::nullopt;
+
+        struct Command
+        {
+            std::string_view name;
+            int minArgc;
+            int maxArgc;
+            int (*run)(int, char**);
+        };
+
+        static constexpr Command commands[] = {
+            { "--help", 2, 2, [](int, char**) { PrintUsage(); return 0; } },
+            { "framing-test", 2, 2, [](int, char**) { return RunTcpFramingTests() ? 0 : 1; } },
+            { "framing-host", 2, 2, [](int, char**) { return RunTcpNetworkCommand(true, false); } },
+            { "framing-client", 2, 2, [](int, char**) { return RunTcpNetworkCommand(false, false); } },
+            { "send-host", 2, 2, [](int, char**) { return RunTcpNetworkCommand(true, true); } },
+            { "send-client", 2, 2, [](int, char**) { return RunTcpNetworkCommand(false, true); } },
+            { "mgr-overflow-test", 2, 2, [](int, char**) { return RunReceiveOverflow(TCP_PORT, UDP_PORT) ? 0 : 1; } },
+            { "mgr-stop-test", 2, 2, [](int, char**) { return RunListeningShutdown(TCP_PORT, UDP_PORT) ? 0 : 1; } },
+            { "mgr-active-stop-test", 2, 2, [](int, char**) { return RunActiveShutdown(TCP_PORT, UDP_PORT) ? 0 : 1; } },
+            { "mgr-host", 2, 2, [](int, char**) { return Run(true, "", TCP_PORT, UDP_PORT) ? 0 : 1; } },
+            { "mgr-client", 3, 3, [](int, char** args) { return Run(false, args[2], TCP_PORT, UDP_PORT) ? 0 : 1; } },
+            { "mgr-queue-host", 2, 2, [](int, char**) { return RunQueueTest(true, "", TCP_PORT, UDP_PORT) ? 0 : 1; } },
+            { "mgr-queue-client", 3, 3, [](int, char** args) { return RunQueueTest(false, args[2], TCP_PORT, UDP_PORT) ? 0 : 1; } },
+            { "mgr-batch-test", 2, 2, [](int, char**) { return RunSnapshotBatchTest() ? 0 : 1; } },
+            { "mgr-batch-host", 2, 2, [](int, char**) { return Run(true, "", TCP_PORT, UDP_PORT, TestMode::SnapshotBatch) ? 0 : 1; } },
+            { "mgr-batch-client", 3, 3, [](int, char** args) { return Run(false, args[2], TCP_PORT, UDP_PORT, TestMode::SnapshotBatch) ? 0 : 1; } },
+            { "mgr-concurrent-host", 2, 2, [](int, char**) { return Run(true, "", TCP_PORT, UDP_PORT, TestMode::Concurrent) ? 0 : 1; } },
+            { "mgr-concurrent-client", 3, 3, [](int, char** args) { return Run(false, args[2], TCP_PORT, UDP_PORT, TestMode::Concurrent) ? 0 : 1; } },
+            { "session-host", 2, 3, [](int count, char** args) { return RunSessionCommand(true, count, args); } },
+            { "session-client", 3, 4, [](int count, char** args) { return RunSessionCommand(false, count, args); } },
+            { "session-bad-token-client", 3, 3, [](int, char** args) { return RunSessionBadTokenClient(args[2], TCP_PORT, UDP_PORT) ? 0 : 1; } },
+            { "session-room-test", 2, 2, [](int, char**) { return RunSessionRoomLifecycle(TCP_PORT, UDP_PORT) ? 0 : 1; } },
+            { "session-retry-client", 3, 3, [](int, char** args) { return RunSessionApproval(false, args[2], TCP_PORT, UDP_PORT, SessionJoinTest::InvalidIp) ? 0 : 1; } },
+            { "session-connect-failure-client", 3, 3, [](int, char** args) { return RunSessionApproval(false, args[2], TCP_PORT, UDP_PORT, SessionJoinTest::ConnectionRefused) ? 0 : 1; } },
+            { "flow-host", 2, 2, [](int, char**) { return Run(true, "", TCP_PORT, UDP_PORT, TestMode::GameFlow) ? 0 : 1; } },
+            { "flow-client", 3, 3, [](int, char** args) { return Run(false, args[2], TCP_PORT, UDP_PORT, TestMode::GameFlow) ? 0 : 1; } },
+            { "pong", 2, 2, [](int, char**) { return pong_test::Run(TCP_PORT, UDP_PORT) ? 0 : 1; } },
+            { "session-data-host", 2, 3, [](int count, char** args) { return RunSessionDataCommand(true, count, args); } },
+            { "session-data-client", 3, 4, [](int count, char** args) { return RunSessionDataCommand(false, count, args); } },
+            { "session-data-compare", 4, 4, [](int, char** args) { return session_data_test::Compare(args[2], args[3]) ? 0 : 1; } },
+            { "snapshot-replay-test", 2, 2, [](int, char**) { return session_data_test::RunSnapshotReplayTest() ? 0 : 1; } },
+        };
+
+        const std::string_view name = argv[1];
+        for (const auto& command : commands)
+        {
+            if (command.name != name)
+                continue;
+
+            if (argc < command.minArgc || argc > command.maxArgc)
+                return InvalidArguments();
+
+            return command.run(argc, argv);
+        }
+
+        return std::nullopt;
+    }
+}
+
+int main(int argc, char* argv[])
+{
+    if (const auto result = TryRunCommand(argc, argv))
+        return *result;
+
+    Options options;
+
+    if (!ParseArguments(argc, argv, options))
+        return InvalidArguments();
+
     WSADATA wsaData{};
 
-    const int startupError =
-        WSAStartup(MAKEWORD(2, 2), &wsaData);
+    const int startupError = WSAStartup(MAKEWORD(2, 2), &wsaData);
 
     if (startupError != 0)
     {
-        std::cerr << "WSAStartup failed: "
-            << startupError << "\n";
+        std::cerr << "WSAStartup failed: " << startupError << "\n";
         return 1;
     }
 

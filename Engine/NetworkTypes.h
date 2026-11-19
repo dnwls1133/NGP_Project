@@ -44,6 +44,7 @@ namespace network
         TransportType transport = TransportType::TCP;
         sockaddr_in sender{};
         protocol::Message message{};
+        std::uint64_t receivedTimeMs = 0;
     };
 
     enum class NetworkEventType

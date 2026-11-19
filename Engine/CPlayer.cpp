@@ -1,13 +1,14 @@
 ﻿#include "pch.h"
 #include "CPlayer.h"
 
-
+#include "CCore.h"
 #include "CSceneMgr.h"
 #include "CKeyMgr.h"
 #include "CTimeMgr.h"
 #include "CPathMgr.h"
 #include "CResMgr.h"
 #include "CSoundMgr.h"
+#include "CSessionMgr.h"
 
 
 #include "CScene.h"
@@ -71,21 +72,32 @@ CPlayer::~CPlayer()
 }
 void CPlayer::update()
 {
-    std::uint8_t moveBits = protocol::MoveBit::NONE;
-    std::uint8_t fireHeld = 0;
-
-    // 11/10: 로컬 슬롯(0) 임시 키 수집 (11/14 통합 시 이현범 담당 BuildInput/호스트 루프로 연결)
-    if (m_PlayerId == 0)
+    auto& session = CCore::GetInst()->GetSession();
+    if (session.IsHost())
     {
-        if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
-        if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
-        if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
-        if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
-        if (KEY_HOLD(KEY::S)) fireHeld = 1;
-        if (KEY_TAP(KEY::L)) m_iLvl = 5;
+
     }
-   
-    Simulate(moveBits, fireHeld, fDT);
+    else
+    {
+        /*
+        std::uint8_t moveBits = protocol::MoveBit::NONE;
+        std::uint8_t fireHeld = 0;
+
+        // 11/10: 로컬 슬롯(0) 임시 키 수집 (11/14 통합 시 이현범 담당 BuildInput/호스트 루프로 연결)
+        if (m_PlayerId == 0)
+        {
+            if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
+            if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
+            if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
+            if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
+            if (KEY_HOLD(KEY::S)) fireHeld = 1;
+            if (KEY_TAP(KEY::L)) m_iLvl = 5;
+        }
+
+        Simulate(moveBits, fireHeld, fDT);
+        */
+    }
+    
 	
 	
 	//GetAnimator()->update();
@@ -149,7 +161,7 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
                 dAcc += dt;
                 if (dAcc > 0.15f)
                 {
-                    dAcc = 0;
+                    dAcc -= 0.15f;
                     switch (m_iLvl)
                     {
                     case 1:
@@ -198,9 +210,24 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
         }
     }
     else if (m_clear) {
-        vPos.y -= 300.f * fDT;
+        vPos.y -= 300.f * dt;
         SetPos(vPos);
     }
+}
+
+protocol::ObjectStateRecord CPlayer::ExportStateRecord(protocol::ObjectId objectId) const
+{
+    protocol::ObjectStateRecord rec{};
+    rec.objectId = objectId;
+    rec.kind = protocol::NetObjectKind::PLAYER;
+    rec.subType = static_cast<std::uint8_t>(m_iLvl);
+    rec.alive = (!m_dead && m_iHp > 0) ? 1 : 0;
+    rec.fsmState = m_clear ? 2 : (m_bHit ? 1 : 0);
+    rec.pos.x = static_cast<std::int32_t>(m_vPos.x * 100.f);
+    rec.pos.y = static_cast<std::int32_t>(m_vPos.y * 100.f);
+    rec.hp = m_iHp;
+    rec.maxHp = 3;
+    return rec;
 }
 
 void CPlayer::render(HDC _dc)
@@ -312,7 +339,10 @@ void CPlayer::CreateMissile(int type,  float _fVec,MISSILE_TYPE _eType)
     pMissile->ChangemType(_eType);
 	pMissile->SetVec(_fVec);
 	pMissile->SetType(0);
-	pMissile->SetName(L"Missile_Player");
+    pMissile->SetOwnerPlayerId(m_PlayerId);
+    pMissile->SetDamage(m_iAtk);
+    pMissile->SetName(L"Missile_Player");
+    
 
 	CreateObject(pMissile,GROUP_TYPE::PROJ_PLAYER);
 }

@@ -323,6 +323,359 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1111Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. 300ms 중립화 경계(직전 299ms / 정확한 경계 300ms / 직후 301ms) 및 무효·역순 입력 타이머 연장 불가 확인
+        {
+            HostSimEngine engine{ 1000 };
+            // t = 100ms에 유효 입력 채택 (RIGHT + 발사 유지)
+            engine.SubmitPlayerInput(PlayerInputPayload{ 0, MoveBit::RIGHT, 1, 0, 10 }, 100);
+            // t = 250ms에 역순(seq=9) 및 범위 오류(moveBits=0x80) 주입 -> 거부되어 타이머(100ms)가 연장되지 않아야 함
+            engine.SubmitPlayerInput(PlayerInputPayload{ 0, MoveBit::LEFT, 1, 0, 9 }, 250);
+            engine.SubmitPlayerInput(PlayerInputPayload{ 0, 0x80, 1, 0, 11 }, 250);
+            // 경계 직전: t = 399ms (경과 299ms) -> 입력 유지
+            engine.ApplyInputNeutralization(399);
+            const bool beforeBoundaryOk =
+                (engine.GetLastAppliedMoveBits(0) == MoveBit::RIGHT)
+                && (engine.GetLastAppliedFireHeld(0) == 1)
+                && (engine.GetLastValidReceivedTimeMs(0) == 100);
+            // 정확한 경계: t = 400ms (경과 300ms) -> 즉시 중립화 (moveBits = 0, fireHeld = 0)
+            engine.ApplyInputNeutralization(400);
+            const bool exactBoundaryOk =
+                (engine.GetLastAppliedMoveBits(0) == MoveBit::NONE)
+                && (engine.GetLastAppliedFireHeld(0) == 0);
+            // 경계 직후: t = 401ms (경과 301ms) -> 중립 상태 유지
+            engine.ApplyInputNeutralization(401);
+            const bool afterBoundaryOk =
+                (engine.GetLastAppliedMoveBits(0) == MoveBit::NONE)
+                && (engine.GetLastAppliedFireHeld(0) == 0);
+            Check(beforeBoundaryOk && exactBoundaryOk && afterBoundaryOk,
+                "HostSim1111: 300ms neutralization holds at 299ms, clears at 300ms/301ms, and ignores invalid inputs",
+                counters);
+        }
+        // 2. 기본 상태(위치/HP/alive) 추출 및 단일 조각 배치 미전송 교체 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 20'000 }, {}, 3);
+            engine.FlushLifecycleAtTickEnd(sink);
+            script.ScheduleInput(1, 0, MoveBit::RIGHT, 1, 1, 0);
+            // 첫 50ms(tick 3): 단일 조각 상태 배치 등록 (pos.x = 10,900, hp = 3)
+            engine.StepFrame(50'000, script, sink);
+            // P0 피격 가정(HP 3 -> 1) 후 다음 50ms(tick 6) 진행 -> 미전송 대기 배치가 최신 tick 6 배치로 교체됨
+            engine.SetObjectHp(p0Id, 1);
+            engine.StepFrame(50'000, script, sink);
+            const auto pending = sink.GetInnerFakeSink().TakePendingBatchForSend();
+            bool replacedOk = pending.has_value() && (pending->parts.size() == 1);
+            if (replacedOk)
+            {
+                const auto& snap = std::get<StateSnapshotPayload>(pending->parts[0].payload);
+                replacedOk =
+                    (snap.snapshotTick == 6)
+                    && (snap.partIndex == 0 && snap.partCount == 1)
+                    && (snap.objects.size() == 1)
+                    && (snap.objects[0].objectId == p0Id)
+                    && (snap.objects[0].pos.x == 11'800) // 10,000 + 6틱 * 300 = 11,800
+                    && (snap.objects[0].hp == 1)
+                    && (snap.objects[0].alive == 1);
+            }
+            Check(replacedOk,
+                "HostSim1111: Extracts position/HP state and replaces unsent single-part SnapshotBatch with latest tick",
+                counters);
+        }
+    }
+
+    void RunHostSim1112Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. ObjectId 할당/조회/제거 및 같은 세션 내 ID 재사용 금지 확인
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId id1 = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT,
+                FixedVec2{ 1'000, 1'000 });
+            const ObjectId id2 = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT,
+                FixedVec2{ 2'000, 2'000 });
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // id1 삭제 후 새 객체 id3 생성 -> 삭제된 id1(1)을 재사용하지 않고 3이 할당되어야 함
+            engine.RequestDestroy(id1, DespawnReason::DESTROYED);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            const ObjectId id3 = engine.RequestSpawn(NetObjectKind::ITEM, 1, INVALID_PLAYER_SLOT,
+                FixedVec2{ 3'000, 3'000 });
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            Check(id1 == 1 && id2 == 2 && id3 == 3
+                && engine.FindObjectById(id1) == nullptr
+                && engine.FindObjectById(id2) != nullptr
+                && engine.FindObjectById(id3) != nullptr,
+                "HostSim1112: ObjectId asslocation/lookup/removal never reuses destryoed IDs in the same session",
+                counters);
+
+        }
+
+        // 2. 순회 중 해제 없음, 중복 삭제 요청시 해제 1회, 플레이어 슬롯 참조 정리 확인
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER
+                , 1, 0, FixedVec2{ 10'000, 20'000 });
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // 활성 객체 순회 도중 동일 객체 삭제 요청 2회 -> 첫 요청만 채택되고 순회 중 컨테이너 크기는 유지됨
+            bool firstReq = false;
+            bool secondReq = true;
+            for (const HostObjectValue& obj : engine.GetActiveObjects()) {
+                if (obj.objectId == p0Id) {
+                    firstReq = engine.RequestDestroy(obj.objectId, DespawnReason::DESTROYED);
+                    secondReq = engine.RequestDestroy(obj.objectId, DespawnReason::DESTROYED);
+                }
+            }
+            const bool keptDuringIteration = (engine.GetActiveObjects().size() == 1);
+
+            // 틱 종료 경계에서 1회만 해제되고 슬롯 참조가 0으로 정리되며, 바로 새 P0 생성이 가능해야 함.
+            engine.FlushLifecycleAtTickEnd(sink);
+            const ObjectId newP0Id = engine.RequestSpawn(NetObjectKind::PLAYER,
+                1, 0, FixedVec2{ 10'000, 20'000 });
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            Check(firstReq && !secondReq && keptDuringIteration
+                && engine.GetTotalDestroyedCount() == 1
+                && newP0Id == 2
+                && engine.GetPlayerSlotObjectId(0) == newP0Id,
+                "HostSim1112: Duplicate destroy frees once at tick-end without mutating during iteration and clears player slot",
+                counters);
+
+        }
+    }
+
+    void RunHostSim1113Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 서로 다른 플레이어(P0 damamge=2, P1 damage=5)의 발사자 ID와 피해량 보존 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 50'000 }, {}, 3,2);
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 50'000 }, {}, 3,5);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            script.ScheduleInput(1, 0, MoveBit::RIGHT, 1, 1, 0);
+            script.ScheduleInput(1, 1, MoveBit::LEFT, 1, 1, 0);
+
+            // 150ms(9틱)를 75ms 두 프레임으로 진행 -> 9번째 틱에서 각 플레이어 탄환 1발씩 생성
+            engine.StepFrame(75'000, script, sink);
+            engine.StepFrame(75'000, script, sink);
+
+            int p0ProjDamage = 0;
+            int p1ProjDamage = 0;
+            for (const HostObjectValue& obj : engine.GetActiveObjects()) {
+                if (obj.kind == NetObjectKind::PROJ_PLAYER) {
+                    if (obj.ownerPlayerId == 0) p0ProjDamage = obj.damage;
+                    if (obj.ownerPlayerId == 1) p1ProjDamage = obj.damage;
+                }
+            }
+            Check(p0ProjDamage == 2 && p1ProjDamage == 5,
+                "HostSim1113: Preserves distinct ownerPlayerId and damage (P0=2, P1=5) on spawned projectiles",
+                counters);
+        }
+
+        // 2. 같은 시간(300ms = 18틱) 입력에서 화면 FPS(externalRenderFdt)와 무한한 발사 수(2발) 확인
+        {
+            InputScript scriptA;
+            InputScript scriptB;
+            scriptA.ScheduleInput(1, 0, MoveBit::NONE, 1, 1, 16);
+            scriptB.ScheduleInput(1, 0, MoveBit::NONE, 1, 1, 16);
+
+            CaptureSink sinkA;
+            CaptureSink sinkB;
+            HostSimEngine engineA{ 1000 };
+            HostSimEngine engineB{ 1000 };
+
+            engineA.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 50'000 }, {}, 3, 2);
+            engineB.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 50'000 }, {}, 3, 2);
+            engineA.FlushLifecycleAtTickEnd(sinkA);
+            engineB.FlushLifecycleAtTickEnd(sinkB);
+
+            // engineA: 75ms씩 4번 (총 300ms = 18틱, 외부 fDT = 0.25f)
+            for (int i = 0; i < 4; ++i) {
+                engineA.StepFrame(75'000, scriptA, sinkA, 0.25f);
+            }
+            // engineB: 50ms씩 6번 (총 300ms = 18틱, 외부 fDT = 0.005f)
+            for (int i = 0; i < 6; ++i) {
+                engineB.StepFrame(50'000, scriptB, sinkB, 0.005f);
+            }
+
+            int countA = 0;
+            int countB = 0;
+            for (const HostObjectValue& obj : engineA.GetActiveObjects())
+                if (obj.kind == NetObjectKind::PROJ_PLAYER) ++countA;
+            for (const HostObjectValue& obj : engineB.GetActiveObjects())
+                if (obj.kind == NetObjectKind::PROJ_PLAYER) ++countB;
+
+            Check(countA == 2 && countB == 2,
+                "HostSim1113: Produces identical projectile count (2 shots in 300ms) regardless of render FPS",
+                counters);
+        }
+    }
+
+    void RunHostSim1114Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. P0·P1 동시 이동·발사(9틱=150ms) 후 틱/ID/HP/발사 일치 및 P1 입력 단절(300ms 경과) 후 중립화 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 50'000 }, {}, 3, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 50'000 }, {}, 3, 2);
+            engine.FlushLifecycleAtTickEnd(sink);
+            script.ScheduleInput(1, 0, MoveBit::RIGHT, 1, 1, 16);
+            script.ScheduleInput(1, 1, MoveBit::LEFT, 1, 1, 16);
+            script.ScheduleInput(10, 0, MoveBit::RIGHT, 1, 2, 166);
+            engine.StepFrame(75'000, script, sink);
+            engine.StepFrame(75'000, script, sink);
+            const HostObjectValue* p0After9 = engine.FindObjectById(p0Id);
+            const HostObjectValue* p1After9 = engine.FindObjectById(p1Id);
+            const bool syncedAtTick9 = (engine.GetHostTick() == 9)
+                && (p0After9 != nullptr && p1After9 != nullptr)
+                && (p0After9->hp == 3 && p1After9->hp == 3)
+                && (p0After9->pos.x == 12'700 && p1After9->pos.x == 17'300);
+            engine.StepFrame(83'334, script, sink);
+            engine.StepFrame(83'334, script, sink);
+            Check(syncedAtTick9
+                && engine.GetHostTick() == 19
+                && engine.GetLastAppliedMoveBits(0) == MoveBit::RIGHT
+                && engine.GetLastAppliedFireHeld(0) == 1
+                && engine.GetLastAppliedMoveBits(1) == MoveBit::NONE
+                && engine.GetLastAppliedFireHeld(1) == 0,
+                "HostSim1114: Verifies P0/P1 tick/ID/HP/fire parity and neutralizes disconnected P1 after 300ms",
+                counters);
+        }
+    }
+
+    void RunHostSim1115Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. 일반 적 FSM의 고정 틱(30틱 = 500ms) 전환 확인 (29틱에는 IDLE=0, 30틱에 PATROL/RUN=1)
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 20'000, 10'000 }, {}, 20, 1);
+            engine.FlushLifecycleAtTickEnd(sink);
+            // 29틱(483,334us) 진행 -> 아직 IDLE(fsmState == 0)
+            for (int i = 0; i < 5; ++i) engine.StepFrame(83'334, script, sink); // 25틱
+            engine.StepFrame(66'667, script, sink);                             // +4틱 = 29틱
+            const std::uint8_t stateAt29 = engine.FindObjectById(monId)->fsmState;
+            // +1틱(16,667us) 진행 -> 총 30틱에서 fsmState == 1 전환
+            engine.StepFrame(16'667, script, sink);
+            const std::uint8_t stateAt30 = engine.FindObjectById(monId)->fsmState;
+            Check(stateAt29 == 0 && stateAt30 == 1,
+                "HostSim1115: Transitions enemy FSM on exact fixed host tick (tick 29=IDLE, tick 30=PATROL/RUN)",
+                counters);
+        }
+        // 2. 생존 타깃 선택: 가까운 생존자 우선, 동률 시 낮은 PlayerId(P0), 전원 사망 시 발사 안전 생략
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 2);
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 18'000, 30'000 }, {}, 20, 1);
+            engine.FlushLifecycleAtTickEnd(sink);
+            // (a) 적 위치(18,000)에서 P1(20,000, 거리 2,000)이 P0(10,000, 거리 8,000)보다 가까움 -> P1(1) 선택
+            const PlayerSlot nearestWhenBothAlive = engine.SelectNearestAlivePlayerId(FixedVec2{ 18'000, 30'000 });
+            // (b) 적 위치가 정중앙(15,000)이어서 P0·P1 거리가 5,000으로 동률일 때 -> 낮은 PlayerId인 P0(0) 선택
+            const PlayerSlot tieBreakSlot = engine.SelectNearestAlivePlayerId(FixedVec2{ 15'000, 30'000 });
+            // (c) 가까운 P1이 사망(hp=0)하면 생존한 P0(0) 선택
+            engine.SetObjectHp(p1Id, 0);
+            const PlayerSlot afterP1Dead = engine.SelectNearestAlivePlayerId(FixedVec2{ 18'000, 30'000 });
+            // (d) P0도 사망(hp=0)하여 생존 타깃이 없으면 INVALID_PLAYER_SLOT 반환 및 적 탄환 발사 안전 생략(0 반환)
+            engine.SetObjectHp(p0Id, 0);
+            const PlayerSlot whenAllDead = engine.SelectNearestAlivePlayerId(FixedVec2{ 18'000, 30'000 });
+            const ObjectId skippedProjId = engine.TryFireEnemyAimedProjectile(monId);
+            engine.FlushLifecycleAtTickEnd(sink);
+            Check(nearestWhenBothAlive == 1
+                && tieBreakSlot == 0
+                && afterP1Dead == 0
+                && whenAllDead == INVALID_PLAYER_SLOT
+                && skippedProjId == 0,
+                "HostSim1115: Selects nearest alive player, breaks ties by lower PlayerId, and safely skips firing when no target is alive",
+                counters);
+        }
+    }
+    void RunHostSim1116Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. 피해 2(P0)와 피해 7(P1) 탄환의 Spawn/Combat 데이터 보존 및 GetPlayer(0) 공격력 미참조 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 50'000 }, {}, 3, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 50'000 }, {}, 3, 7);
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 20'000 }, {}, 20, 1);
+            engine.FlushLifecycleAtTickEnd(sink);
+            script.ScheduleInput(1, 0, MoveBit::NONE, 1, 1, 16);
+            script.ScheduleInput(1, 1, MoveBit::NONE, 1, 1, 16);
+            // 9틱(150ms) 진행 -> P0 탄환(피해 2)과 P1 탄환(피해 7) 각각 생성 및 SPAWN 메시지 기록
+            engine.StepFrame(75'000, script, sink);
+            engine.StepFrame(75'000, script, sink);
+            ObjectId projP0 = 0;
+            ObjectId projP1 = 0;
+            for (const auto& entry : sink.GetCapturedMessages())
+            {
+                if (const auto* sp = std::get_if<SpawnPayload>(&entry.message.payload))
+                {
+                    if (sp->kind == NetObjectKind::PROJ_PLAYER && sp->ownerPlayerId == 0 && sp->damage == 2)
+                        projP0 = sp->objectId;
+                    if (sp->kind == NetObjectKind::PROJ_PLAYER && sp->ownerPlayerId == 1 && sp->damage == 7)
+                        projP1 = sp->objectId;
+                }
+            }
+            // P0 객체를 제거한 뒤에도(적이 GetPlayer(0)을 읽지 않음), 이미 발사된 P0 탄환(2)과 P1 탄환(7)의 피해가 그대로 적용되는지 확인
+            engine.RequestDestroy(p0Id, DespawnReason::DESTROYED);
+            engine.FlushLifecycleAtTickEnd(sink);
+            const bool hit0 = engine.ApplyProjectileHit(projP0, monId, sink); // 20 - 2 = 18
+            const std::int32_t hpAfterHit0 = engine.FindObjectById(monId)->hp;
+            const bool hit1 = engine.ApplyProjectileHit(projP1, monId, sink); // 18 - 7 = 11
+            const std::int32_t hpAfterHit1 = engine.FindObjectById(monId)->hp;
+            bool combat0Ok = false;
+            bool combat1Ok = false;
+            for (const auto& entry : sink.GetCapturedMessages())
+            {
+                if (const auto* ce = std::get_if<CombatEventPayload>(&entry.message.payload))
+                {
+                    if (ce->kind == CombatEventKind::DAMAGE_APPLIED && ce->instigatorPlayerId == 0 && ce->confirmedHp == 18)
+                        combat0Ok = true;
+                    if (ce->kind == CombatEventKind::DAMAGE_APPLIED && ce->instigatorPlayerId == 1 && ce->confirmedHp == 11)
+                        combat1Ok = true;
+                }
+            }
+            Check(projP0 != 0 && projP1 != 0 && p1Id != 0
+                && hit0 && hit1
+                && hpAfterHit0 == 18 && hpAfterHit1 == 11
+                && combat0Ok && combat1Ok,
+                "HostSim1116: Preserves projectile owner/damage (2 and 7) across Spawn/Combat without reading GetPlayer(0)",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -333,6 +686,12 @@ int main()
     RunHostSim1108Suite(counters);
     RunHostSim1109Suite(counters);
     RunHostSim1110Suite(counters);
+    RunHostSim1111Suite(counters);
+    RunHostSim1112Suite(counters);
+    RunHostSim1113Suite(counters);
+    RunHostSim1114Suite(counters);
+    RunHostSim1115Suite(counters);
+    RunHostSim1116Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

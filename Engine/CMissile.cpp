@@ -102,6 +102,7 @@ void CMissile::init(GROUP_TYPE _eType)
 }
 void CMissile::ChangemType(MISSILE_TYPE _eType)
 {
+    m_eMissileType = _eType;
     switch (_eType)
     {
     case MISSILE_TYPE::SMALL:
@@ -176,6 +177,24 @@ void CMissile::ChangemType(MISSILE_TYPE _eType)
     }
     break;
     }
+}
+protocol::SpawnPayload CMissile::ExportSpawnPayload(protocol::EventId eventId) const
+{
+    protocol::SpawnPayload spawn{};
+    spawn.eventId = eventId;
+    spawn.objectId = GetObjectId();
+    spawn.kind = protocol::NetObjectKind::PROJ_PLAYER;
+    spawn.subType = static_cast<std::uint8_t>(m_eMissileType);
+    spawn.ownerPlayerId = m_ownerPlayerId;
+    spawn.patternType = static_cast<std::uint8_t>(m_iType);
+    spawn.pos.x = static_cast<std::int32_t>(GetPos().x * 100.f);
+    spawn.pos.y = static_cast<std::int32_t>(GetPos().y * 100.f);
+    spawn.vel.x = static_cast<std::int32_t>(m_vDir.x * m_fVec * 100.f);
+    spawn.vel.y = static_cast<std::int32_t>(m_vDir.y * m_fVec * 100.f);
+    spawn.hp = 1;
+    spawn.damage = m_iDamage;
+
+    return spawn;
 }
 void CMissile::update()
 {

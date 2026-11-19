@@ -4,6 +4,7 @@
 #include "../Engine/CNetworkMgr.h"
 #include "../Engine/CSessionMgr.h"
 #include "../shared/protocol/PacketCodec.h"
+#include "../tests/CodecTests/fixtures/ProtocolV1Fixtures.h"
 
 #include <algorithm>
 #include <chrono>
@@ -16,6 +17,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <array>
 
 namespace session_data_test
 {
@@ -28,6 +30,9 @@ namespace session_data_test
 
     constexpr std::size_t MIN_INPUT_RECEIVED = 100;
     constexpr std::size_t MIN_SNAPSHOT_RECEIVED = 50;
+
+    constexpr std::uint32_t REPLAY_SESSION_ID = 1000;
+    constexpr std::size_t REPLAY_FRAME_COUNT = 4;
 
     struct Record
     {
@@ -110,6 +115,24 @@ namespace session_data_test
         net::SnapshotBatch batch{};
         batch.parts.push_back(std::move(message));
         return batch;
+    }
+
+    bool BuildSnapshotReplayFrames(std::array<std::vector<std::uint8_t>, REPLAY_FRAME_COUNT>& frames)
+    {
+        for (std::size_t index = 0; index < frames.size(); ++index)
+        {
+            const auto number = static_cast<std::uint32_t>(index + 1);
+            const auto batch = MakeSnapshot(REPLAY_SESSION_ID, number);
+            const auto error = protocol::CPacketCodec::Encode(batch.parts.front(), frames[index]);
+
+            if (error != protocol::CodecError::NONE)
+            {
+                std::cerr << "[FAIL] Snapshot replay encode failed, index=" << index << ", codecError=" << static_cast<int>(error) << '\n';
+                return false;
+            }
+        }
+
+        return true;
     }
 
     bool ValidateInput(const protocol::Message& message, std::uint32_t sessionId, std::uint32_t& number)
@@ -216,6 +239,137 @@ namespace session_data_test
         }
 
         return true;
+    }
+
+    bool DecodeSnapshotReplay(const std::array<std::vector<std::uint8_t>, REPLAY_FRAME_COUNT>& frames, const std::array<std::size_t, REPLAY_FRAME_COUNT>& order, std::array<protocol::Message, REPLAY_FRAME_COUNT>& decoded)
+    {
+        for (std::size_t step = 0; step < order.size(); ++step)
+        {
+            const auto frameIndex = order[step];
+
+            if (frameIndex >= frames.size())
+            {
+                std::cerr << "[FAIL] Invalid replay frame index=" << frameIndex << '\n';
+                return false;
+            }
+
+            auto& message = decoded[step];
+            const auto error = protocol::CPacketCodec::Decode(frames[frameIndex], message);
+
+            if (error != protocol::CodecError::NONE)
+            {
+                std::cerr << "[FAIL] Replay decode failed, step=" << step << ", frame=" << frameIndex << ", codecError=" << static_cast<int>(error) << '\n';
+                return false;
+            }
+
+            std::uint32_t number = 0;
+            if (!ValidateSnapshot(message, REPLAY_SESSION_ID, number) || number != frameIndex + 1)
+            {
+                std::cerr << "[FAIL] Replay snapshot mismatch, step=" << step << ", frame=" << frameIndex << ", decodedNumber=" << number << '\n';
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool CheckSnapshotReplay(const std::array<std::vector<std::uint8_t>, REPLAY_FRAME_COUNT>& frames, const std::array<std::size_t, REPLAY_FRAME_COUNT>& order, const std::vector<std::uint32_t>& expectedAppliedTicks)
+    {
+        std::cout << "[TEST] Replay order:";
+        for (const auto index : order)
+            std::cout << ' ' << index;
+        std::cout << '\n';
+
+        std::array<protocol::Message, REPLAY_FRAME_COUNT> decoded{};
+        if (!DecodeSnapshotReplay(frames, order, decoded))
+            return false;
+
+        struct AppliedState
+        {
+            std::vector<std::uint32_t> ticks;
+            protocol::FixedVec2 position{};
+        };
+
+        std::map<protocol::ObjectId, AppliedState> applied;
+
+        std::cout << "  Received ticks:";
+        for (const auto& message : decoded)
+        {
+            const auto& snapshot = std::get<protocol::StateSnapshotPayload>(message.payload);
+            std::cout << ' ' << snapshot.snapshotTick;
+
+            for (const auto& object : snapshot.objects)
+            {
+                auto& state = applied[object.objectId];
+                if (!state.ticks.empty() && snapshot.snapshotTick <= state.ticks.back())
+                    continue;
+
+                state.ticks.push_back(snapshot.snapshotTick);
+                state.position = object.pos;
+            }
+        }
+        std::cout << '\n';
+
+        const auto finalBatch = MakeSnapshot(REPLAY_SESSION_ID, REPLAY_FRAME_COUNT);
+        const auto& finalSnapshot = std::get<protocol::StateSnapshotPayload>(finalBatch.parts.front().payload);
+
+        for (const auto& object : finalSnapshot.objects)
+        {
+            const auto& state = applied.at(object.objectId);
+
+            std::cout << "  Object " << object.objectId << " applied ticks:";
+            for (const auto tick : state.ticks)
+                std::cout << ' ' << tick;
+            std::cout << '\n';
+
+            if (state.ticks != expectedAppliedTicks || state.position != object.pos)
+            {
+                std::cerr << "[FAIL] Applied ticks or final position mismatch, objectId=" << object.objectId << '\n';
+                return false;
+            }
+        }
+
+        std::cout << "[PASS] Applied ticks and final positions matched\n";
+        return true;
+    }
+
+    bool RunSnapshotReplayTest()
+    {
+        std::array<std::vector<std::uint8_t>, REPLAY_FRAME_COUNT> frames{};
+        if (!BuildSnapshotReplayFrames(frames))
+        {
+            std::cout << "[SUITE] FAIL\n";
+            return false;
+        }
+
+        std::array<std::size_t, REPLAY_FRAME_COUNT> order{ 0, 1, 2, 3 };
+        std::size_t total = 0;
+        std::size_t passed = 0;
+
+        do
+        {
+            std::vector<std::uint32_t> expectedAppliedTicks;
+
+            for (auto current = order.begin(); current != order.end(); ++current)
+            {
+                const auto newest = std::max_element(order.begin(), current + 1);
+                if (newest == current)
+                {
+                    const auto number = static_cast<std::uint32_t>(*current + 1);
+                    expectedAppliedTicks.push_back(START_TICK + number * 3);
+                }
+            }
+
+            ++total;
+            if (CheckSnapshotReplay(frames, order, expectedAppliedTicks))
+                ++passed;
+        } while (std::next_permutation(order.begin(), order.end()));
+
+        std::cout << "[SUMMARY] total=" << total << " passed=" << passed << " failed=" << total - passed << '\n';
+
+        const bool success = total == 24 && passed == total;
+        std::cout << (success ? "[SUITE] PASS\n" : "[SUITE] FAIL\n");
+        return success;
     }
 
     bool AppendRecord(Trace& trace, bool sent, std::uint32_t number, const protocol::Message& message)
@@ -406,7 +560,123 @@ namespace session_data_test
         return true;
     }
 
-    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort)
+    protocol::Message MakeDespawnAfterSpawn(const protocol::Message& spawn)
+    {
+        const auto& spawnPayload = std::get<protocol::SpawnPayload>(spawn.payload);
+
+        protocol::DespawnPayload payload{};
+        payload.eventId = spawnPayload.eventId + 1;
+        payload.objectId = spawnPayload.objectId;
+        payload.reason = protocol::DespawnReason::DESTROYED;
+
+        protocol::Message message{};
+        message.header = spawn.header;
+        message.header.type = protocol::MessageType::DESPAWN;
+        message.header.totalBytes = 44;
+        message.header.sequence = spawn.header.sequence + 1;
+        message.payload = payload;
+
+        return message;
+    }
+
+    bool RunSpawnPhase(network::CSessionMgr& session, bool includeDespawn = false)
+    {
+        auto expected = protocol::fixtures::MakeValidSpawnMessage();
+        expected.header.sessionId = session.GetSessionId();
+        expected.header.hostTick = session.GetStartInfo().startHostTick;
+
+        const auto despawn = MakeDespawnAfterSpawn(expected);
+
+        const bool host = session.IsHost();
+
+        if (host)
+        {
+            const auto queueTcp = [&session](const protocol::Message& message, const char* name) {
+                const auto result = session.EnqueueSend(net::Channel::Tcp, message);
+
+                if (result != net::SendResult::Queued)
+                {
+                    std::cerr << "[FAIL] " << name << " enqueue failed, result=" << static_cast<int>(result) << '\n';
+                    return false;
+                }
+
+                std::cout << "[HOST] TCP " << name << " queued\n";
+                return true;
+                };
+
+            if (!queueTcp(expected, "SPAWN"))
+                return false;
+
+            if (includeDespawn)
+            {
+                if (!queueTcp(despawn, "DESPAWN"))
+                    return false;
+            }
+        }
+
+        const auto deadline = Clock::now() + std::chrono::seconds(5);
+
+        bool spawnReceived = false;
+
+        while (Clock::now() < deadline)
+        {
+            session.Update();
+            const auto state = session.GetState();
+
+            if (host && state == SessionState::Disconnected)
+            {
+                std::cout << "[HOST] Client disconnected. Check client verification result.\n";
+                return true;
+            }
+
+            if (state != SessionState::Started)
+            {
+                const auto& event = session.GetLastNetworkEvent();
+                std::cerr << "[FAIL] Session ended during SPAWN test, state=" << static_cast<int>(state) << ", socketError=" << event.socketError << ", codecError=" << static_cast<int>(event.codecError) << '\n';
+                return false;
+            }
+
+            if (!host)
+            {
+                network::ReceivedMessage received{};
+                if (session.TryReceiveGame(received))
+                {
+                    const auto& expectedMessage = spawnReceived ? despawn : expected;
+                    const char* expectedName = spawnReceived ? "DESPAWN" : "SPAWN";
+
+                    if (received.transport != network::TransportType::TCP || received.message != expectedMessage)
+                    {
+                        std::cerr << "[FAIL] Expected TCP " << expectedName << ", received type=" << static_cast<int>(received.message.header.type) << ", sequence=" << received.message.header.sequence << '\n';
+                        return false;
+                    }
+
+                    if (spawnReceived)
+                    {
+                        std::cout << "[PASS] TCP SPAWN -> DESPAWN received in order with matching fields\n";
+                        return true;
+                    }
+
+                    std::cout << "[PASS] TCP SPAWN reached client session with matching fields\n";
+
+                    if (!includeDespawn)
+                        return true;
+
+                    spawnReceived = true;
+                }
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        if (host)
+            std::cerr << "[FAIL] Timed out waiting for client to close\n";
+        else
+            std::cerr << "[FAIL] Timed out waiting for TCP " << (spawnReceived ? "DESPAWN" : "SPAWN") << '\n';
+
+        return false;
+    }
+
+    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, Mode mode)
     {
         network::CSessionMgr session(*network::CNetworkMgr::GetInst());
 
@@ -499,9 +769,16 @@ namespace session_data_test
                     gameSince = now;
                     nextSend = now;
 
-                    std::cout
-                        << "[PASS] Session started, sessionId="
-                        << trace.sessionId << '\n';
+                    std::cout << "[PASS] Session started, sessionId=" << trace.sessionId << '\n';
+
+                    if (mode != Mode::Data)
+                    {
+                        const bool eventPassed = RunSpawnPhase(session, mode == Mode::Lifecycle);
+                        session.Stop();
+
+                        std::cout << (eventPassed ? "[LOCAL] PASS\n" : "[LOCAL] FAIL\n");
+                        return eventPassed;
+                    }
                 }
                 else
                 {
