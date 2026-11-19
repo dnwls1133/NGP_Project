@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 #include <array>
+#include <span>
 
 namespace session_data_test
 {
@@ -62,6 +63,22 @@ namespace session_data_test
     {
         std::vector<std::uint32_t> ticks;
         protocol::ObjectStateRecord object{};
+    };
+
+    struct DuplicateEventState
+    {
+        std::map<protocol::EventId, std::size_t> applicationCounts;
+        std::set<protocol::ObjectId> missiles;
+
+        std::size_t skipped = 0;
+        std::int32_t targetHp = 100;
+        std::uint8_t playerLevel = 1;
+        std::uint32_t teamScore = 0;
+
+        bool targetDead = false;
+        bool itemAvailable = true;
+        bool finished = false;
+        protocol::MatchOutcome outcome = protocol::MatchOutcome::DEFEAT;
     };
 
     protocol::Message MakeInput(std::uint32_t sessionId, protocol::PlayerSlot playerId, std::uint32_t number)
@@ -738,39 +755,218 @@ namespace session_data_test
         return messages;
     }
 
-    bool QueueGameEventMessages(network::CSessionMgr& session, const std::array<protocol::Message, 4>& messages)
+    std::array<protocol::Message, 7> MakeDuplicateEventMessages(std::uint32_t sessionId, std::uint32_t hostTick)
     {
+        const auto base = MakeGameEventMessages(sessionId, hostTick);
+        std::array<protocol::Message, 7> messages{};
+
+        // 1. 미사일 생성
+        messages[0] = base[0];
+
+        const auto& spawn = std::get<protocol::SpawnPayload>(messages[0].payload);
+
+        // 2~5. 피해·사망·아이템 획득·점수 변경
+        const std::array<protocol::CombatEventKind, 4> kinds{
+            protocol::CombatEventKind::DAMAGE_APPLIED,
+            protocol::CombatEventKind::ENTITY_DIED,
+            protocol::CombatEventKind::ITEM_PICKED,
+            protocol::CombatEventKind::SCORE_CHANGED
+        };
+
+        for (std::size_t index = 0; index < kinds.size(); ++index)
+        {
+            protocol::CombatEventPayload payload{};
+            payload.eventId = spawn.eventId + static_cast<protocol::EventId>(index) + 1;
+            payload.kind = kinds[index];
+            payload.instigatorPlayerId = spawn.ownerPlayerId;
+
+            auto& message = messages[index + 1];
+            message.header = base[1].header;
+            message.header.sequence = messages[0].header.sequence + static_cast<std::uint32_t>(index) + 1;
+            message.payload = payload;
+        }
+
+        auto& damage = std::get<protocol::CombatEventPayload>(messages[1].payload);
+        damage.sourceObjectId = spawn.objectId;
+        damage.targetObjectId = 100;
+        damage.confirmedHp = 80;
+
+        auto& death = std::get<protocol::CombatEventPayload>(messages[2].payload);
+        death.sourceObjectId = spawn.objectId;
+        death.targetObjectId = 100;
+        death.confirmedHp = 0;
+
+        auto& item = std::get<protocol::CombatEventPayload>(messages[3].payload);
+        item.sourceObjectId = 200;
+        item.targetObjectId = 1;
+        item.updatedPlayerLevel = 2;
+
+        auto& score = std::get<protocol::CombatEventPayload>(messages[4].payload);
+        score.targetObjectId = 100;
+        score.scoreDelta = 100;
+        score.teamScore = 100;
+
+        // 6. 생성했던 미사일 삭제
+        messages[5] = base[2];
+        messages[5].header.sequence = messages[4].header.sequence + 1;
+
+        auto& despawn = std::get<protocol::DespawnPayload>(messages[5].payload);
+        despawn.eventId = score.eventId + 1;
+
+        // 7. 게임 결과
+        messages[6] = base[3];
+        messages[6].header.sequence = messages[5].header.sequence + 1;
+
+        auto& result = std::get<protocol::ResultPayload>(messages[6].payload);
+        result.eventId = despawn.eventId + 1;
+        result.finalTeamScore = score.teamScore;
+
+        return messages;
+    }
+
+    bool QueueGameEventMessages(network::CSessionMgr& session, std::span<const protocol::Message> messages, std::size_t repeatCount)
+    {
+        if (messages.empty() || repeatCount == 0)
+            return false;
+
         std::size_t queued = 0;
 
         for (const auto& message : messages)
         {
-            const auto result = session.EnqueueSend(net::Channel::Tcp, message);
-
-            if (result != net::SendResult::Queued)
+            for (std::size_t repeat = 0; repeat < repeatCount; ++repeat)
             {
-                std::cerr << "[FAIL] TCP event enqueue failed" << ", type=" << static_cast<int>(message.header.type) << ", sequence=" << message.header.sequence << ", queued=" << queued << ", result=" << static_cast<int>(result) << '\n';
-                return false;
+                const auto result = session.EnqueueSend(net::Channel::Tcp, message);
+
+                if (result != net::SendResult::Queued)
+                {
+                    std::cerr << "[FAIL] TCP event enqueue failed"
+                        << ", type=" << static_cast<int>(message.header.type)
+                        << ", sequence=" << message.header.sequence
+                        << ", repeat=" << repeat + 1
+                        << ", queued=" << queued
+                        << ", result=" << static_cast<int>(result) << '\n';
+                    return false;
+                }
+
+                ++queued;
+
+                std::cout << "[HOST] TCP event queued"
+                    << ", type=" << static_cast<int>(message.header.type)
+                    << ", sequence=" << message.header.sequence
+                    << ", repeat=" << repeat + 1 << '/' << repeatCount
+                    << ", queued=" << queued << '\n';
             }
-
-            ++queued;
-
-            std::cout << "[HOST] TCP event queued" << ", type=" << static_cast<int>(message.header.type) << ", sequence=" << message.header.sequence << ", queued=" << queued << '\n';
         }
 
         std::cout << "[PASS] TCP events queued=" << queued << '\n';
         return true;
     }
 
-    bool RunGameEventPhase(network::CSessionMgr& session)
+    protocol::EventId GetGameEventId(const protocol::Message& message)
     {
-        const auto expected = MakeGameEventMessages(session.GetSessionId(), session.GetStartInfo().startHostTick);
+        if (const auto* payload = std::get_if<protocol::SpawnPayload>(&message.payload))
+            return payload->eventId;
 
+        if (const auto* payload = std::get_if<protocol::DespawnPayload>(&message.payload))
+            return payload->eventId;
+
+        if (const auto* payload = std::get_if<protocol::CombatEventPayload>(&message.payload))
+            return payload->eventId;
+
+        if (const auto* payload = std::get_if<protocol::ResultPayload>(&message.payload))
+            return payload->eventId;
+
+        return 0;
+    }
+
+    bool ApplyDuplicateTestEvent(const protocol::Message& message, DuplicateEventState& state)
+    {
+        const auto eventId = GetGameEventId(message);
+        if (eventId == 0)
+            return false;
+
+        if (state.applicationCounts.contains(eventId))
+        {
+            ++state.skipped;
+            std::cout << "[SKIP] Duplicate eventId=" << eventId << '\n';
+            return true;
+        }
+
+        if (const auto* spawn = std::get_if<protocol::SpawnPayload>(&message.payload))
+        {
+            if (!state.missiles.insert(spawn->objectId).second)
+                return false;
+        }
+        else if (const auto* despawn = std::get_if<protocol::DespawnPayload>(&message.payload))
+        {
+            if (state.missiles.erase(despawn->objectId) != 1)
+                return false;
+        }
+        else if (const auto* combat = std::get_if<protocol::CombatEventPayload>(&message.payload))
+        {
+            switch (combat->kind)
+            {
+            case protocol::CombatEventKind::DAMAGE_APPLIED:
+                state.targetHp = combat->confirmedHp;
+                break;
+
+            case protocol::CombatEventKind::ENTITY_DIED:
+                state.targetHp = combat->confirmedHp;
+                state.targetDead = true;
+                break;
+
+            case protocol::CombatEventKind::ITEM_PICKED:
+                if (!state.itemAvailable)
+                    return false;
+
+                state.itemAvailable = false;
+                state.playerLevel = combat->updatedPlayerLevel;
+                break;
+
+            case protocol::CombatEventKind::SCORE_CHANGED:
+                state.teamScore = combat->teamScore;
+                break;
+
+            default:
+                return false;
+            }
+        }
+        else if (const auto* result = std::get_if<protocol::ResultPayload>(&message.payload))
+        {
+            state.finished = true;
+            state.outcome = result->outcome;
+            state.teamScore = result->finalTeamScore;
+        }
+
+        ++state.applicationCounts[eventId];
+        std::cout << "[APPLY] eventId=" << eventId << ", count=" << state.applicationCounts[eventId] << '\n';
+        return true;
+    }
+
+    bool RunGameEventPhase(network::CSessionMgr& session, bool duplicateTest = false)
+    {
+        std::vector<protocol::Message> expected;
+
+        if (duplicateTest)
+        {
+            const auto messages = MakeDuplicateEventMessages(session.GetSessionId(), session.GetStartInfo().startHostTick);
+            expected.assign(messages.begin(), messages.end());
+        }
+        else
+        {
+            const auto messages = MakeGameEventMessages(session.GetSessionId(), session.GetStartInfo().startHostTick);
+            expected.assign(messages.begin(), messages.end());
+        }
+
+        const std::size_t repeatCount = duplicateTest ? 2 : 1;
+        const std::size_t expectedCount = expected.size() * repeatCount;
         const bool host = session.IsHost();
 
-        if (host && !QueueGameEventMessages(session, expected))
+        if (host && !QueueGameEventMessages(session, expected, repeatCount))
             return false;
 
         std::size_t receivedCount = 0;
+        DuplicateEventState duplicateState{};
         const auto deadline = Clock::now() + std::chrono::seconds(5);
 
         while (Clock::now() < deadline)
@@ -801,13 +997,13 @@ namespace session_data_test
 
                 while (session.TryReceiveGame(received))
                 {
-                    if (receivedCount >= expected.size())
+                    if (receivedCount >= expectedCount)
                     {
                         std::cerr << "[FAIL] Unexpected extra game event\n";
                         return false;
                     }
 
-                    const auto& wanted = expected[receivedCount];
+                    const auto& wanted = expected[receivedCount / repeatCount];
 
                     if (received.transport != network::TransportType::TCP ||
                         received.message != wanted)
@@ -821,17 +1017,62 @@ namespace session_data_test
                         return false;
                     }
 
+                    if (duplicateTest && !ApplyDuplicateTestEvent(received.message, duplicateState))
+                    {
+                        std::cerr << "[FAIL] Duplicate event application failed, eventId=" << GetGameEventId(received.message) << '\n';
+                        return false;
+                    }
+
                     ++receivedCount;
 
                     std::cout << "[CLIENT] TCP event matched"
                         << ", type=" << static_cast<int>(received.message.header.type)
                         << ", sequence=" << received.message.header.sequence
+                        << ", repeat=" << (receivedCount - 1) % repeatCount + 1
+                        << '/' << repeatCount
                         << ", received=" << receivedCount << '\n';
                 }
 
-                if (receivedCount == expected.size())
+                if (receivedCount == expectedCount)
                 {
-                    std::cout << "[PASS] TCP game events received in order, matched=" << receivedCount << '/' << expected.size() << '\n';
+                    if (duplicateTest)
+                    {
+                        bool passed =
+                            duplicateState.applicationCounts.size() == expected.size() &&
+                            duplicateState.skipped == expected.size() &&
+                            duplicateState.missiles.empty() &&
+                            duplicateState.targetHp == 0 &&
+                            duplicateState.targetDead &&
+                            !duplicateState.itemAvailable &&
+                            duplicateState.playerLevel == 2 &&
+                            duplicateState.teamScore == 100 &&
+                            duplicateState.finished &&
+                            duplicateState.outcome == protocol::MatchOutcome::VICTORY;
+
+                        for (const auto& message : expected)
+                        {
+                            const auto eventId = GetGameEventId(message);
+                            const auto found = duplicateState.applicationCounts.find(eventId);
+
+                            if (found == duplicateState.applicationCounts.end() || found->second != 1)
+                                passed = false;
+                        }
+
+                        if (!passed)
+                        {
+                            std::cerr << "[FAIL] Duplicate event effects or application counts mismatch\n";
+                            return false;
+                        }
+
+                        std::cout << "[PASS] received=" << receivedCount << ", applied=" << duplicateState.applicationCounts.size() << ", duplicateSkipped=" << duplicateState.skipped << '\n';
+
+                        std::cout << "[PASS] Each event applied once and final game state matched\n";
+                    }
+                    else
+                    {
+                        std::cout << "[PASS] TCP game events received in order, matched=" << receivedCount << '/' << expectedCount << '\n';
+                    }
+
                     return true;
                 }
             }
@@ -842,8 +1083,7 @@ namespace session_data_test
         if (host)
             std::cerr << "[FAIL] Timed out waiting for client to close\n";
         else
-            std::cerr << "[FAIL] Game event receive timeout, received="
-            << receivedCount << '/' << expected.size() << '\n';
+            std::cerr << "[FAIL] Game event receive timeout, received=" << receivedCount << '/' << expectedCount << '\n';
 
         return false;
     }
@@ -1036,9 +1276,12 @@ namespace session_data_test
 
                     if (mode != Mode::Data)
                     {
-                        const bool eventPassed = (mode == Mode::Events)
-                            ? RunGameEventPhase(session)
-                            : RunSpawnPhase(session, mode == Mode::Lifecycle);
+                        bool eventPassed;
+
+                        if (mode == Mode::Events || mode == Mode::DuplicateEvents)
+                            eventPassed = RunGameEventPhase(session, mode == Mode::DuplicateEvents);
+                        else
+                            eventPassed = RunSpawnPhase(session, mode == Mode::Lifecycle);
 
                         session.Stop();
 

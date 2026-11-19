@@ -9,7 +9,8 @@ namespace session_data_test
         Data,
         Spawn,
         Lifecycle,
-        Events
+        Events,
+        DuplicateEvents
     };
 
     bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, Mode mode = Mode::Data);
