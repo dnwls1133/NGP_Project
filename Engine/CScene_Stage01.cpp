@@ -212,6 +212,19 @@ void CScene_Stage01::update()
                 }
                 continue;
             }
+            else if (const auto* result = std::get_if<protocol::ResultPayload>(&received.message.payload))
+            {
+                CRankMgr::GetInst()->CurrentRanking.Score = static_cast<int>(result->finalTeamScore);
+                if (result->outcome == protocol::MatchOutcome::DEFEAT)
+                {
+                    Fail();
+                }
+                else if (result->outcome == protocol::MatchOutcome::VICTORY)
+                {
+                    Clear();
+                }
+                continue;
+            }
 
             const auto* snapshot = std::get_if<protocol::StateSnapshotPayload>(&received.message.payload);
             if (!snapshot)
@@ -258,6 +271,26 @@ void CScene_Stage01::update()
     {
         if (m_fClearAcc == 0.f)
         {
+            if (session.IsHost())
+            {
+                protocol::ResultPayload result{};
+                result.eventId = ++m_nextSpawnEventId;
+                result.outcome = protocol::MatchOutcome::VICTORY;
+                result.finalTeamScore = static_cast<std::uint32_t>(
+                    CRankMgr::GetInst()->CurrentRanking.Score > 0
+                    ? CRankMgr::GetInst()->CurrentRanking.Score
+                    : 0);
+
+                protocol::Message message{};
+                message.header.type = protocol::MessageType::RESULT;
+                message.header.sessionId = session.GetSessionId();
+                message.header.hostTick = m_hostTick;
+                message.header.sequence = result.eventId;
+                message.payload = result;
+
+                session.EnqueueSend(net::Channel::Tcp, message);
+            }
+
             m_pHud->SetActive(false);
             CRankMgr::GetInst()->SetPlayer(nullptr);
             CSoundMgr::GetInst()->PlayBGM(m_pClearTheme, false);
@@ -270,8 +303,11 @@ void CScene_Stage01::update()
             // AddObject(clearCard, GROUP_TYPE::UI);
             m_pClearCard = CResMgr::GetInst()->LoadTexture(L"Clear Card", L"texture\\Stage Cards\\StageClear\\slice_16.png");
 
-            CPlayer* player = CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0);
-            player->setclear();
+            for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS; ++slot)
+            {
+                if (auto* player = GetPlayer(slot))
+                    player->setclear();
+            }
             CCamera::GetInst()->FadeOut(3.f);
         }
         m_fClearAcc += fDT;
@@ -286,6 +322,24 @@ void CScene_Stage01::update()
     {
         if (m_fClearAcc == 0.f)
         {
+            if (session.IsHost())
+            {
+                protocol::ResultPayload result{};
+                result.eventId = ++m_nextSpawnEventId;
+                result.outcome = protocol::MatchOutcome::DEFEAT;
+                result.finalTeamScore = static_cast<std::uint32_t>(
+                    CRankMgr::GetInst()->CurrentRanking.Score > 0
+                    ? CRankMgr::GetInst()->CurrentRanking.Score
+                    : 0);
+                protocol::Message message{};
+                message.header.type = protocol::MessageType::RESULT;
+                message.header.sessionId = session.GetSessionId();
+                message.header.hostTick = m_hostTick;
+                message.header.sequence = result.eventId;
+                message.payload = result;
+                session.EnqueueSend(net::Channel::Tcp, message);
+            }
+
             m_pHud->SetActive(false);
 
             CSoundMgr::GetInst()->PlayBGM(m_pFailTheme, false);
@@ -302,6 +356,7 @@ void CScene_Stage01::update()
         }
         m_fClearAcc += fDT;
 
+        /*
         if (KEY_TAP(KEY::SPACE))
         {
             CPlayer* player = CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0);
@@ -322,6 +377,7 @@ void CScene_Stage01::update()
 
             //CCamera::GetInst()->FadeIn(0.5f);
         }
+        */
         if (5.f + fDT >= m_fClearAcc && m_fClearAcc > 5.f)
         {
 
