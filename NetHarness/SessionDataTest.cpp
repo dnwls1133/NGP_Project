@@ -64,7 +64,6 @@ namespace session_data_test
         protocol::ObjectStateRecord object{};
     };
 
-
     protocol::Message MakeInput(std::uint32_t sessionId, protocol::PlayerSlot playerId, std::uint32_t number)
     {
         const bool odd = number % 2 != 0;
@@ -685,6 +684,170 @@ namespace session_data_test
         return message;
     }
 
+    std::array<protocol::Message, 4> MakeGameEventMessages(std::uint32_t sessionId, std::uint32_t hostTick)
+    {
+        std::array<protocol::Message, 4> messages{};
+
+        // 1. 시험용 미사일 생성
+        auto& spawnMessage = messages[0];
+        spawnMessage = protocol::fixtures::MakeValidSpawnMessage();
+        spawnMessage.header.sessionId = sessionId;
+        spawnMessage.header.hostTick = hostTick;
+
+        const auto& spawn = std::get<protocol::SpawnPayload>(spawnMessage.payload);
+
+        // 2. 해당 미사일이 시험용 대상에 피해를 준 이벤트
+        protocol::CombatEventPayload combat{};
+        combat.eventId = spawn.eventId + 1;
+        combat.kind = protocol::CombatEventKind::DAMAGE_APPLIED;
+        combat.instigatorPlayerId = spawn.ownerPlayerId;
+        combat.sourceObjectId = spawn.objectId;
+        combat.targetObjectId = 100;
+        combat.confirmedHp = 0;
+        combat.scoreDelta = 100;
+        combat.teamScore = 100;
+
+        auto& combatMessage = messages[1];
+        combatMessage.header = spawnMessage.header;
+        combatMessage.header.type = protocol::MessageType::COMBAT_EVENT;
+        combatMessage.header.totalBytes = 60;
+        combatMessage.header.sequence = spawnMessage.header.sequence + 1;
+        combatMessage.payload = combat;
+
+        // 3. 생성했던 미사일 삭제
+        auto& despawnMessage = messages[2];
+        despawnMessage = MakeDespawnAfterSpawn(spawnMessage);
+        despawnMessage.header.sequence = combatMessage.header.sequence + 1;
+
+        auto& despawn = std::get<protocol::DespawnPayload>(despawnMessage.payload);
+        despawn.eventId = combat.eventId + 1;
+
+        // 4. 최종 결과
+        protocol::ResultPayload result{};
+        result.eventId = despawn.eventId + 1;
+        result.outcome = protocol::MatchOutcome::VICTORY;
+        result.finalTeamScore = combat.teamScore;
+
+        auto& resultMessage = messages[3];
+        resultMessage.header = despawnMessage.header;
+        resultMessage.header.type = protocol::MessageType::RESULT;
+        resultMessage.header.totalBytes = 44;
+        resultMessage.header.sequence = despawnMessage.header.sequence + 1;
+        resultMessage.payload = result;
+
+        return messages;
+    }
+
+    bool QueueGameEventMessages(network::CSessionMgr& session, const std::array<protocol::Message, 4>& messages)
+    {
+        std::size_t queued = 0;
+
+        for (const auto& message : messages)
+        {
+            const auto result = session.EnqueueSend(net::Channel::Tcp, message);
+
+            if (result != net::SendResult::Queued)
+            {
+                std::cerr << "[FAIL] TCP event enqueue failed" << ", type=" << static_cast<int>(message.header.type) << ", sequence=" << message.header.sequence << ", queued=" << queued << ", result=" << static_cast<int>(result) << '\n';
+                return false;
+            }
+
+            ++queued;
+
+            std::cout << "[HOST] TCP event queued" << ", type=" << static_cast<int>(message.header.type) << ", sequence=" << message.header.sequence << ", queued=" << queued << '\n';
+        }
+
+        std::cout << "[PASS] TCP events queued=" << queued << '\n';
+        return true;
+    }
+
+    bool RunGameEventPhase(network::CSessionMgr& session)
+    {
+        const auto expected = MakeGameEventMessages(session.GetSessionId(), session.GetStartInfo().startHostTick);
+
+        const bool host = session.IsHost();
+
+        if (host && !QueueGameEventMessages(session, expected))
+            return false;
+
+        std::size_t receivedCount = 0;
+        const auto deadline = Clock::now() + std::chrono::seconds(5);
+
+        while (Clock::now() < deadline)
+        {
+            session.Update();
+            const auto state = session.GetState();
+
+            if (host && state == SessionState::Disconnected)
+            {
+                std::cout << "[HOST] Client disconnected. Check client verification result.\n";
+                return true;
+            }
+
+            if (state != SessionState::Started)
+            {
+                const auto& event = session.GetLastNetworkEvent();
+
+                std::cerr << "[FAIL] Session ended during event test"
+                    << ", state=" << static_cast<int>(state)
+                    << ", socketError=" << event.socketError
+                    << ", codecError=" << static_cast<int>(event.codecError) << '\n';
+                return false;
+            }
+
+            if (!host)
+            {
+                network::ReceivedMessage received{};
+
+                while (session.TryReceiveGame(received))
+                {
+                    if (receivedCount >= expected.size())
+                    {
+                        std::cerr << "[FAIL] Unexpected extra game event\n";
+                        return false;
+                    }
+
+                    const auto& wanted = expected[receivedCount];
+
+                    if (received.transport != network::TransportType::TCP ||
+                        received.message != wanted)
+                    {
+                        std::cerr << "[FAIL] Game event order or fields mismatch"
+                            << ", index=" << receivedCount
+                            << ", expectedType=" << static_cast<int>(wanted.header.type)
+                            << ", actualType=" << static_cast<int>(received.message.header.type)
+                            << ", expectedSequence=" << wanted.header.sequence
+                            << ", actualSequence=" << received.message.header.sequence << '\n';
+                        return false;
+                    }
+
+                    ++receivedCount;
+
+                    std::cout << "[CLIENT] TCP event matched"
+                        << ", type=" << static_cast<int>(received.message.header.type)
+                        << ", sequence=" << received.message.header.sequence
+                        << ", received=" << receivedCount << '\n';
+                }
+
+                if (receivedCount == expected.size())
+                {
+                    std::cout << "[PASS] TCP game events received in order, matched=" << receivedCount << '/' << expected.size() << '\n';
+                    return true;
+                }
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        if (host)
+            std::cerr << "[FAIL] Timed out waiting for client to close\n";
+        else
+            std::cerr << "[FAIL] Game event receive timeout, received="
+            << receivedCount << '/' << expected.size() << '\n';
+
+        return false;
+    }
+
     bool RunSpawnPhase(network::CSessionMgr& session, bool includeDespawn = false)
     {
         auto expected = protocol::fixtures::MakeValidSpawnMessage();
@@ -815,9 +978,7 @@ namespace session_data_test
         auto nextSend = Clock::now();
         auto finishedAt = Clock::now();
 
-        const auto sendInterval =
-            std::chrono::duration_cast<Clock::duration>(
-                std::chrono::duration<double>(1.0 / (host ? 20.0 : 30.0)));
+        const auto sendInterval = std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / (host ? 20.0 : 30.0)));
 
         std::cout << (host ? "[HOST] Waiting for Client...\n" : "[CLIENT] Connecting...\n");
 
@@ -839,11 +1000,7 @@ namespace session_data_test
             {
                 const auto& event = session.GetLastNetworkEvent();
 
-                std::cerr
-                    << "[FAIL] Session failed"
-                    << ", socketError=" << event.socketError
-                    << ", codecError=" << static_cast<int>(event.codecError)
-                    << '\n';
+                std::cerr << "[FAIL] Session failed" << ", socketError=" << event.socketError << ", codecError=" << static_cast<int>(event.codecError) << '\n';
 
                 passed = false;
                 break;
@@ -879,7 +1036,10 @@ namespace session_data_test
 
                     if (mode != Mode::Data)
                     {
-                        const bool eventPassed = RunSpawnPhase(session, mode == Mode::Lifecycle);
+                        const bool eventPassed = (mode == Mode::Events)
+                            ? RunGameEventPhase(session)
+                            : RunSpawnPhase(session, mode == Mode::Lifecycle);
+
                         session.Stop();
 
                         std::cout << (eventPassed ? "[LOCAL] PASS\n" : "[LOCAL] FAIL\n");
@@ -1044,10 +1204,7 @@ namespace session_data_test
         return true;
     }
 
-    bool CompareDirection(
-        const Trace& sender, const Trace& receiver,
-        std::uint32_t expectedCount, std::size_t minimumReceived,
-        const char* label)
+    bool CompareDirection(const Trace& sender, const Trace& receiver, std::uint32_t expectedCount, std::size_t minimumReceived, const char* label)
     {
         std::map<std::uint32_t, std::string> sent;
         std::set<std::uint32_t> received;

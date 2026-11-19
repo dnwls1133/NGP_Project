@@ -96,8 +96,8 @@ namespace
 
         std::cout
             << "\nSession data test:\n"
-            << "  NetHarness.exe session-data-host [--spawn|--lifecycle]\n"
-            << "  NetHarness.exe session-data-client <Host-IP> [--spawn|--lifecycle]\n"
+            << "  NetHarness.exe session-data-host [--spawn|--lifecycle|--events]\n"
+            << "  NetHarness.exe session-data-client <Host-IP> [--spawn|--lifecycle|--events]\n"
             << "  NetHarness.exe session-data-compare <host-trace> <client-trace>\n"
             << "  NetHarness.exe snapshot-replay-test\n";
 
@@ -281,6 +281,8 @@ namespace
                 mode = Mode::Spawn;
             else if (option == "--lifecycle")
                 mode = Mode::Lifecycle;
+            else if (option == "--events")
+                mode = Mode::Events;
             else
                 return InvalidArguments();
         }
