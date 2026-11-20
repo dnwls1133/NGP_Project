@@ -12,11 +12,12 @@
 #include "CNetworkMgr.h"
 #include "CSessionMgr.h"
 
+#include <cmath>
 #include <iostream>
 
 namespace
 {
-    void DrawLobbyLogo(HDC canvas, CTexture* logo, const RECT& bounds)
+    void DrawLobbyLogo(HDC canvas, CTexture* logo, const RECT& bounds, int opticalOffsetX = 0)
     {
         assert(canvas);
         assert(logo);
@@ -33,7 +34,8 @@ namespace
 
         const int drawWidth = static_cast<int>(width * scale);
         const int drawHeight = static_cast<int>(height * scale);
-        const int drawX = bounds.left + (availableWidth - drawWidth) / 2;
+        const int drawX = bounds.left + (availableWidth - drawWidth) / 2
+            + static_cast<int>(std::lround(opticalOffsetX * scale));
         const int drawY = bounds.top + (availableHeight - drawHeight) / 2;
 
         TransparentBlt(canvas, drawX, drawY, drawWidth, drawHeight,
@@ -367,6 +369,7 @@ void CScene_Lobby::render(HDC _dc)
 
     using network::SessionState;
     const auto state = session.GetState();
+    constexpr int waitingLogoOpticalOffsetX = 22;
     const RECT statusRect = {
         static_cast<LONG>(resolution.x * 0.1f),
         static_cast<LONG>(resolution.y * 0.65f),
@@ -379,12 +382,12 @@ void CScene_Lobby::render(HDC _dc)
             DrawLobbyLogo(_dc, m_pEnterPlayerLogo, statusRect);
         else if (state == SessionState::Listening || state == SessionState::AwaitingJoin ||
             state == SessionState::AwaitingUdpRegister)
-            DrawLobbyLogo(_dc, m_pWaitPlayerLogo, statusRect);
+            DrawLobbyLogo(_dc, m_pWaitPlayerLogo, statusRect, waitingLogoOpticalOffsetX);
     }
     else if (state == SessionState::Starting || state == SessionState::AwaitingAccept ||
         state == SessionState::AwaitingUdpAck || state == SessionState::UdpRegistered)
     {
-        DrawLobbyLogo(_dc, m_pWaitDecisionLogo, statusRect);
+        DrawLobbyLogo(_dc, m_pWaitDecisionLogo, statusRect, waitingLogoOpticalOffsetX);
     }
 
     if (state == SessionState::UdpRegistered)
