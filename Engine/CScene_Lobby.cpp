@@ -325,10 +325,16 @@ void CScene_Lobby::render(HDC _dc)
         );
     }
 
+    constexpr int panelTextureHeight = 1080;
+    constexpr int panelSourceTop = 83;
+    constexpr int panelSourceBottom = 1057;
+    constexpr int panelSourceHeight = panelSourceBottom - panelSourceTop;
+    const int panelHeight = static_cast<int>(std::lround(resolution.y * panelSourceHeight / panelTextureHeight));
+    const int panelTop = (static_cast<int>(resolution.y) - panelHeight) / 2;
     if (m_pPanel)
     {
-        TransparentBlt(_dc, 0, 0, static_cast<int>(resolution.x), static_cast<int>(resolution.y),
-            m_pPanel->GetDC(), 0, 0, m_pPanel->Width(), m_pPanel->Height(), RGB(255, 0, 255));
+        TransparentBlt(_dc, 0, panelTop, static_cast<int>(resolution.x), panelHeight,
+            m_pPanel->GetDC(), 0, panelSourceTop, m_pPanel->Width(), panelSourceHeight, RGB(255, 0, 255));
     }
 
     auto& session = CCore::GetInst()->GetSession();
@@ -340,11 +346,12 @@ void CScene_Lobby::render(HDC _dc)
 
         HFONT hOld = (HFONT)SelectObject(_dc, m_hFont);
 
+        const LONG logoHalfHeight = static_cast<LONG>(resolution.y * 0.04f);
         RECT messageRect = {
             static_cast<LONG>(resolution.x * 0.1f),
-            static_cast<LONG>(resolution.y * (83.0f / 1080.0f - 0.04f)),
+            panelTop - logoHalfHeight,
             static_cast<LONG>(resolution.x * 0.9f),
-            static_cast<LONG>(resolution.y * (83.0f / 1080.0f + 0.04f))
+            panelTop + logoHalfHeight
         };
         RECT addressRect = {
             static_cast<LONG>(resolution.x * 0.1f),
