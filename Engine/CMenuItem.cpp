@@ -11,6 +11,11 @@
 
 #include <algorithm>
 
+namespace
+{
+    constexpr float ClickScale = 1.1f;
+}
+
 // CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_)
 //     : m_pTexture(idleTex_)
 //     , m_pIdleTexture(idleTex_)
@@ -82,8 +87,8 @@ void CMenuItem::MouseLbtnUP()
     if (m_pHoverTexture)
         m_pTexture = m_pHoverTexture;
 
-    const float curScaleX = GetScale().x * 1.1f;
-    const float curScaleY = GetScale().y * 1.1f;
+    const float curScaleX = GetScale().x * ClickScale;
+    const float curScaleY = GetScale().y * ClickScale;
     SetScale(Vec2(curScaleX, curScaleY));
 
     if (m_pClickSound)
@@ -100,8 +105,8 @@ void CMenuItem::MouseLbtnDown()
     if (m_pHoverTexture)
         m_pTexture = m_pHoverTexture;
 
-    const float curScaleX = GetScale().x / 1.1f;
-    const float curScaleY = GetScale().y / 1.1f;
+    const float curScaleX = GetScale().x / ClickScale;
+    const float curScaleY = GetScale().y / ClickScale;
     SetScale(Vec2(curScaleX, curScaleY));
 
     m_bClickedFlag = false;
@@ -147,7 +152,9 @@ void CMenuItem::render(HDC canvas_)
     const int sourceHeight = static_cast<int>(cursor->Height());
     const int rightCursorX = drawX + static_cast<int>(scale.x) + cursorGap;
     const int screenWidth = static_cast<int>(CCore::GetInst()->GetResolution().x);
-    const int cursorWidth = (std::min)({sourceWidth, drawX - cursorGap, screenWidth - rightCursorX});
+    const float cursorScale = m_bClickedFlag ? ClickScale : 1.f;
+    const int scaledCursorWidth = static_cast<int>(sourceWidth * cursorScale);
+    const int cursorWidth = (std::min)({scaledCursorWidth, drawX - cursorGap, screenWidth - rightCursorX});
     if (cursorWidth <= 0)
         return;
 
