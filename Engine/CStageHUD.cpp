@@ -96,96 +96,54 @@ void CStageHUD::render(HDC canvas_)
         SelectObject(canvas_, hOldFont);
     }
     {
-        auto currentHP = player1->getHP();
-        auto currentLv = player1->getLv();
-        // HP: N/3 Lv. N
-
-        std::wstring str = L"";
-        if (player1->isMujeok)
-        {
-            str = std::format(L"P1 HP: MUJEOK!!! Lv. {}", currentLv);
-        }
-        else
-        {
-            str = std::format(L"P1 HP: {}/3 Lv. {}", currentHP, currentLv);
-        }
-
         HFONT hOldFont = (HFONT)SelectObject(canvas_, m_hLabelFont);
         SetBkMode(canvas_, TRANSPARENT);
-        SetTextColor(canvas_, RGB(255, 255, 255));
 
-        int bgX = (1280 - 540) / 2;
-        str += std::format(L"  P2 Lv. {}", player2->getLv());
+        constexpr int heartSize = 18;
+        constexpr int heartGap = 3;
+        constexpr int heartCount = 3;
+        constexpr int y = 40;
+        const wchar_t* invincibleText = L"MUJEOK!!!";
+        SIZE invincibleSize{};
+        GetTextExtentPoint32(canvas_, invincibleText, 9, &invincibleSize);
+        constexpr int heartsWidth = heartCount * heartSize + (heartCount - 1) * heartGap;
+        const int healthWidth = heartsWidth > invincibleSize.cx ? heartsWidth : invincibleSize.cx;
 
-        int y = 40;
-        TextOut(canvas_, bgX + 20, y, str.c_str(), (int)str.length());
-        SelectObject(canvas_, hOldFont);
-    }
-    // 하트 띄우는 로직.
-    {
-        const Vec2 position = GetPos();    // 중심 위치
-        const Vec2 scale = GetScale();     // 하트 아이콘 크기 (픽셀 단위)
-
-        auto currentHP = player1->getHP();
-
-        const float heartSpacing = scale.x + 10.f;  // 하트 간 간격 (하트 크기 + 여백 10px)
-
-        for (size_t i = 0; i < 3; ++i)
+        auto drawPlayer = [&](CPlayer* player, const wchar_t* label, bool rightAligned)
         {
-            Vec2 heartPos = position;
-            // 각 하트 아이콘을 좌측에서 우측으로 나열 (중심 위치 기준으로 좌측 정렬)
-            heartPos.x = position.x - heartSpacing * (1.5f - i);
+            SIZE labelSize{};
+            GetTextExtentPoint32(canvas_, label, static_cast<int>(wcslen(label)), &labelSize);
+            const std::wstring level = std::format(L"Lv. {}", player->getLv());
+            SIZE levelSize{};
+            GetTextExtentPoint32(canvas_, level.c_str(), static_cast<int>(level.length()), &levelSize);
+            const int groupWidth = labelSize.cx + healthWidth + 8 + levelSize.cx;
+            const int x = rightAligned ? 890 - groupWidth : 390;
 
-            if (i < currentHP)
+            SetTextColor(canvas_, RGB(255, 255, 255));
+            TextOut(canvas_, x, y, label, static_cast<int>(wcslen(label)));
+            const int healthX = x + labelSize.cx;
+            if (player->isMujeok)
             {
-                // 채워진 하트 텍스쳐 출력
-                const int width = m_pHeartFull->Width();
-                const int height = m_pHeartFull->Height();
-
-                const int drawWidth = static_cast<int>(scale.x);
-                const int drawHeight = static_cast<int>(scale.y);
-
-                const int drawX = static_cast<int>(heartPos.x - drawWidth / 2.0f);
-                const int drawY = static_cast<int>(heartPos.y - drawHeight / 2.0f);
-
-                // 투명색 지정 (예: RGB(255, 0, 255) - 보라색)
-                COLORREF transparentColor = RGB(255, 0, 255);
-
-                TransparentBlt(
-                    canvas_,
-                    drawX, drawY,
-                    drawWidth, drawHeight,              // 출력 크기
-                    m_pHeartFull->GetDC(),
-                    0, 0,
-                    width, height,                      // 원본 크기
-                    transparentColor
-                );
+                SetTextColor(canvas_, RGB(255, 255, 0));
+                TextOut(canvas_, healthX, y, invincibleText, 9);
             }
             else
             {
-                // 빈 하트 텍스쳐 출력
-                const int width = m_pHeartEmpty->Width();
-                const int height = m_pHeartEmpty->Height();
-
-                const int drawWidth = static_cast<int>(scale.x);
-                const int drawHeight = static_cast<int>(scale.y);
-
-                const int drawX = static_cast<int>(heartPos.x - drawWidth / 2.0f);
-                const int drawY = static_cast<int>(heartPos.y - drawHeight / 2.0f);
-
-                // 투명색 지정 (예: RGB(255, 0, 255) - 보라색)
-                COLORREF transparentColor = RGB(255, 0, 255);
-
-                TransparentBlt(
-                    canvas_,
-                    drawX, drawY,
-                    drawWidth, drawHeight,              // 출력 크기
-                    m_pHeartEmpty->GetDC(),
-                    0, 0,
-                    width, height,                      // 원본 크기
-                    transparentColor
-                );
+                for (int i = 0; i < heartCount; ++i)
+                {
+                    CTexture* heart = i < player->getHP() ? m_pHeartFull : m_pHeartEmpty;
+                    TransparentBlt(canvas_, healthX + i * (heartSize + heartGap), y,
+                        heartSize, heartSize, heart->GetDC(), 0, 0,
+                        heart->Width(), heart->Height(), RGB(255, 0, 255));
+                }
             }
-        }
+
+            SetTextColor(canvas_, RGB(255, 255, 255));
+            TextOut(canvas_, healthX + healthWidth + 8, y, level.c_str(), static_cast<int>(level.length()));
+        };
+
+        drawPlayer(player1, L"P1 HP: ", false);
+        drawPlayer(player2, L"P2 HP: ", true);
+        SelectObject(canvas_, hOldFont);
     }
 }
