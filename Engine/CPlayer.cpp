@@ -1,8 +1,6 @@
 ﻿#include "pch.h"
 #include "CPlayer.h"
 
-#include <iostream>
-
 #include "CCore.h"
 #include "CSceneMgr.h"
 #include "CKeyMgr.h"
@@ -383,10 +381,6 @@ void CPlayer::ApplyConfirmedItemLevel(std::uint8_t level)
 {
     m_iLvl = static_cast<int>(level);
     CSoundMgr::GetInst()->PlaySE(m_pLvUpSE);
-
-#ifdef _DEBUG
-    std::cout << "[CLIENT] 아이템 머거쪙" << std::endl;
-#endif
 }
 
 void CPlayer::OnCollisionEnter(CCollider* _pOther)

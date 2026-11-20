@@ -39,6 +39,24 @@
 #include <cmath>
 #include <utility>
 
+#ifdef _DEBUG
+namespace
+{
+    void LogItemPickupApplied(const network::CSessionMgr& session, const protocol::CombatEventPayload& combat)
+    {
+        const char* role = session.IsHost() ? "[HOST]" : "[CLIENT]";
+        const bool pickedBySelf = combat.instigatorPlayerId == session.GetLocalPlayerId();
+        const char* message = pickedBySelf ? "ITEM_PICKED applied for self" : "ITEM_PICKED applied for teammate";
+        std::cout << role << ' ' << message
+            << ", eventId=" << combat.eventId
+            << ", itemId=" << combat.sourceObjectId
+            << ", pickerSlot=" << static_cast<int>(combat.instigatorPlayerId)
+            << ", level=" << static_cast<int>(combat.updatedPlayerLevel)
+            << ", teamScore=" << combat.teamScore << '\n';
+    }
+}
+#endif
+
 CScene_Stage01::CScene_Stage01()
     :m_bClear(false)
     , m_bFail(false)
@@ -99,6 +117,10 @@ bool CScene_Stage01::ConfirmItemPickup(protocol::ObjectId itemId, protocol::Play
     m_pendingItemEvents.push_back(message);
 
     m_nextSpawnEventId = combat.eventId;
+
+#ifdef _DEBUG
+    LogItemPickupApplied(session, combat);
+#endif
     return true;
 }
 
@@ -357,6 +379,10 @@ void CScene_Stage01::update()
 
                     CRankMgr::GetInst()->CurrentRanking.Score =
                         static_cast<int>(combat.teamScore);
+
+#ifdef _DEBUG
+                    LogItemPickupApplied(session, combat);
+#endif
                 }
             }
 
