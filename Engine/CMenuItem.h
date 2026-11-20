@@ -10,7 +10,7 @@ class CMenuItem
 {
     friend class CBtnUI;
 public:
-    CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_);
+    CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_, CTexture* cursorTexture = nullptr);
 
     virtual void MouseOn() override;
     virtual void MouseOff() override;
@@ -30,6 +30,8 @@ private:
     CTexture* m_pTexture;               // 현재 사용중인 텍스쳐.
     CTexture* const m_pIdleTexture;     // 일반 텍스쳐.
     CTexture* const m_pHoverTexture;    // 호버 텍스쳐.
+
+    CTexture* m_pCursorTexture;
 
     CSound* m_pHoverSound;
     CSound* m_pClickSound;

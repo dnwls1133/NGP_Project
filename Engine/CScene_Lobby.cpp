@@ -12,7 +12,36 @@
 #include "CNetworkMgr.h"
 #include "CSessionMgr.h"
 
+#include <cmath>
 #include <iostream>
+
+namespace
+{
+    void DrawLobbyLogo(HDC canvas, CTexture* logo, const RECT& bounds, int opticalOffsetX = 0)
+    {
+        assert(canvas);
+        assert(logo);
+
+        const int width = static_cast<int>(logo->Width());
+        const int height = static_cast<int>(logo->Height());
+
+        const int availableWidth = bounds.right - bounds.left;
+        const int availableHeight = bounds.bottom - bounds.top;
+
+        const float scaleX = static_cast<float>(availableWidth) / width;
+        const float scaleY = static_cast<float>(availableHeight) / height;
+        const float scale = scaleX < scaleY ? scaleX : scaleY;
+
+        const int drawWidth = static_cast<int>(width * scale);
+        const int drawHeight = static_cast<int>(height * scale);
+        const int drawX = bounds.left + (availableWidth - drawWidth) / 2
+            + static_cast<int>(std::lround(opticalOffsetX * scale));
+        const int drawY = bounds.top + (availableHeight - drawHeight) / 2;
+
+        TransparentBlt(canvas, drawX, drawY, drawWidth, drawHeight,
+            logo->GetDC(), 0, 0, width, height, RGB(255, 0, 255));
+    }
+}
 
 CScene_Lobby::CScene_Lobby()
     : m_pBackground(nullptr)
@@ -53,6 +82,10 @@ void CScene_Lobby::Enter()
             L"Ranking Background",
             L"texture\\Sprite_Background_Rankings.png"
         );
+        m_pPanel = CResMgr::GetInst()->LoadTexture(
+            L"Lobby Panel",
+            L"texture\\Panels\\Sprite_Panel_Lobby.png"
+        );
     }
     // 배경 음악 로드
     {
@@ -65,7 +98,7 @@ void CScene_Lobby::Enter()
         AddFontResourceEx(fontPath.c_str(), FR_PRIVATE, NULL);
 
         m_hFont = CreateFont(
-            -48,
+            -72,
             0,
             0,
             0,
@@ -90,6 +123,12 @@ void CScene_Lobby::Enter()
 #endif
 
     auto& session = CCore::GetInst()->GetSession();
+    m_pRoomCodeLogo = session.IsHost()
+        ? CResMgr::GetInst()->LoadTexture(L"ShareRoomCode", L"texture\\Sprite_Logo_ShareRoomCode.png")
+        : CResMgr::GetInst()->LoadTexture(L"EnterRoomCode", L"texture\\Sprite_Logo_EnterRoomCode.png");
+    m_pWaitPlayerLogo = CResMgr::GetInst()->LoadTexture(L"WaitPlayer", L"texture\\Sprite_Logo_WaitPlayer.png");
+    m_pEnterPlayerLogo = CResMgr::GetInst()->LoadTexture(L"EnterPlayer", L"texture\\Sprite_Logo_EnterPlayer.png");
+    m_pWaitDecisionLogo = CResMgr::GetInst()->LoadTexture(L"WaitDecision", L"texture\\Sprite_Logo_WaitDecision.png");
 
     if (session.IsHost())
     {
@@ -261,10 +300,11 @@ void CScene_Lobby::ResumeHostWaiting()
 
 void CScene_Lobby::render(HDC _dc)
 {
+    const Vec2 resolution = CCore::GetInst()->GetResolution();
+
     // 배경 그리기
     if (m_pBackground)
     {
-        const Vec2 resolution = CCore::GetInst()->GetResolution();
         const Vec2 position = (Vec2(resolution.x / 2.0f, resolution.y / 2.0f));
         const Vec2 scale = (Vec2(resolution.x, resolution.y));
         const int width = m_pBackground->Width();
@@ -285,32 +325,42 @@ void CScene_Lobby::render(HDC _dc)
         );
     }
 
+    constexpr int panelTextureHeight = 1080;
+    constexpr int panelSourceTop = 83;
+    constexpr int panelSourceBottom = 1057;
+    constexpr int panelSourceHeight = panelSourceBottom - panelSourceTop;
+    const int panelHeight = static_cast<int>(std::lround(resolution.y * panelSourceHeight / panelTextureHeight));
+    const int panelTop = (static_cast<int>(resolution.y) - panelHeight) / 2;
+    if (m_pPanel)
+    {
+        TransparentBlt(_dc, 0, panelTop, static_cast<int>(resolution.x), panelHeight,
+            m_pPanel->GetDC(), 0, panelSourceTop, m_pPanel->Width(), panelSourceHeight, RGB(255, 0, 255));
+    }
+
     auto& session = CCore::GetInst()->GetSession();
 
     // 메시지
     {
         SetBkMode(_dc, TRANSPARENT);
-        SetTextColor(_dc, RGB(255, 215, 0));
+        SetTextColor(_dc, RGB(49, 19, 84));
 
         HFONT hOld = (HFONT)SelectObject(_dc, m_hFont);
 
-        const Vec2 resolution = CCore::GetInst()->GetResolution();
+        const LONG logoHalfHeight = static_cast<LONG>(resolution.y * 0.04f);
         RECT messageRect = {
             static_cast<LONG>(resolution.x * 0.1f),
-            static_cast<LONG>(resolution.y * 0.38f),
+            panelTop - logoHalfHeight,
             static_cast<LONG>(resolution.x * 0.9f),
-            static_cast<LONG>(resolution.y * 0.46f)
+            panelTop + logoHalfHeight
         };
         RECT addressRect = {
             static_cast<LONG>(resolution.x * 0.1f),
-            static_cast<LONG>(resolution.y * 0.51f),
+            static_cast<LONG>(resolution.y * 0.49f),
             static_cast<LONG>(resolution.x * 0.9f),
-            static_cast<LONG>(resolution.y * 0.59f)
+            static_cast<LONG>(resolution.y * 0.61f)
         };
 
-        LPCTSTR message = session.IsHost()
-            ? TEXT("함께할 유저에게 코드를 공유하세요!")
-            : TEXT("함께할 유저의 코드를 입력해주세요");
+        DrawLobbyLogo(_dc, m_pRoomCodeLogo, messageRect);
 
         const std::string roomCode = session.GetRoomCode();
         const std::wstring hostCode(roomCode.begin(), roomCode.end());
@@ -319,13 +369,35 @@ void CScene_Lobby::render(HDC _dc)
             ? hostCode.c_str()
             : inputRoomCode.c_str();
 
-        DrawText(_dc, message, -1, &messageRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
         DrawText(_dc, address, -1, &addressRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
         SelectObject(_dc, hOld);
     }
 
-    if (session.GetState() == network::SessionState::UdpRegistered)
+    using network::SessionState;
+    const auto state = session.GetState();
+    constexpr int waitingLogoOpticalOffsetX = 22;
+    const RECT statusRect = {
+        static_cast<LONG>(resolution.x * 0.1f),
+        static_cast<LONG>(resolution.y * 0.65f),
+        static_cast<LONG>(resolution.x * 0.9f),
+        static_cast<LONG>(resolution.y * 0.73f)
+    };
+    if (session.IsHost())
+    {
+        if (state == SessionState::UdpRegistered || state == SessionState::Loading)
+            DrawLobbyLogo(_dc, m_pEnterPlayerLogo, statusRect);
+        else if (state == SessionState::Listening || state == SessionState::AwaitingJoin ||
+            state == SessionState::AwaitingUdpRegister)
+            DrawLobbyLogo(_dc, m_pWaitPlayerLogo, statusRect, waitingLogoOpticalOffsetX);
+    }
+    else if (state == SessionState::Starting || state == SessionState::AwaitingAccept ||
+        state == SessionState::AwaitingUdpAck || state == SessionState::UdpRegistered)
+    {
+        DrawLobbyLogo(_dc, m_pWaitDecisionLogo, statusRect, waitingLogoOpticalOffsetX);
+    }
+
+    if (state == SessionState::UdpRegistered)
     {
         if (session.IsHost())
         {
@@ -360,20 +432,6 @@ void CScene_Lobby::render(HDC _dc)
         else
         {
             session.RequestReady(true);
-
-            SetBkMode(_dc, TRANSPARENT);
-            SetTextColor(_dc, RGB(0, 255, 0));
-            HFONT hOld = (HFONT)SelectObject(_dc, m_hFont);
-            const Vec2 resolution = CCore::GetInst()->GetResolution();
-            RECT readyRect = {
-                static_cast<LONG>(resolution.x * 0.1f),
-                static_cast<LONG>(resolution.y * 0.65f),
-                static_cast<LONG>(resolution.x * 0.9f),
-                static_cast<LONG>(resolution.y * 0.73f)
-            };
-            LPCTSTR readyMessage = TEXT("유저의 선택을 기다리는 중...");
-            DrawText(_dc, readyMessage, -1, &readyRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            SelectObject(_dc, hOld);
 
             if (m_backButton)
             {

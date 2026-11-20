@@ -6,7 +6,15 @@
 #include "CSound.h"
 #include "CSoundMgr.h"
 
+#include "CCore.h"
 #include "CResMgr.h"
+
+#include <algorithm>
+
+namespace
+{
+    constexpr float ClickScale = 1.1f;
+}
 
 // CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_)
 //     : m_pTexture(idleTex_)
@@ -17,10 +25,11 @@
 //     // m_pHoverSound = 
 // }
 
-CMenuItem::CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_)
+CMenuItem::CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_, CTexture* cursorTexture)
     : m_pTexture(idleTex_)
     , m_pIdleTexture(idleTex_)
     , m_pHoverTexture(hoverTex_)
+    , m_pCursorTexture(cursorTexture)
 {
     m_pHoverSound = CResMgr::GetInst()->LoadSound(L"Button Hover", L"sound\\SE\\SE_MenuSelect.mp3");
     m_pClickSound = CResMgr::GetInst()->LoadSound(L"Button Hover", L"sound\\SE\\SE_MenuClick.mp3");
@@ -78,8 +87,8 @@ void CMenuItem::MouseLbtnUP()
     if (m_pHoverTexture)
         m_pTexture = m_pHoverTexture;
 
-    const float curScaleX = GetScale().x * 1.1f;
-    const float curScaleY = GetScale().y * 1.1f;
+    const float curScaleX = GetScale().x * ClickScale;
+    const float curScaleY = GetScale().y * ClickScale;
     SetScale(Vec2(curScaleX, curScaleY));
 
     if (m_pClickSound)
@@ -96,8 +105,8 @@ void CMenuItem::MouseLbtnDown()
     if (m_pHoverTexture)
         m_pTexture = m_pHoverTexture;
 
-    const float curScaleX = GetScale().x / 1.1f;
-    const float curScaleY = GetScale().y / 1.1f;
+    const float curScaleX = GetScale().x / ClickScale;
+    const float curScaleY = GetScale().y / ClickScale;
     SetScale(Vec2(curScaleX, curScaleY));
 
     m_bClickedFlag = false;
@@ -131,4 +140,31 @@ void CMenuItem::render(HDC canvas_)
         transparentColor     // 투명 색상
     );
 
+    if (!m_bHoverFlag)
+        return;
+
+    CTexture* cursor = m_pCursorTexture;
+    if (!cursor)
+        return;
+
+    constexpr int cursorGap = 8;
+    const int sourceWidth = static_cast<int>(cursor->Width());
+    const int sourceHeight = static_cast<int>(cursor->Height());
+    const int rightCursorX = drawX + static_cast<int>(scale.x) + cursorGap;
+    const int screenWidth = static_cast<int>(CCore::GetInst()->GetResolution().x);
+    const float cursorScale = m_bClickedFlag ? ClickScale : 1.f;
+    const int scaledCursorWidth = static_cast<int>(sourceWidth * cursorScale);
+    const int cursorWidth = (std::min)({scaledCursorWidth, drawX - cursorGap, screenWidth - rightCursorX});
+    if (cursorWidth <= 0)
+        return;
+
+    const int cursorHeight = sourceHeight * cursorWidth / sourceWidth;
+    const int cursorY = drawY + (static_cast<int>(scale.y) - cursorHeight) / 2;
+    const int leftCursorX = drawX - cursorGap - cursorWidth;
+
+    for (const int cursorX : {leftCursorX, rightCursorX})
+    {
+        TransparentBlt(canvas_, cursorX, cursorY, cursorWidth, cursorHeight,
+            cursor->GetDC(), 0, 0, sourceWidth, sourceHeight, transparentColor);
+    }
 }

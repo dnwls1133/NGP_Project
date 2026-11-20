@@ -46,6 +46,7 @@ void CScene_Title::Enter()
     
     CSoundMgr::GetInst()->PlayBGM(m_pTitleTheme, false);
 
+    m_menuSwitchRequested = false;
     CreateMenus();
     m_pFirstMenu->SetActive(false);
 
@@ -55,14 +56,16 @@ void CScene_Title::Enter()
 
 void CScene_Title::update()
 {
-    CScene::update();
-
-    if (m_CurrentState == EState::Title && m_pSecondMenu &&
-        m_pSecondMenu->IsActive() && KEY_TAP(KEY::ESC))
+    if (m_CurrentState == EState::Title &&
+        (m_menuSwitchRequested || (m_pSecondMenu->IsActive() && KEY_TAP(KEY::ESC))))
     {
-        m_pSecondMenu->SetActive(false);
-        m_pFirstMenu->SetActive(true);
+        m_menuSwitchRequested = false;
+        const bool showSecondMenu = !m_pSecondMenu->IsActive();
+        m_pFirstMenu->SetActive(!showSecondMenu);
+        m_pSecondMenu->SetActive(showSecondMenu);
     }
+
+    CScene::update();
 
     if (m_CurrentState == EState::Intro)
     {
@@ -92,20 +95,23 @@ void CScene_Title::Exit()
 
 void CScene_Title::CreateMenus()
 {
+    auto* cursorTexture = CResMgr::GetInst()->LoadTexture(
+        L"Menu Cursor", L"texture\\Menu Items\\Cursor\\Sprite_Cursor_1.png");
+
     m_pFirstMenu = new CTitleMenu();
     m_pFirstMenu->SetScale(CCore::GetInst()->GetResolution());
 
     auto m_pStartButton = new CMenuItem(
         CResMgr::GetInst()->LoadTexture(L"StartGame_Idle", L"texture\\Menu Items\\Start Game\\Sprite_Label_StartGame_0.png"),
-        CResMgr::GetInst()->LoadTexture(L"StartGame_Hover", L"texture\\Menu Items\\Start Game\\Sprite_Label_StartGame_1.png")
+        CResMgr::GetInst()->LoadTexture(L"StartGame_Hover", L"texture\\Menu Items\\Start Game\\Sprite_Label_StartGame_1.png"),
+        cursorTexture
     );
     m_pStartButton->SetPos(Vec2(290.0f, 520.0f));
     m_pStartButton->SetScale(Vec2(210.0f, 70.0f));
     m_pStartButton->SetClickedCallBack(
         [](DWORD_PTR scene, DWORD_PTR) {
             auto* titleScene = reinterpret_cast<CScene_Title*>(scene);
-            titleScene->m_pFirstMenu->SetActive(false);
-            titleScene->m_pSecondMenu->SetActive(true);
+            titleScene->m_menuSwitchRequested = true;
         },
         reinterpret_cast<DWORD_PTR>(this), (DWORD_PTR)0
     );
@@ -113,7 +119,8 @@ void CScene_Title::CreateMenus()
 
     auto m_pManuelButton = new CMenuItem(
         CResMgr::GetInst()->LoadTexture(L"Manuel_Idle", L"texture\\Menu Items\\Manual\\Sprite_Label_Manual_0.png"),
-        CResMgr::GetInst()->LoadTexture(L"Manuel_Hover", L"texture\\Menu Items\\Manual\\Sprite_Label_Manual_1.png")
+        CResMgr::GetInst()->LoadTexture(L"Manuel_Hover", L"texture\\Menu Items\\Manual\\Sprite_Label_Manual_1.png"),
+        cursorTexture
     );
     m_pManuelButton->SetPos(Vec2(325.0f, 600.0f));
     m_pManuelButton->SetScale(Vec2(160.0f, 70.0f));
@@ -127,7 +134,8 @@ void CScene_Title::CreateMenus()
 
     auto m_pRankingButton = new CMenuItem(
         CResMgr::GetInst()->LoadTexture(L"Ranking_Idle", L"texture\\Menu Items\\Score Ranking\\Sprite_Label_GameRanking_0.png"),
-        CResMgr::GetInst()->LoadTexture(L"Ranking_Hover", L"texture\\Menu Items\\Score Ranking\\Sprite_Label_GameRanking_1.png")
+        CResMgr::GetInst()->LoadTexture(L"Ranking_Hover", L"texture\\Menu Items\\Score Ranking\\Sprite_Label_GameRanking_1.png"),
+        cursorTexture
     );
     m_pRankingButton->SetPos(Vec2(290.0f, 680.0f));
     m_pRankingButton->SetScale(Vec2(210.0f, 70.0f));
@@ -141,7 +149,8 @@ void CScene_Title::CreateMenus()
 
     auto m_pExitButton = new CMenuItem(
         CResMgr::GetInst()->LoadTexture(L"QuitGame_Idle", L"texture\\Menu Items\\Quit Game\\Sprite_Label_QuitGame_0.png"),
-        CResMgr::GetInst()->LoadTexture(L"QuitGame_Hover", L"texture\\Menu Items\\Quit Game\\Sprite_Label_QuitGame_1.png")
+        CResMgr::GetInst()->LoadTexture(L"QuitGame_Hover", L"texture\\Menu Items\\Quit Game\\Sprite_Label_QuitGame_1.png"),
+        cursorTexture
     );
     m_pExitButton->SetPos(Vec2(290.0f, 760.0f));
     m_pExitButton->SetScale(Vec2(210.0f, 70.0f));
@@ -161,8 +170,9 @@ void CScene_Title::CreateMenus()
 
     auto openRoomButton = new CMenuItem(
         CResMgr::GetInst()->LoadTexture(L"OpenRoom_Idle", L"texture\\Menu Items\\Open Room\\Sprite_Label_OpenRoom_0.png"),
-        CResMgr::GetInst()->LoadTexture(L"OpenRoom_Hover", L"texture\\Menu Items\\Open Room\\Sprite_Label_OpenRoom_1.png"));
-    openRoomButton->SetPos(Vec2(290.0f, 520.0f));
+        CResMgr::GetInst()->LoadTexture(L"OpenRoom_Hover", L"texture\\Menu Items\\Open Room\\Sprite_Label_OpenRoom_1.png"),
+        cursorTexture);
+    openRoomButton->SetPos(Vec2(290.0f, 560.0f));
     openRoomButton->SetScale(Vec2(210.0f, 70.0f));
     openRoomButton->SetClickedCallBack(
         [](DWORD_PTR, DWORD_PTR) {
@@ -177,8 +187,9 @@ void CScene_Title::CreateMenus()
 
     auto enterRoomButton = new CMenuItem(
         CResMgr::GetInst()->LoadTexture(L"EnterRoom_Idle", L"texture\\Menu Items\\Enter Room\\Sprite_Label_EnterRoom_0.png"),
-        CResMgr::GetInst()->LoadTexture(L"EnterRoom_Hover", L"texture\\Menu Items\\Enter Room\\Sprite_Label_EnterRoom_1.png"));
-    enterRoomButton->SetPos(Vec2(290.0f, 600.0f));
+        CResMgr::GetInst()->LoadTexture(L"EnterRoom_Hover", L"texture\\Menu Items\\Enter Room\\Sprite_Label_EnterRoom_1.png"),
+        cursorTexture);
+    enterRoomButton->SetPos(Vec2(290.0f, 640.0f));
     enterRoomButton->SetScale(Vec2(210.0f, 70.0f));
     enterRoomButton->SetClickedCallBack(
         [](DWORD_PTR, DWORD_PTR) {
@@ -193,14 +204,14 @@ void CScene_Title::CreateMenus()
 
     auto backButton = new CMenuItem(
         CResMgr::GetInst()->LoadTexture(L"GoBack_Idle", L"texture\\Menu Items\\Go Back\\Sprite_Label_GoBack_0.png"),
-        CResMgr::GetInst()->LoadTexture(L"GoBack_Hover", L"texture\\Menu Items\\Go Back\\Sprite_Label_GoBack_1.png"));
-    backButton->SetPos(Vec2(290.0f, 680.0f));
+        CResMgr::GetInst()->LoadTexture(L"GoBack_Hover", L"texture\\Menu Items\\Go Back\\Sprite_Label_GoBack_1.png"),
+        cursorTexture);
+    backButton->SetPos(Vec2(290.0f, 720.0f));
     backButton->SetScale(Vec2(210.0f, 70.0f));
     backButton->SetClickedCallBack(
         [](DWORD_PTR scene, DWORD_PTR) {
             auto* titleScene = reinterpret_cast<CScene_Title*>(scene);
-            titleScene->m_pSecondMenu->SetActive(false);
-            titleScene->m_pFirstMenu->SetActive(true);
+            titleScene->m_menuSwitchRequested = true;
         },
         reinterpret_cast<DWORD_PTR>(this), (DWORD_PTR)0
     );
