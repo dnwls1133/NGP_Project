@@ -40,15 +40,13 @@ CItem::~CItem()
 {
 }
 
-
-
 void CItem::InitAfterPlacement()
 {
-    Vec2 vIpos = GetPos();
-    CScene* pCurScene = CSceneMgr::GetInst()->GetCurScene();
-    CPlayer* pTarget = (pCurScene != nullptr) ? pCurScene->
-        SelectNearestAlivePlayer(vIpos) : nullptr;
-    if (pTarget == nullptr) {
+    const Vec2 vIpos = GetPos();
+    const CScene* pCurScene = CSceneMgr::GetInst()->GetCurScene();
+    const CPlayer* pTarget = pCurScene->SelectNearestAlivePlayer(vIpos);
+    if (pTarget == nullptr)
+    {
         m_vDir = Vec2(0.f, -1.f);
         return;
     }
@@ -57,31 +55,35 @@ void CItem::InitAfterPlacement()
     vPpos.x -= vIpos.x;
     vPpos.y = vIpos.y - vPpos.y;
     m_vDir = vPpos.Normalize();
-
 }
 
 void CItem::ResolveSimultaneousPickup()
 {
     if (!CCore::GetInst()->GetSession().IsHost())
+    {
         return;
+    }
 
     if (m_bCollected || IsDead() || m_TouchPlayers.empty())
+    {
         return;
+    }
 
     CPlayer* winner = nullptr;
     float bestDistSq = 0.0f;
     const Vec2 itemPos = GetPos();
-    for (CPlayer* candidate : m_TouchPlayers) {
-        if (candidate == nullptr || candidate->IsDead() ||
-            !candidate->IsAlivePlayer())
+    for (CPlayer* candidate : m_TouchPlayers)
+    {
+        if (candidate->IsDead() || !candidate->IsAlivePlayer())
+        {
             continue;
+        }
         Vec2 diff = candidate->GetPos() - itemPos;
         float distSq = diff.x * diff.x + diff.y * diff.y;
 
-        if (winner == nullptr
-            || distSq < bestDistSq
-            || (distSq == bestDistSq &&
-                candidate->GetPlayerId() < winner->GetPlayerId())) {
+        if (distSq < bestDistSq ||
+           (distSq == bestDistSq && candidate->GetPlayerId() < winner->GetPlayerId()))
+        {
             winner = candidate;
             bestDistSq = distSq;
         }
@@ -89,10 +91,14 @@ void CItem::ResolveSimultaneousPickup()
 
     m_TouchPlayers.clear();
 
-    if (winner != nullptr) {
-        auto* stage = dynamic_cast<CScene_Stage01*>(CSceneMgr::GetInst()->GetCurScene());
-        if (stage == nullptr || !stage->ConfirmItemPickup(GetObjectId(), winner->GetPlayerId()))
+    if (!winner)
+    {
+        auto* scene = CSceneMgr::GetInst()->GetCurScene();
+        auto* stage = static_cast<CScene_Stage01*>(scene);
+        if (!stage->ConfirmItemPickup(GetObjectId(), winner->GetPlayerId()))
+        {
             return;
+        }
 
         m_bCollected = true;
         SetCollideroff();
@@ -118,17 +124,17 @@ protocol::SpawnPayload CItem::ExportSpawnPayload(protocol::EventId eventId) cons
 
 void CItem::update()
 {
-    ResolveSimultaneousPickup(); // 이전 충돌 단계에서 모인 동시 접촉 후보가 있으면 단일 획득자 확정
+    ResolveSimultaneousPickup();
     if (m_bCollected || IsDead())
+    {
         return;
+    }
+
     Vec2 vIpos = GetPos();
-    
     Vec2 resolution = CCore::GetInst()->GetResolution();
     CBackground* Background = (CBackground*)CSceneMgr::GetInst()->GetCurScene()->GetBackground();
     Vec2 vBackPos = Background->GetPos();
     Vec2 vBackScale = Background->GetScale();
-
-
 
     if (vIpos.y > resolution.y-10.f || vIpos.y < 10.f)
     {

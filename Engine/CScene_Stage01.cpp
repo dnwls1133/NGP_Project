@@ -57,15 +57,19 @@ CScene_Stage01::~CScene_Stage01()
 bool CScene_Stage01::ConfirmItemPickup(protocol::ObjectId itemId, protocol::PlayerSlot slot)
 {
     auto& session = CCore::GetInst()->GetSession();
-    if (!session.IsHost() || session.GetState() != network::SessionState::Started
-        || !m_playerSpawnsQueued || itemId == 0 || slot >= m_playerObjectIds.size())
+    if (!session.IsHost() || session.GetState() != network::SessionState::Started)
+    {
         return false;
+    }
 
     auto* player = GetPlayer(slot);
-    if (player == nullptr || player->IsDead() || !player->IsAlivePlayer())
+    if (player->IsDead() || !player->IsAlivePlayer())
+    {
         return false;
+    }
 
     const int scoreBefore = CRankMgr::GetInst()->CurrentRanking.Score;
+
     protocol::CombatEventPayload combat{};
     combat.eventId = m_nextSpawnEventId + 1;
     combat.kind = protocol::CombatEventKind::ITEM_PICKED;
@@ -73,10 +77,9 @@ bool CScene_Stage01::ConfirmItemPickup(protocol::ObjectId itemId, protocol::Play
     combat.sourceObjectId = itemId;
     combat.targetObjectId = m_playerObjectIds[slot];
     combat.confirmedHp = player->getHP();
-    combat.updatedPlayerLevel = static_cast<std::uint8_t>(
-        player->getLv() < 5 ? player->getLv() + 1 : player->getLv());
+    combat.updatedPlayerLevel = player->getLv();
     combat.scoreDelta = player->getLv() < 5 ? 0 : 100;
-    combat.teamScore = static_cast<std::uint32_t>(scoreBefore + combat.scoreDelta);
+    combat.teamScore = scoreBefore + combat.scoreDelta;
 
     protocol::Message message{};
     message.header.type = protocol::MessageType::COMBAT_EVENT;
@@ -84,9 +87,8 @@ bool CScene_Stage01::ConfirmItemPickup(protocol::ObjectId itemId, protocol::Play
     message.header.sequence = combat.eventId;
     message.header.hostTick = m_hostTick;
     message.payload = combat;
-
-    // 확정 결과를 먼저 보관합니다. 재송신 시 보상은 다시 적용하지 않습니다.
     m_pendingItemEvents.push_back(message);
+
     m_nextSpawnEventId = combat.eventId;
     player->ApplyItemReward();
     return true;
