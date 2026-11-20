@@ -162,7 +162,7 @@ void CScene_Title::CreateMenus()
     auto openRoomButton = new CMenuItem(
         CResMgr::GetInst()->LoadTexture(L"OpenRoom_Idle", L"texture\\Menu Items\\Open Room\\Sprite_Label_OpenRoom_0.png"),
         CResMgr::GetInst()->LoadTexture(L"OpenRoom_Hover", L"texture\\Menu Items\\Open Room\\Sprite_Label_OpenRoom_1.png"));
-    openRoomButton->SetPos(Vec2(290.0f, 520.0f));
+    openRoomButton->SetPos(Vec2(290.0f, 560.0f));
     openRoomButton->SetScale(Vec2(210.0f, 70.0f));
     openRoomButton->SetClickedCallBack(
         [](DWORD_PTR, DWORD_PTR) {
@@ -178,7 +178,7 @@ void CScene_Title::CreateMenus()
     auto enterRoomButton = new CMenuItem(
         CResMgr::GetInst()->LoadTexture(L"EnterRoom_Idle", L"texture\\Menu Items\\Enter Room\\Sprite_Label_EnterRoom_0.png"),
         CResMgr::GetInst()->LoadTexture(L"EnterRoom_Hover", L"texture\\Menu Items\\Enter Room\\Sprite_Label_EnterRoom_1.png"));
-    enterRoomButton->SetPos(Vec2(290.0f, 600.0f));
+    enterRoomButton->SetPos(Vec2(290.0f, 640.0f));
     enterRoomButton->SetScale(Vec2(210.0f, 70.0f));
     enterRoomButton->SetClickedCallBack(
         [](DWORD_PTR, DWORD_PTR) {
@@ -194,7 +194,7 @@ void CScene_Title::CreateMenus()
     auto backButton = new CMenuItem(
         CResMgr::GetInst()->LoadTexture(L"GoBack_Idle", L"texture\\Menu Items\\Go Back\\Sprite_Label_GoBack_0.png"),
         CResMgr::GetInst()->LoadTexture(L"GoBack_Hover", L"texture\\Menu Items\\Go Back\\Sprite_Label_GoBack_1.png"));
-    backButton->SetPos(Vec2(290.0f, 680.0f));
+    backButton->SetPos(Vec2(290.0f, 720.0f));
     backButton->SetScale(Vec2(210.0f, 70.0f));
     backButton->SetClickedCallBack(
         [](DWORD_PTR scene, DWORD_PTR) {
