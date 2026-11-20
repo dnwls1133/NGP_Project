@@ -53,6 +53,10 @@ void CScene_Lobby::Enter()
             L"Ranking Background",
             L"texture\\Sprite_Background_Rankings.png"
         );
+        m_pPanel = CResMgr::GetInst()->LoadTexture(
+            L"Lobby Panel",
+            L"texture\\Panels\\Sprite_Panel_Lobby.png"
+        );
     }
     // 배경 음악 로드
     {
@@ -264,10 +268,11 @@ void CScene_Lobby::ResumeHostWaiting()
 
 void CScene_Lobby::render(HDC _dc)
 {
+    const Vec2 resolution = CCore::GetInst()->GetResolution();
+
     // 배경 그리기
     if (m_pBackground)
     {
-        const Vec2 resolution = CCore::GetInst()->GetResolution();
         const Vec2 position = (Vec2(resolution.x / 2.0f, resolution.y / 2.0f));
         const Vec2 scale = (Vec2(resolution.x, resolution.y));
         const int width = m_pBackground->Width();
@@ -288,21 +293,26 @@ void CScene_Lobby::render(HDC _dc)
         );
     }
 
+    if (m_pPanel)
+    {
+        TransparentBlt(_dc, 0, 0, static_cast<int>(resolution.x), static_cast<int>(resolution.y),
+            m_pPanel->GetDC(), 0, 0, m_pPanel->Width(), m_pPanel->Height(), RGB(255, 0, 255));
+    }
+
     auto& session = CCore::GetInst()->GetSession();
 
     // 메시지
     {
         SetBkMode(_dc, TRANSPARENT);
-        SetTextColor(_dc, RGB(255, 215, 0));
+        SetTextColor(_dc, RGB(49, 19, 84));
 
         HFONT hOld = (HFONT)SelectObject(_dc, m_hFont);
 
-        const Vec2 resolution = CCore::GetInst()->GetResolution();
         RECT messageRect = {
             static_cast<LONG>(resolution.x * 0.1f),
-            static_cast<LONG>(resolution.y * 0.38f),
+            static_cast<LONG>(resolution.y * (83.0f / 1080.0f - 0.04f)),
             static_cast<LONG>(resolution.x * 0.9f),
-            static_cast<LONG>(resolution.y * 0.46f)
+            static_cast<LONG>(resolution.y * (83.0f / 1080.0f + 0.04f))
         };
         RECT addressRect = {
             static_cast<LONG>(resolution.x * 0.1f),
@@ -378,9 +388,8 @@ void CScene_Lobby::render(HDC _dc)
             session.RequestReady(true);
 
             SetBkMode(_dc, TRANSPARENT);
-            SetTextColor(_dc, RGB(0, 255, 0));
+            SetTextColor(_dc, RGB(0, 85, 40));
             HFONT hOld = (HFONT)SelectObject(_dc, m_hFont);
-            const Vec2 resolution = CCore::GetInst()->GetResolution();
             RECT readyRect = {
                 static_cast<LONG>(resolution.x * 0.1f),
                 static_cast<LONG>(resolution.y * 0.65f),

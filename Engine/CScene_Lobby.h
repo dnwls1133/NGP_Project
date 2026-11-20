@@ -29,6 +29,7 @@ public:
 
 private:
     CTexture* m_pBackground;
+    CTexture* m_pPanel = nullptr;
     CTexture* m_pRoomCodeLogo = nullptr;
     CSound* m_pTheme;
 
