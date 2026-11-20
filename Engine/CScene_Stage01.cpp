@@ -72,7 +72,13 @@ void CScene_Stage01::OnObjectAdded(CObject* _pObj, GROUP_TYPE _eType)
         return;
     }
 
-    m_pendingSpawns.push_back(_pObj->ExportSpawnPayload(++m_nextSpawnEventId));
+    const protocol::ObjectId objectId = _pObj->GetObjectId();
+    if (objectId == 0 || objectId <= m_lastQueuedSpawnObjectId)
+        return;
+
+    m_lastQueuedSpawnObjectId = objectId;
+    m_pendingSpawns.push_back(_pObj->ExportSpawnPayload(0));
+    
 
 }
 
@@ -108,17 +114,26 @@ void CScene_Stage01::update()
             // 11/20: 대기 중인 SPAWN 큐를 FIFO 순서대로 먼저 송신 (스냅샷보다 항상 먼저 전송)
             while (!m_pendingSpawns.empty())
             {
-                const auto& spawn = m_pendingSpawns.front();
-                const auto result = session.SendSpawn(spawn,m_hostTick);
-                if (result != net::SendResult::Queued)
+                auto spawn = m_pendingSpawns.front();
+                spawn.eventId = m_nextSpawnEventId + 1;
+                const auto result = session.SendSpawn(spawn, m_hostTick);
+                if (result == net::SendResult::Queued)
+                {
+                    m_nextSpawnEventId = spawn.eventId;
+                    m_pendingSpawns.pop_front();
+                }
+                else if (result == net::SendResult::QueueFull)
+                {
+                    break; // 일시적 큐 포화 -> pop하지 않고 다음 프레임에 재시도
+                }
+                else
                 {
 #ifdef _DEBUG
-                    std::cerr << "[HOST] SPAWN enqueue failed, objectId=" << spawn.objectId
+                    std::cerr << "[HOST] SPAWN dropped due to error, objectId=" << spawn.objectId
                         << ", result=" << static_cast<int>(result) << '\n';
 #endif
-                    break;
+                    m_pendingSpawns.pop_front(); // 오류 항목은 걸러내어 뒤의 정상 SPAWN이 막히지 않게 처리
                 }
-                m_pendingSpawns.pop_front();
             }
             m_hostTickAccumulator += CTimeMgr::GetInst()->GetDT();
 
@@ -644,6 +659,7 @@ void CScene_Stage01::Enter()
     m_hostTick = 0;
     m_playerSpawnsQueued = false;
     m_nextSpawnEventId = 2;
+    m_lastQueuedSpawnObjectId = 0;
     m_pendingSpawns.clear();
 
     if (session.IsHost() && session.GetState() == network::SessionState::Started)
