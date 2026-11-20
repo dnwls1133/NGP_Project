@@ -7,6 +7,7 @@
 
 #include "CSceneMgr.h"
 #include "CScene.h"
+#include "CScene_Stage01.h"
 
 #include "CTexture.h"
 #include "CBackground.h"
@@ -61,6 +62,9 @@ void CItem::InitAfterPlacement()
 
 void CItem::ResolveSimultaneousPickup()
 {
+    if (!CCore::GetInst()->GetSession().IsHost())
+        return;
+
     if (m_bCollected || IsDead() || m_TouchPlayers.empty())
         return;
 
@@ -86,9 +90,12 @@ void CItem::ResolveSimultaneousPickup()
     m_TouchPlayers.clear();
 
     if (winner != nullptr) {
+        auto* stage = dynamic_cast<CScene_Stage01*>(CSceneMgr::GetInst()->GetCurScene());
+        if (stage == nullptr || !stage->ConfirmItemPickup(GetObjectId(), winner->GetPlayerId()))
+            return;
+
         m_bCollected = true;
         SetCollideroff();
-        winner->ApplyItemReward();
         DeleteObject(this);
     }
 }

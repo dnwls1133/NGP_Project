@@ -54,6 +54,62 @@ CScene_Stage01::~CScene_Stage01()
 {
 }
 
+bool CScene_Stage01::ConfirmItemPickup(protocol::ObjectId itemId, protocol::PlayerSlot slot)
+{
+    auto& session = CCore::GetInst()->GetSession();
+    if (!session.IsHost() || session.GetState() != network::SessionState::Started
+        || !m_playerSpawnsQueued || itemId == 0 || slot >= m_playerObjectIds.size())
+        return false;
+
+    auto* player = GetPlayer(slot);
+    if (player == nullptr || player->IsDead() || !player->IsAlivePlayer())
+        return false;
+
+    const int scoreBefore = CRankMgr::GetInst()->CurrentRanking.Score;
+    protocol::CombatEventPayload combat{};
+    combat.eventId = m_nextSpawnEventId + 1;
+    combat.kind = protocol::CombatEventKind::ITEM_PICKED;
+    combat.instigatorPlayerId = slot;
+    combat.sourceObjectId = itemId;
+    combat.targetObjectId = m_playerObjectIds[slot];
+    combat.confirmedHp = player->getHP();
+    combat.updatedPlayerLevel = static_cast<std::uint8_t>(
+        player->getLv() < 5 ? player->getLv() + 1 : player->getLv());
+    combat.scoreDelta = player->getLv() < 5 ? 0 : 100;
+    combat.teamScore = static_cast<std::uint32_t>(scoreBefore + combat.scoreDelta);
+
+    protocol::Message message{};
+    message.header.type = protocol::MessageType::COMBAT_EVENT;
+    message.header.sessionId = session.GetSessionId();
+    message.header.sequence = combat.eventId;
+    message.header.hostTick = m_hostTick;
+    message.payload = combat;
+
+    // 확정 결과를 먼저 보관합니다. 재송신 시 보상은 다시 적용하지 않습니다.
+    m_pendingItemEvents.push_back(message);
+    m_nextSpawnEventId = combat.eventId;
+    player->ApplyItemReward();
+    return true;
+}
+
+bool CScene_Stage01::FlushItemEvents()
+{
+    auto& session = CCore::GetInst()->GetSession();
+    while (!m_pendingItemEvents.empty())
+    {
+        const auto result = session.EnqueueSend(net::Channel::Tcp, m_pendingItemEvents.front());
+        if (result != net::SendResult::Queued)
+        {
+#ifdef _DEBUG
+            std::cerr << "[HOST] ITEM_PICKED enqueue failed, result=" << static_cast<int>(result) << '\n';
+#endif
+            return false;
+        }
+        m_pendingItemEvents.pop_front();
+    }
+    return true;
+}
+
 void CScene_Stage01::update()
 {
     auto& session = CCore::GetInst()->GetSession();
@@ -72,6 +128,9 @@ void CScene_Stage01::update()
 
     if (session.IsHost())
     {
+        if (!FlushItemEvents())
+            return;
+
         using Clock = std::chrono::steady_clock;
         const auto nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count());
 
@@ -230,7 +289,25 @@ void CScene_Stage01::update()
             {
                 consumed = true;
 
-                // combat.kind에 따라 피해·사망·획득·점수 적용 코드 연결
+                if (combat.kind == protocol::CombatEventKind::ITEM_PICKED)
+                {
+                    const auto slot = combat.instigatorPlayerId;
+                    if (slot >= m_remotePlayers.size()
+                        || combat.updatedPlayerLevel < 1 || combat.updatedPlayerLevel > 5)
+                        continue;
+
+                    const auto& remote = m_remotePlayers[slot];
+                    if (remote.objectId == 0 || remote.objectId != combat.targetObjectId)
+                        continue;
+
+                    if (auto* player = GetPlayer(slot))
+                    {
+                        player->ApplyConfirmedItemLevel(combat.updatedPlayerLevel);
+
+                        CRankMgr::GetInst()->CurrentRanking.Score =
+                            static_cast<int>(combat.teamScore);
+                    }
+                }
             }
 
             if (session.TryReceiveSnapshot(snapshot, header))
@@ -297,6 +374,9 @@ void CScene_Stage01::update()
         m_dAcc += fDT;
     }
 
+    // 획득 이벤트가 결과 메시지보다 먼저 송신 큐에 들어가도록 합니다.
+    if (session.IsHost() && !FlushItemEvents())
+        return;
 
 
     if (m_bClear)
@@ -412,7 +492,6 @@ void CScene_Stage01::update()
         */
         if (5.f + fDT >= m_fClearAcc && m_fClearAcc > 5.f)
         {
-
             CCamera::GetInst()->FadeOut(5.f);
         }
         if (m_fClearAcc >= 10.f)
@@ -421,10 +500,7 @@ void CScene_Stage01::update()
             ChangeScene(SCENE_TYPE::TITLE);
 
             m_fClearAcc = 0.f;
-
-
         }
-
     }
     else
     {
@@ -459,15 +535,10 @@ void CScene_Stage01::update()
                     evt.triggered = true;
                 }
             }
-
         }
-
-
     }
-
-
-
 }
+
 void CScene_Stage01::render(HDC _dc)
 {
     CScene::render(_dc);
@@ -582,6 +653,7 @@ void CScene_Stage01::Enter()
     m_hostInput.ResetSession(session.GetSessionId());
     m_inputSendAccumulator = 0.0;
     m_remotePlayers = {};
+    m_pendingItemEvents.clear();
 
     // Monster Object 추가
 
@@ -673,6 +745,7 @@ void CScene_Stage01::Enter()
 
 void CScene_Stage01::Exit()
 {
+    m_pendingItemEvents.clear();
     DeleteAll();
     m_dAcc = 0;
     m_bClear = false;
