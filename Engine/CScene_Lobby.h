@@ -31,6 +31,9 @@ private:
     CTexture* m_pBackground;
     CTexture* m_pPanel = nullptr;
     CTexture* m_pRoomCodeLogo = nullptr;
+    CTexture* m_pWaitPlayerLogo = nullptr;
+    CTexture* m_pEnterPlayerLogo = nullptr;
+    CTexture* m_pWaitDecisionLogo = nullptr;
     CSound* m_pTheme;
 
     CMenuItem* m_startButton;
