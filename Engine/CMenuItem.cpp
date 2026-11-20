@@ -20,11 +20,11 @@
 //     // m_pHoverSound = 
 // }
 
-CMenuItem::CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_)
+CMenuItem::CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_, CTexture* cursorTexture)
     : m_pTexture(idleTex_)
     , m_pIdleTexture(idleTex_)
     , m_pHoverTexture(hoverTex_)
-    , m_pCursorTexture(CResMgr::GetInst()->LoadTexture(L"Menu Cursor", L"texture\\Menu Items\\Cursor\\Sprite_Cursor_1.png"))
+    , m_pCursorTexture(cursorTexture)
 {
     m_pHoverSound = CResMgr::GetInst()->LoadSound(L"Button Hover", L"sound\\SE\\SE_MenuSelect.mp3");
     m_pClickSound = CResMgr::GetInst()->LoadSound(L"Button Hover", L"sound\\SE\\SE_MenuClick.mp3");

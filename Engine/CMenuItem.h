@@ -10,7 +10,7 @@ class CMenuItem
 {
     friend class CBtnUI;
 public:
-    CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_);
+    CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_, CTexture* cursorTexture = nullptr);
 
     virtual void MouseOn() override;
     virtual void MouseOff() override;
