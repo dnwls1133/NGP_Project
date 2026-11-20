@@ -6,7 +6,10 @@
 #include "CSound.h"
 #include "CSoundMgr.h"
 
+#include "CCore.h"
 #include "CResMgr.h"
+
+#include <algorithm>
 
 // CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_)
 //     : m_pTexture(idleTex_)
@@ -21,6 +24,8 @@ CMenuItem::CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_)
     : m_pTexture(idleTex_)
     , m_pIdleTexture(idleTex_)
     , m_pHoverTexture(hoverTex_)
+    , m_pCursorTexture(CResMgr::GetInst()->LoadTexture(L"Menu Cursor", L"texture\\Menu Items\\Cursor\\Sprite_Cursor_0.png"))
+    , m_pPressedCursorTexture(CResMgr::GetInst()->LoadTexture(L"Menu Cursor Pressed", L"texture\\Menu Items\\Cursor\\Sprite_Cursor_1.png"))
 {
     m_pHoverSound = CResMgr::GetInst()->LoadSound(L"Button Hover", L"sound\\SE\\SE_MenuSelect.mp3");
     m_pClickSound = CResMgr::GetInst()->LoadSound(L"Button Hover", L"sound\\SE\\SE_MenuClick.mp3");
@@ -131,4 +136,29 @@ void CMenuItem::render(HDC canvas_)
         transparentColor     // 투명 색상
     );
 
+    if (!m_bHoverFlag)
+        return;
+
+    CTexture* cursor = IsLbtnDown() ? m_pPressedCursorTexture : m_pCursorTexture;
+    if (!cursor)
+        return;
+
+    constexpr int cursorGap = 8;
+    const int sourceWidth = static_cast<int>(cursor->Width());
+    const int sourceHeight = static_cast<int>(cursor->Height());
+    const int rightCursorX = drawX + static_cast<int>(scale.x) + cursorGap;
+    const int screenWidth = static_cast<int>(CCore::GetInst()->GetResolution().x);
+    const int cursorWidth = (std::min)({sourceWidth, drawX - cursorGap, screenWidth - rightCursorX});
+    if (cursorWidth <= 0)
+        return;
+
+    const int cursorHeight = sourceHeight * cursorWidth / sourceWidth;
+    const int cursorY = drawY + (static_cast<int>(scale.y) - cursorHeight) / 2;
+    const int leftCursorX = drawX - cursorGap - cursorWidth;
+
+    for (const int cursorX : {leftCursorX, rightCursorX})
+    {
+        TransparentBlt(canvas_, cursorX, cursorY, cursorWidth, cursorHeight,
+            cursor->GetDC(), 0, 0, sourceWidth, sourceHeight, transparentColor);
+    }
 }
