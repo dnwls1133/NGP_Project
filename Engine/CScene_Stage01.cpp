@@ -56,19 +56,28 @@ CScene_Stage01::~CScene_Stage01()
 
 bool CScene_Stage01::ConfirmItemPickup(protocol::ObjectId itemId, protocol::PlayerSlot slot)
 {
+    assert(itemId != 0);
+    assert(slot < m_playerObjectIds.size());
+
+    auto* player = GetPlayer(slot);
+    assert(player != nullptr);
+
     auto& session = CCore::GetInst()->GetSession();
-    if (!session.IsHost() || session.GetState() != network::SessionState::Started)
+    if (!session.IsHost() ||
+        session.GetState() != network::SessionState::Started ||
+        !m_playerSpawnsQueued)
     {
         return false;
     }
 
-    auto* player = GetPlayer(slot);
     if (player->IsDead() || !player->IsAlivePlayer())
     {
         return false;
     }
 
     const int scoreBefore = CRankMgr::GetInst()->CurrentRanking.Score;
+    player->ApplyItemReward();
+    const int scoreAfter = CRankMgr::GetInst()->CurrentRanking.Score;
 
     protocol::CombatEventPayload combat{};
     combat.eventId = m_nextSpawnEventId + 1;
@@ -77,9 +86,9 @@ bool CScene_Stage01::ConfirmItemPickup(protocol::ObjectId itemId, protocol::Play
     combat.sourceObjectId = itemId;
     combat.targetObjectId = m_playerObjectIds[slot];
     combat.confirmedHp = player->getHP();
-    combat.updatedPlayerLevel = player->getLv();
-    combat.scoreDelta = player->getLv() < 5 ? 0 : 100;
-    combat.teamScore = scoreBefore + combat.scoreDelta;
+    combat.updatedPlayerLevel = static_cast<std::uint8_t>(player->getLv());
+    combat.scoreDelta = scoreAfter - scoreBefore;
+    combat.teamScore = static_cast<std::uint32_t>(scoreAfter);
 
     protocol::Message message{};
     message.header.type = protocol::MessageType::COMBAT_EVENT;
@@ -90,7 +99,6 @@ bool CScene_Stage01::ConfirmItemPickup(protocol::ObjectId itemId, protocol::Play
     m_pendingItemEvents.push_back(message);
 
     m_nextSpawnEventId = combat.eventId;
-    player->ApplyItemReward();
     return true;
 }
 
@@ -329,21 +337,26 @@ void CScene_Stage01::update()
                 if (combat.kind == protocol::CombatEventKind::ITEM_PICKED)
                 {
                     const auto slot = combat.instigatorPlayerId;
-                    if (slot >= m_remotePlayers.size()
-                        || combat.updatedPlayerLevel < 1 || combat.updatedPlayerLevel > 5)
+                    if (slot >= m_remotePlayers.size() ||
+                        combat.updatedPlayerLevel < 1 ||
+                        combat.updatedPlayerLevel > 5)
+                    {
                         continue;
+                    }
 
                     const auto& remote = m_remotePlayers[slot];
                     if (remote.objectId == 0 || remote.objectId != combat.targetObjectId)
-                        continue;
-
-                    if (auto* player = GetPlayer(slot))
                     {
-                        player->ApplyConfirmedItemLevel(combat.updatedPlayerLevel);
-
-                        CRankMgr::GetInst()->CurrentRanking.Score =
-                            static_cast<int>(combat.teamScore);
+                        continue;
                     }
+
+                    auto* player = GetPlayer(slot);
+                    assert(player != nullptr);
+
+                    player->ApplyConfirmedItemLevel(combat.updatedPlayerLevel);
+
+                    CRankMgr::GetInst()->CurrentRanking.Score =
+                        static_cast<int>(combat.teamScore);
                 }
             }
 

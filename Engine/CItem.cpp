@@ -26,6 +26,7 @@ CItem::CItem()
     , m_fTheta(0.f)
     , m_vDir(Vec2(1.f, 1.f))
     , m_fVec(200.f)
+    , m_iType(0)
 {
     CreaeteCollider();
     GetCollider()->SetScale(Vec2(20.f, 20.f));
@@ -74,6 +75,8 @@ void CItem::ResolveSimultaneousPickup()
     const Vec2 itemPos = GetPos();
     for (CPlayer* candidate : m_TouchPlayers)
     {
+        assert(candidate != nullptr);
+
         if (candidate->IsDead() || !candidate->IsAlivePlayer())
         {
             continue;
@@ -81,8 +84,9 @@ void CItem::ResolveSimultaneousPickup()
         Vec2 diff = candidate->GetPos() - itemPos;
         float distSq = diff.x * diff.x + diff.y * diff.y;
 
-        if (distSq < bestDistSq ||
-           (distSq == bestDistSq && candidate->GetPlayerId() < winner->GetPlayerId()))
+        if (winner == nullptr ||
+            distSq < bestDistSq ||
+            (distSq == bestDistSq && candidate->GetPlayerId() < winner->GetPlayerId()))
         {
             winner = candidate;
             bestDistSq = distSq;
@@ -91,10 +95,12 @@ void CItem::ResolveSimultaneousPickup()
 
     m_TouchPlayers.clear();
 
-    if (!winner)
+    if (winner != nullptr)
     {
         auto* scene = CSceneMgr::GetInst()->GetCurScene();
-        auto* stage = static_cast<CScene_Stage01*>(scene);
+        auto* stage = dynamic_cast<CScene_Stage01*>(scene);
+        assert(stage != nullptr);
+
         if (!stage->ConfirmItemPickup(GetObjectId(), winner->GetPlayerId()))
         {
             return;
