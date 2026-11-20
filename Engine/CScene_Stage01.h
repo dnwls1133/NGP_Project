@@ -1,7 +1,9 @@
 ﻿#pragma once
 #include "CScene.h"
 #include "../host/HostSimCore.h"
+#include <deque>
 #include <optional>
+#include <deque>
 
 class CSound;
 class CStageHUD;
@@ -41,9 +43,16 @@ private:
     std::array<protocol::ObjectId, protocol::MAX_PROTOCOL_PLAYERS> m_playerObjectIds{};
     std::uint32_t m_hostTick = 0;
     protocol::EventId m_nextSpawnEventId = 2;
-    protocol::ObjectId m_lastSyncedMissileObjectId = 0;
+    protocol::ObjectId m_lastQueuedSpawnObjectId = 0;
+    std::deque<protocol::SpawnPayload> m_pendingSpawns;
 
     bool m_playerSpawnsQueued = false;
+    std::deque<protocol::Message> m_pendingItemEvents;
+
+    bool FlushItemEvents();
+
+protected:
+    void OnObjectAdded(CObject* _pObj, GROUP_TYPE _eType) override;
 
 public:
     virtual void update();
@@ -54,6 +63,7 @@ public:
     void Clear() { m_bClear = true; }
     void Fail() { m_bFail = true; }
     void InitEvents();
+    bool ConfirmItemPickup(protocol::ObjectId itemId, protocol::PlayerSlot slot);
 public:
     CScene_Stage01();
     ~CScene_Stage01();

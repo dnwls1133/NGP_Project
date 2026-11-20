@@ -801,6 +801,72 @@ namespace
                 counters);
         }
     }
+    void RunHostSim1120Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. 동시 공격·획득 입력 순서를 바꿔도({P0, P1} vs {P1, P0}) 계약에 맞는 동일한 확정 HP/사망/획득/점수 결과 확인
+        {
+            CaptureSink sinkA;
+            HostSimEngine engineA{ 1000 };
+            engineA.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 10);
+            engineA.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 10);
+            const ObjectId monA = engineA.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 20'000 }, {}, 10, 1);
+            const ObjectId proj0A = engineA.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 0, FixedVec2{ 15'000, 20'000 }, {}, 1, 10);
+            const ObjectId proj1A = engineA.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 1, FixedVec2{ 15'000, 20'000 }, {}, 1, 10);
+            const ObjectId itemA = engineA.RequestSpawn(NetObjectKind::ITEM, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 30'000 }, {}, 1, 0);
+            engineA.FlushLifecycleAtTickEnd(sinkA);
+            CaptureSink sinkB;
+            HostSimEngine engineB{ 1000 };
+            engineB.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 10);
+            engineB.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 10);
+            const ObjectId monB = engineB.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 20'000 }, {}, 10, 1);
+            const ObjectId proj0B = engineB.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 0, FixedVec2{ 15'000, 20'000 }, {}, 1, 10);
+            const ObjectId proj1B = engineB.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 1, FixedVec2{ 15'000, 20'000 }, {}, 1, 10);
+            const ObjectId itemB = engineB.RequestSpawn(NetObjectKind::ITEM, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 30'000 }, {}, 1, 0);
+            engineB.FlushLifecycleAtTickEnd(sinkB);
+            // 동시 치명타 공격 및 동시 아이템 접촉 순서를 정방향({P0, P1})과 역방향({P1, P0})으로 각각 주입
+            const std::size_t hitsA = engineA.ResolveSimultaneousProjectileHits(monA, { proj0A, proj1A }, sinkA);
+            const std::size_t hitsB = engineB.ResolveSimultaneousProjectileHits(monB, { proj1B, proj0B }, sinkB);
+            const PlayerSlot pickA = engineA.ResolveItemPickup(itemA, { 0, 1 }, sinkA);
+            const PlayerSlot pickB = engineB.ResolveItemPickup(itemB, { 1, 0 }, sinkB);
+            PlayerSlot killerA = INVALID_PLAYER_SLOT;
+            PlayerSlot killerB = INVALID_PLAYER_SLOT;
+            for (const auto& e : sinkA.GetCapturedMessages())
+                if (const auto* ce = std::get_if<CombatEventPayload>(&e.message.payload))
+                    if (ce->kind == CombatEventKind::ENTITY_DIED) killerA = ce->instigatorPlayerId;
+            for (const auto& e : sinkB.GetCapturedMessages())
+                if (const auto* ce = std::get_if<CombatEventPayload>(&e.message.payload))
+                    if (ce->kind == CombatEventKind::ENTITY_DIED) killerB = ce->instigatorPlayerId;
+            Check(hitsA == 1 && hitsB == 1
+                && killerA == 0 && killerB == 0
+                && pickA == 0 && pickB == 0
+                && engineA.GetTeamScore() == 250 && engineB.GetTeamScore() == 250,
+                "HostSim1120: Reversing simultaneous attack and pickup input order produces identical killer, pickup winner, and score",
+                counters);
+        }
+        // 2. 이전 씬 지연 이벤트(대기 중인 생성·삭제)가 씬 전환 이후 새 씬 객체에 적용되지 않음 확인
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId oldP0 = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 });
+            engine.FlushLifecycleAtTickEnd(sink);
+            // 이전 씬에서 지연 생성(미사일)과 지연 삭제(oldP0)가 대기열에 들어간 직후 씬 전환 발생
+            const ObjectId stalePendingMissile = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 0, FixedVec2{ 10'000, 25'000 });
+            engine.RequestDestroy(oldP0, DespawnReason::STAGE_END);
+            engine.TransitionScene();
+            // 새 씬에서 P0 생성 후 틱 종료 플러시 실행 -> 이전 씬의 지연 미사일이나 삭제가 섞이지 않고 새 P0만 존재해야 함
+            const ObjectId newP0 = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 12'000, 30'000 });
+            engine.FlushLifecycleAtTickEnd(sink);
+            Check(newP0 > stalePendingMissile
+                && engine.GetActiveObjects().size() == 1
+                && engine.FindObjectById(newP0) != nullptr
+                && engine.FindObjectById(stalePendingMissile) == nullptr
+                && engine.FindObjectById(oldP0) == nullptr,
+                "HostSim1120: Delayed spawn/despawn events from previous scene are discarded on scene transition and never affect new scene objects",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -820,6 +886,7 @@ int main()
     RunHostSim1117Suite(counters);
     RunHostSim1118Suite(counters);
     RunHostSim1119Suite(counters);
+    RunHostSim1120Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';
