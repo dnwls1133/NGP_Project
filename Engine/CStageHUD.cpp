@@ -142,8 +142,8 @@ void CStageHUD::render(HDC canvas_)
             TextOut(canvas_, healthX + healthWidth + 8, y, level.c_str(), static_cast<int>(level.length()));
         };
 
-        drawPlayer(player1, L"P1 HP: ", false);
-        drawPlayer(player2, L"P2 HP: ", true);
+        drawPlayer(player1, L"P1: ", false);
+        drawPlayer(player2, L"P2: ", true);
         SelectObject(canvas_, hOldFont);
     }
 }
