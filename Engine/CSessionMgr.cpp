@@ -21,6 +21,51 @@ namespace network
         return static_cast<std::uint64_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
     }
 
+    static protocol::EventId GetGameEventId(const protocol::Message& message) noexcept
+    {
+        if (const auto* spawn = std::get_if<protocol::SpawnPayload>(&message.payload))
+            return spawn->eventId;
+
+        if (const auto* despawn = std::get_if<protocol::DespawnPayload>(&message.payload))
+            return despawn->eventId;
+
+        if (const auto* combat = std::get_if<protocol::CombatEventPayload>(&message.payload))
+            return combat->eventId;
+
+        if (const auto* result = std::get_if<protocol::ResultPayload>(&message.payload))
+            return result->eventId;
+
+        return 0;
+    }
+
+#ifdef _DEBUG
+    static void LogGameEvent(const char* label, const protocol::Message& message)
+    {
+        const auto eventId = GetGameEventId(message);
+        if (eventId == 0)
+            return;
+
+        const auto& header = message.header;
+        const char* typeText = nullptr;
+
+        switch (header.type)
+        {
+        case protocol::MessageType::SPAWN:        typeText = "SPAWN"; break;
+        case protocol::MessageType::DESPAWN:      typeText = "DESPAWN"; break;
+        case protocol::MessageType::COMBAT_EVENT: typeText = "COMBAT_EVENT"; break;
+        case protocol::MessageType::RESULT:       typeText = "RESULT"; break;
+        default:                                 return;
+        }
+
+        std::cout << label
+            << " type=" << typeText
+            << " sessionId=" << header.sessionId
+            << " hostTick=" << header.hostTick
+            << " eventId=" << eventId
+            << " sequence=" << header.sequence << '\n';
+    }
+#endif
+
     CSessionMgr::CSessionMgr(CNetworkMgr& network) : network(network) {}
 
     NetworkResult CSessionMgr::StartHost(unsigned short tcpPort, unsigned short udpPort)
@@ -795,7 +840,14 @@ namespace network
         if (!IsGameMessageAllowed(role, transport, message))
             return net::SendResult::InvalidRequest;
 
-        return network.EnqueueSend(channel, message);
+        const auto result = network.EnqueueSend(channel, message);
+
+#ifdef _DEBUG
+        if (IsHost() && result == net::SendResult::Queued)
+            LogGameEvent("[HOST] QUEUED", message);
+#endif
+
+        return result;
     }
 
     net::SendResult CSessionMgr::EnqueueSnapshotBatch(const net::SnapshotBatch& batch)
@@ -1037,23 +1089,6 @@ namespace network
         }
     }
 
-    static protocol::EventId GetGameEventId(const protocol::Message& message) noexcept
-    {
-        if (const auto* spawn = std::get_if<protocol::SpawnPayload>(&message.payload))
-            return spawn->eventId;
-
-        if (const auto* despawn = std::get_if<protocol::DespawnPayload>(&message.payload))
-            return despawn->eventId;
-
-        if (const auto* combat = std::get_if<protocol::CombatEventPayload>(&message.payload))
-            return combat->eventId;
-
-        if (const auto* result = std::get_if<protocol::ResultPayload>(&message.payload))
-            return result->eventId;
-
-        return 0;
-    }
-
     void CSessionMgr::HandleGameMessage(ReceivedMessage received)
     {
         const NetworkRole senderRole = IsHost() ? NetworkRole::Client : NetworkRole::Host;
@@ -1099,13 +1134,15 @@ namespace network
 
         if (gameReceiveQueue.size() < net::MAX_RECV_QUEUE_ENTRIES)
         {
+            bool queued = false;
+
             try
             {
                 if (eventId != 0)
                     acceptedEventIds.insert(eventId);
 
                 gameReceiveQueue.push_back(std::move(received));
-                return;
+                queued = true;
             }
             catch (const std::bad_alloc&)
             {
@@ -1113,6 +1150,15 @@ namespace network
                     acceptedEventIds.erase(eventId);
 
                 error = WSA_NOT_ENOUGH_MEMORY;
+            }
+
+            if (queued)
+            {
+#ifdef _DEBUG
+                if (!IsHost() && eventId != 0)
+                    LogGameEvent("[CLIENT] ACCEPTED", gameReceiveQueue.back().message);
+#endif
+                return;
             }
         }
 
