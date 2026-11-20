@@ -32,7 +32,6 @@ private:
     CTexture* const m_pHoverTexture;    // 호버 텍스쳐.
 
     CTexture* m_pCursorTexture;
-    CTexture* m_pPressedCursorTexture;
 
     CSound* m_pHoverSound;
     CSound* m_pClickSound;

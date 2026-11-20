@@ -24,8 +24,7 @@ CMenuItem::CMenuItem(CTexture* const idleTex_, CTexture* const hoverTex_)
     : m_pTexture(idleTex_)
     , m_pIdleTexture(idleTex_)
     , m_pHoverTexture(hoverTex_)
-    , m_pCursorTexture(CResMgr::GetInst()->LoadTexture(L"Menu Cursor", L"texture\\Menu Items\\Cursor\\Sprite_Cursor_0.png"))
-    , m_pPressedCursorTexture(CResMgr::GetInst()->LoadTexture(L"Menu Cursor Pressed", L"texture\\Menu Items\\Cursor\\Sprite_Cursor_1.png"))
+    , m_pCursorTexture(CResMgr::GetInst()->LoadTexture(L"Menu Cursor", L"texture\\Menu Items\\Cursor\\Sprite_Cursor_1.png"))
 {
     m_pHoverSound = CResMgr::GetInst()->LoadSound(L"Button Hover", L"sound\\SE\\SE_MenuSelect.mp3");
     m_pClickSound = CResMgr::GetInst()->LoadSound(L"Button Hover", L"sound\\SE\\SE_MenuClick.mp3");
@@ -139,7 +138,7 @@ void CMenuItem::render(HDC canvas_)
     if (!m_bHoverFlag)
         return;
 
-    CTexture* cursor = IsLbtnDown() ? m_pPressedCursorTexture : m_pCursorTexture;
+    CTexture* cursor = m_pCursorTexture;
     if (!cursor)
         return;
 
