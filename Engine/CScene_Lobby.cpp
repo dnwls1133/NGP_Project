@@ -96,7 +96,7 @@ void CScene_Lobby::Enter()
         AddFontResourceEx(fontPath.c_str(), FR_PRIVATE, NULL);
 
         m_hFont = CreateFont(
-            -48,
+            -72,
             0,
             0,
             0,
@@ -346,9 +346,9 @@ void CScene_Lobby::render(HDC _dc)
         };
         RECT addressRect = {
             static_cast<LONG>(resolution.x * 0.1f),
-            static_cast<LONG>(resolution.y * 0.51f),
+            static_cast<LONG>(resolution.y * 0.49f),
             static_cast<LONG>(resolution.x * 0.9f),
-            static_cast<LONG>(resolution.y * 0.59f)
+            static_cast<LONG>(resolution.y * 0.61f)
         };
 
         DrawLobbyLogo(_dc, m_pRoomCodeLogo, messageRect);
