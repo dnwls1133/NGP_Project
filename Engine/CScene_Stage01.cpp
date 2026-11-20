@@ -39,6 +39,24 @@
 #include <cmath>
 #include <utility>
 
+#ifdef _DEBUG
+namespace
+{
+    void LogItemPickupApplied(const network::CSessionMgr& session, const protocol::CombatEventPayload& combat)
+    {
+        const char* role = session.IsHost() ? "[HOST]" : "[CLIENT]";
+        const bool pickedBySelf = combat.instigatorPlayerId == session.GetLocalPlayerId();
+        const char* message = pickedBySelf ? "ITEM_PICKED applied for self" : "ITEM_PICKED applied for teammate";
+        std::cout << role << ' ' << message
+            << ", eventId=" << combat.eventId
+            << ", itemId=" << combat.sourceObjectId
+            << ", pickerSlot=" << static_cast<int>(combat.instigatorPlayerId)
+            << ", level=" << static_cast<int>(combat.updatedPlayerLevel)
+            << ", teamScore=" << combat.teamScore << '\n';
+    }
+}
+#endif
+
 CScene_Stage01::CScene_Stage01()
     :m_bClear(false)
     , m_bFail(false)
@@ -54,6 +72,104 @@ CScene_Stage01::~CScene_Stage01()
 {
 }
 
+bool CScene_Stage01::ConfirmItemPickup(protocol::ObjectId itemId, protocol::PlayerSlot slot)
+{
+    assert(itemId != 0);
+    assert(slot < m_playerObjectIds.size());
+
+    auto* player = GetPlayer(slot);
+    assert(player != nullptr);
+
+    auto& session = CCore::GetInst()->GetSession();
+    if (!session.IsHost() ||
+        session.GetState() != network::SessionState::Started ||
+        !m_playerSpawnsQueued)
+    {
+        return false;
+    }
+
+    if (player->IsDead() || !player->IsAlivePlayer())
+    {
+        return false;
+    }
+
+    const int scoreBefore = CRankMgr::GetInst()->CurrentRanking.Score;
+    player->ApplyItemReward();
+    const int scoreAfter = CRankMgr::GetInst()->CurrentRanking.Score;
+
+    protocol::CombatEventPayload combat{};
+    combat.eventId = m_nextSpawnEventId + 1;
+    combat.kind = protocol::CombatEventKind::ITEM_PICKED;
+    combat.instigatorPlayerId = slot;
+    combat.sourceObjectId = itemId;
+    combat.targetObjectId = m_playerObjectIds[slot];
+    combat.confirmedHp = player->getHP();
+    combat.updatedPlayerLevel = static_cast<std::uint8_t>(player->getLv());
+    combat.scoreDelta = scoreAfter - scoreBefore;
+    combat.teamScore = static_cast<std::uint32_t>(scoreAfter);
+
+    protocol::Message message{};
+    message.header.type = protocol::MessageType::COMBAT_EVENT;
+    message.header.sessionId = session.GetSessionId();
+    message.header.sequence = combat.eventId;
+    message.header.hostTick = m_hostTick;
+    message.payload = combat;
+    m_pendingItemEvents.push_back(message);
+
+    m_nextSpawnEventId = combat.eventId;
+
+#ifdef _DEBUG
+    LogItemPickupApplied(session, combat);
+#endif
+    return true;
+}
+
+bool CScene_Stage01::FlushItemEvents()
+{
+    auto& session = CCore::GetInst()->GetSession();
+    while (!m_pendingItemEvents.empty())
+    {
+        const auto result = session.EnqueueSend(net::Channel::Tcp, m_pendingItemEvents.front());
+        if (result != net::SendResult::Queued)
+        {
+#ifdef _DEBUG
+            std::cerr << "[HOST] ITEM_PICKED enqueue failed, result=" << static_cast<int>(result) << '\n';
+#endif
+            return false;
+        }
+        m_pendingItemEvents.pop_front();
+    }
+    return true;
+}
+
+void CScene_Stage01::OnObjectAdded(CObject* _pObj, GROUP_TYPE _eType)
+{
+    auto& session = CCore::GetInst()->GetSession();
+    if (!session.IsHost() || session.GetState() !=
+        network::SessionState::Started)
+        return;
+
+    if (_pObj == nullptr || _pObj->IsDead())
+        return;
+
+    if (_eType != GROUP_TYPE::PROJ_PLAYER
+        && _eType != GROUP_TYPE::PROJ_MONSTER
+        && _eType != GROUP_TYPE::MONSTER
+        && _eType != GROUP_TYPE::ITEM)
+    {
+        return;
+    }
+
+    const protocol::ObjectId objectId = _pObj->GetObjectId();
+    if (objectId == 0 || objectId <= m_lastQueuedSpawnObjectId)
+        return;
+
+    m_lastQueuedSpawnObjectId = objectId;
+    m_pendingSpawns.push_back(_pObj->ExportSpawnPayload(0));
+
+
+}
+
 void CScene_Stage01::update()
 {
     auto& session = CCore::GetInst()->GetSession();
@@ -63,6 +179,10 @@ void CScene_Stage01::update()
         CScene::update();
         m_dAcc += fDT;
     }
+
+    // 획득 이벤트가 결과 메시지보다 먼저 송신 큐에 들어가도록 합니다.
+    if (session.IsHost() && !FlushItemEvents())
+        return;
 
     if (m_bClear)
     {
@@ -188,7 +308,6 @@ void CScene_Stage01::update()
         */
         if (5.f + fDT >= m_fClearAcc && m_fClearAcc > 5.f)
         {
-
             CCamera::GetInst()->FadeOut(5.f);
         }
         if (m_fClearAcc >= 10.f)
@@ -197,10 +316,7 @@ void CScene_Stage01::update()
             ChangeScene(SCENE_TYPE::TITLE);
 
             m_fClearAcc = 0.f;
-
-
         }
-
     }
     else
     {
@@ -227,6 +343,9 @@ void CScene_Stage01::update()
 
         if (session.IsHost())
         {
+            if (!FlushItemEvents())
+                return;
+
             using Clock = std::chrono::steady_clock;
             const auto nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count());
 
@@ -237,6 +356,30 @@ void CScene_Stage01::update()
 
             if (!m_bFail)
             {
+                // 11/20: 대기 중인 SPAWN 큐를 FIFO 순서대로 먼저 송신 (스냅샷보다 항상 먼저 전송)
+                while (!m_pendingSpawns.empty())
+                {
+                    auto spawn = m_pendingSpawns.front();
+                    spawn.eventId = m_nextSpawnEventId + 1;
+                    const auto result = session.SendSpawn(spawn, m_hostTick);
+                    if (result == net::SendResult::Queued)
+                    {
+                        m_nextSpawnEventId = spawn.eventId;
+                        m_pendingSpawns.pop_front();
+                    }
+                    else if (result == net::SendResult::QueueFull)
+                    {
+                        break; // 일시적 큐 포화 -> pop하지 않고 다음 프레임에 재시도
+                    }
+                    else
+                    {
+#ifdef _DEBUG
+                        std::cerr << "[HOST] SPAWN dropped due to error, objectId=" << spawn.objectId
+                            << ", result=" << static_cast<int>(result) << '\n';
+#endif
+                        m_pendingSpawns.pop_front(); // 오류 항목은 걸러내어 뒤의 정상 SPAWN이 막히지 않게 처리
+                    }
+                }
                 m_hostTickAccumulator += CTimeMgr::GetInst()->GetDT();
 
                 for (std::uint32_t tick = 0; tick < host::MAX_TICKS_PER_FRAME && m_hostTickAccumulator >= host::SIM_FIXED_DT; ++tick)
@@ -298,7 +441,7 @@ void CScene_Stage01::update()
 
                         CMonster* pMon = CMonFactory::CreateMonster(evt.type, evt.mtype, evt.spawnPos, evt.targetPos, evt.exitPos);
                         pMon->SetName(L"Monster");
-                        AddObject(pMon, GROUP_TYPE::MONSTER);
+                        CreateObject(pMon, GROUP_TYPE::MONSTER);
                         evt.triggered = true;
                     }
                 }
@@ -399,11 +542,38 @@ void CScene_Stage01::update()
                     // despawn.objectId의 객체를 제거하는 코드 연결
                 }
 
+
                 if (session.TryReceiveCombatEvent(combat, header))
                 {
                     consumed = true;
 
-                    // combat.kind에 따라 피해·사망·획득·점수 적용 코드 연결
+                    if (combat.kind == protocol::CombatEventKind::ITEM_PICKED)
+                    {
+                        const auto slot = combat.instigatorPlayerId;
+                        if (slot >= m_remotePlayers.size() ||
+                            combat.updatedPlayerLevel < 1 ||
+                            combat.updatedPlayerLevel > 5)
+                        {
+                            continue;
+                        }
+
+                        const auto& remote = m_remotePlayers[slot];
+                        if (remote.objectId == 0 || remote.objectId != combat.targetObjectId)
+                        {
+                            continue;
+                        }
+
+                        auto* player = GetPlayer(slot);
+                        assert(player != nullptr);
+
+                        player->ApplyConfirmedItemLevel(combat.updatedPlayerLevel);
+
+                        CRankMgr::GetInst()->CurrentRanking.Score = static_cast<int>(combat.teamScore);
+
+#ifdef _DEBUG
+                        LogItemPickupApplied(session, combat);
+#endif
+                    }
                 }
 
                 if (session.TryReceiveSnapshot(snapshot, header))
@@ -463,8 +633,8 @@ void CScene_Stage01::update()
 
     }
 
-
 }
+
 void CScene_Stage01::render(HDC _dc)
 {
     CScene::render(_dc);
@@ -579,6 +749,7 @@ void CScene_Stage01::Enter()
     m_hostInput.ResetSession(session.GetSessionId());
     m_inputSendAccumulator = 0.0;
     m_remotePlayers = {};
+    m_pendingItemEvents.clear();
 
     // Monster Object 추가
 
@@ -621,7 +792,8 @@ void CScene_Stage01::Enter()
     m_hostTick = 0;
     m_playerSpawnsQueued = false;
     m_nextSpawnEventId = 2;
-    m_lastSyncedMissileObjectId = 0;
+    m_lastQueuedSpawnObjectId = 0;
+    m_pendingSpawns.clear();
 
     if (session.IsHost() && session.GetState() == network::SessionState::Started)
     {
@@ -670,12 +842,14 @@ void CScene_Stage01::Enter()
 
 void CScene_Stage01::Exit()
 {
+    m_pendingItemEvents.clear();
     DeleteAll();
     m_dAcc = 0;
     m_bClear = false;
     m_bFail = false;
     m_fClearAcc = 0.f;
     m_vEvents.clear();
+    m_pendingSpawns.clear();
     CColliderMgr::GetInst()->Reset();
 }
 

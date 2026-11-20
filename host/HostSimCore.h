@@ -671,6 +671,54 @@ namespace host
             return winnerSlot;
         }
 
+        // 11/20 : 동시 공격 탄환들의 입력 순서가 바뀌어도 계약( 낮은 ownerPlayerId ->
+        // 낮은 objectId 순)에 따라 동일한 결과를 확정
+        std::size_t ResolveSimultaneousProjectileHits(
+            protocol::ObjectId monsterId,
+            std::vector<protocol::ObjectId> projectileIds,
+            net::ISendSink& sendSink)
+        {
+            std::sort(
+                projectileIds.begin(),
+                projectileIds.end(),
+                [this](protocol::ObjectId a, protocol::ObjectId b)
+                {
+                    const HostObjectValue* objA = FindObjectById(a);
+                    const HostObjectValue* objB = FindObjectById(b);
+                    const protocol::PlayerSlot ownerA = (objA != nullptr) ?
+                        objA->ownerPlayerId : protocol::INVALID_PLAYER_SLOT;
+                    const protocol::PlayerSlot ownerB = (objB != nullptr) ?
+                        objB->ownerPlayerId : protocol::INVALID_PLAYER_SLOT;
+                    if (ownerA != ownerB)
+                        return ownerA < ownerB;
+
+                    return a < b;
+                });
+
+            std::size_t appliedCount = 0;
+            for (const protocol::ObjectId projId : projectileIds) {
+                if (ApplyProjectileHit(projId, monsterId, sendSink)) {
+                    ++appliedCount;
+                }
+            }
+            return appliedCount;
+        }
+
+        // 11/20: 씬 전환 시 이전 씬의 미처리 지연 생성/삭제 이벤트를 폐기하여
+        // 새 씬 객체에 적용 되지 않도록 보장
+        void TransitionScene()
+        {
+            m_pendingSpawns.clear();
+            m_pendingDespawns.clear();
+            m_objects.clear();
+            m_playerSlotObjectIds.fill(0);
+            m_fireTickAccum.fill(0);
+        }
+
+        
+
+
+
         // 11/11: 마지막 유효 입력 시각 기준 300ms 경과 시 이동·발사 중립화
         // - 경계 직전(elapsedMs == 299): 유지
         // - 정확한 경계(elapsedMs == 300) 및 직후(elapsedMs >= 301) :
