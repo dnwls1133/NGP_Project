@@ -62,6 +62,9 @@ public:
 
 	virtual void Enter() = 0; // 해당 Scene 에 진입 시 호출
 	virtual void Exit() = 0; // 해당 Scenen 에 탈출 시 호출
+protected:
+    virtual void OnObjectAdded(CObject* _pObj, GROUP_TYPE _eType) {};
+
 public:
     void AddObject(CObject* _pObj, GROUP_TYPE _eType);
     void RegisterPlayer(PlayerId id, CPlayer* player);
