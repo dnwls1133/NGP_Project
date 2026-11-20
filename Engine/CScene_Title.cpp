@@ -46,6 +46,7 @@ void CScene_Title::Enter()
     
     CSoundMgr::GetInst()->PlayBGM(m_pTitleTheme, false);
 
+    m_menuSwitchRequested = false;
     CreateMenus();
     m_pFirstMenu->SetActive(false);
 
@@ -55,14 +56,16 @@ void CScene_Title::Enter()
 
 void CScene_Title::update()
 {
-    CScene::update();
-
-    if (m_CurrentState == EState::Title && m_pSecondMenu &&
-        m_pSecondMenu->IsActive() && KEY_TAP(KEY::ESC))
+    if (m_CurrentState == EState::Title &&
+        (m_menuSwitchRequested || (m_pSecondMenu->IsActive() && KEY_TAP(KEY::ESC))))
     {
-        m_pSecondMenu->SetActive(false);
-        m_pFirstMenu->SetActive(true);
+        m_menuSwitchRequested = false;
+        const bool showSecondMenu = !m_pSecondMenu->IsActive();
+        m_pFirstMenu->SetActive(!showSecondMenu);
+        m_pSecondMenu->SetActive(showSecondMenu);
     }
+
+    CScene::update();
 
     if (m_CurrentState == EState::Intro)
     {
@@ -108,8 +111,7 @@ void CScene_Title::CreateMenus()
     m_pStartButton->SetClickedCallBack(
         [](DWORD_PTR scene, DWORD_PTR) {
             auto* titleScene = reinterpret_cast<CScene_Title*>(scene);
-            titleScene->m_pFirstMenu->SetActive(false);
-            titleScene->m_pSecondMenu->SetActive(true);
+            titleScene->m_menuSwitchRequested = true;
         },
         reinterpret_cast<DWORD_PTR>(this), (DWORD_PTR)0
     );
@@ -209,8 +211,7 @@ void CScene_Title::CreateMenus()
     backButton->SetClickedCallBack(
         [](DWORD_PTR scene, DWORD_PTR) {
             auto* titleScene = reinterpret_cast<CScene_Title*>(scene);
-            titleScene->m_pSecondMenu->SetActive(false);
-            titleScene->m_pFirstMenu->SetActive(true);
+            titleScene->m_menuSwitchRequested = true;
         },
         reinterpret_cast<DWORD_PTR>(this), (DWORD_PTR)0
     );

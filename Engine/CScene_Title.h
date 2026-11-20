@@ -42,4 +42,5 @@ private:
 
     CTitleMenu* m_pFirstMenu = nullptr;
     CTitleMenu* m_pSecondMenu = nullptr;
+    bool m_menuSwitchRequested = false;
 };
