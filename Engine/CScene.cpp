@@ -182,7 +182,6 @@ void CScene::AddObject(CObject* _pObj, GROUP_TYPE _eType)
         _pObj->SetObjectId(m_nexObjectId++);
     }
     m_arrObj[(UINT)_eType].push_back(_pObj);
-    OnObjectAdded(_pObj, _eType);
 }
 
 void CScene::RegisterPlayer(PlayerId id, CPlayer* player)

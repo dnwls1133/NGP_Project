@@ -9,7 +9,6 @@
 
 
 #include "CObject.h"
-#include "CMonster.h"
 CEventMgr::CEventMgr()
 {
 
@@ -37,38 +36,10 @@ void CEventMgr::update()
 	//Event 처리
 	//===========
 
-	/*for (size_t i = 0; i < m_vecEvent.size(); ++i)
+	for (size_t i = 0; i < m_vecEvent.size(); ++i)
 	{
 		Excute(m_vecEvent[i]);
-	}*/
-
-    // 11/20 
-    int sceneChangeIdx = -1;
-    for (size_t i = 0; i < m_vecEvent.size(); ++i) {
-        if (m_vecEvent[i].eEven == EVENT_TYPE::SCENE_CHANGE) {
-            sceneChangeIdx = static_cast<int>(i);
-            break;
-        }
-    }
-
-    if (sceneChangeIdx >= 0) {
-        // 11/20 : 씬 전환 시 같은 프레임에 대기 중이던 이전 씬 지연 이벤트가 새 씬에 적용되지
-        // 않도록 정리
-        for (size_t i = 0; i < m_vecEvent.size(); ++i) {
-            if (m_vecEvent[i].eEven == EVENT_TYPE::CREATE_OBJECT) {
-                CObject* pPendingObj = (CObject*)m_vecEvent[i].lParam;
-                delete pPendingObj;
-            }
-        }
-        const tEvent sceneEvt = m_vecEvent[sceneChangeIdx];
-        m_vecEvent.clear();
-        Excute(sceneEvt);
-        return;
-    }
-
-    for (size_t i = 0; i < m_vecEvent.size(); ++i) {
-        Excute(m_vecEvent[i]);
-    }
+	}
 
 	m_vecEvent.clear();
 }
@@ -120,11 +91,7 @@ void CEventMgr::Excute(const tEvent& _eve)
         AI* pAI = (AI*)_eve.lParam;
         MON_STATE eNextState = (MON_STATE)_eve.wParam;
 
-        if (pAI != nullptr && pAI->GetOwner() != nullptr
-            && !pAI->GetOwner()->IsDead()) {
-            pAI->ChangeState(eNextState);
-        }
-        
+        pAI->ChangeState(eNextState);
     }
     break;
 	}

@@ -69,15 +69,7 @@ void CStageHUD::update()
 void CStageHUD::render(HDC canvas_)
 {
     if (!m_bIsActive)
-    {
         return;
-    }
-
-    auto* scene = CSceneMgr::GetInst()->GetCurScene();
-    auto* player1 = scene->GetPlayer(0);
-    auto* player2 = scene->GetPlayer(1);
-    assert(player1 != nullptr);
-    assert(player2 != nullptr);
 
     // 점수 띄우는 로직.
     {
@@ -96,18 +88,19 @@ void CStageHUD::render(HDC canvas_)
         SelectObject(canvas_, hOldFont);
     }
     {
-        auto currentHP = player1->getHP();
-        auto currentLv = player1->getLv();
+        auto Player = static_cast<CPlayer*>(CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0));
+        auto currentHP = Player->getHP();
+        auto currentLv = Player->getLv();
         // HP: N/3 Lv. N
 
         std::wstring str = L"";
-        if (player1->isMujeok)
+        if (Player->isMujeok)
         {
-            str = std::format(L"P1 HP: MUJEOK!!! Lv. {}", currentLv);
+            str = std::format(L"HP: MUJEOK!!! Lv. {}", currentLv);
         }
         else
         {
-            str = std::format(L"P1 HP: {}/3 Lv. {}", currentHP, currentLv);
+            str = std::format(L"HP: {}/3 Lv. {}", currentHP, currentLv);
         }
 
         HFONT hOldFont = (HFONT)SelectObject(canvas_, m_hLabelFont);
@@ -115,8 +108,6 @@ void CStageHUD::render(HDC canvas_)
         SetTextColor(canvas_, RGB(255, 255, 255));
 
         int bgX = (1280 - 540) / 2;
-        str += std::format(L"  P2 Lv. {}", player2->getLv());
-
         int y = 40;
         TextOut(canvas_, bgX + 20, y, str.c_str(), (int)str.length());
         SelectObject(canvas_, hOldFont);
@@ -126,7 +117,9 @@ void CStageHUD::render(HDC canvas_)
         const Vec2 position = GetPos();    // 중심 위치
         const Vec2 scale = GetScale();     // 하트 아이콘 크기 (픽셀 단위)
 
-        auto currentHP = player1->getHP();
+        auto Player = static_cast<CPlayer*>(CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0));
+        assert(Player != nullptr);
+        auto currentHP = Player->getHP();
 
         const float heartSpacing = scale.x + 10.f;  // 하트 간 간격 (하트 크기 + 여백 10px)
 

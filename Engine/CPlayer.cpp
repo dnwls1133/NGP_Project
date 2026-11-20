@@ -377,12 +377,6 @@ void CPlayer::ApplyItemReward()
     }
 }
 
-void CPlayer::ApplyConfirmedItemLevel(std::uint8_t level)
-{
-    m_iLvl = static_cast<int>(level);
-    CSoundMgr::GetInst()->PlaySE(m_pLvUpSE);
-}
-
 void CPlayer::OnCollisionEnter(CCollider* _pOther)
 {
 	CObject* pOtherObj = _pOther->GetObj();
@@ -414,7 +408,18 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
         m_iBoomb = 1;
 	}
 
-    // 아이템 보상은 CItem의 단일 획득자 확정 경로에서만 적용합니다.
+    /*if (pOtherObj->GetName() == L"Item")
+    {
+        CSoundMgr::GetInst()->PlaySE(m_pLvUpSE);
+        if (m_iLvl < 5)
+        {
+            m_iLvl += 1;
+        }
+        else
+        {
+            CRankMgr::GetInst()->CurrentRanking.Score += 100;
+        }
+    }*/
     if (pOtherObj->GetName() == L"Monster")
     {
         if (isMujeok)
@@ -423,6 +428,7 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
         if (m_iLvl > 1)
         {
             m_iLvl -= 1;
+
         }
     }
 }

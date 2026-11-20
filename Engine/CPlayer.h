@@ -46,7 +46,9 @@ public:
     void SetPlayerAtk(int _atk) { m_iAtk = _atk; }
     void ApplyItemReward();
 
-    void ApplyConfirmedItemLevel(std::uint8_t level);
+
+
+
 
     bool isMujeok = false;
 private:
