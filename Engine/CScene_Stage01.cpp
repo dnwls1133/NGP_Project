@@ -58,246 +58,11 @@ void CScene_Stage01::update()
 {
     auto& session = CCore::GetInst()->GetSession();
 
-    if (session.GetState() != network::SessionState::Started)
-        return;
-
-    // 입력 생성
-    std::uint8_t moveBits = protocol::MoveBit::NONE;
-    std::uint8_t fireHeld = 0;
-    if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
-    if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
-    if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
-    if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
-    if (KEY_HOLD(KEY::S)) fireHeld = 1;
-
-    if (session.IsHost())
-    {
-        using Clock = std::chrono::steady_clock;
-        const auto nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count());
-
-        // 세션이 승인한 참가자 입력을 호스트 입력 처리기에 전달한다.
-        protocol::PlayerInputPayload input{};
-        std::uint64_t receivedTimeMs = 0;
-        while (session.TryReceivePlayerInput(input, receivedTimeMs)) { m_hostInput.SubmitPlayerInput(input, receivedTimeMs); }
-
-        if (!m_bFail)
-        {
-            m_hostTickAccumulator += CTimeMgr::GetInst()->GetDT();
-
-            for (std::uint32_t tick = 0; tick < host::MAX_TICKS_PER_FRAME && m_hostTickAccumulator >= host::SIM_FIXED_DT; ++tick)
-            {
-                m_hostInput.ApplyInputNeutralization(nowMs);
-
-                if (auto* p0 = GetPlayer(0); p0 && !p0->IsDead())
-                    p0->Simulate(moveBits, fireHeld, host::SIM_FIXED_DT);
-
-                if (auto* p1 = GetPlayer(1); p1 && !p1->IsDead())
-                {
-                    p1->Simulate(
-                        m_hostInput.GetLastAppliedMoveBits(1),
-                        m_hostInput.GetLastAppliedFireHeld(1),
-                        host::SIM_FIXED_DT
-                    );
-                }
-
-                ++m_hostTick;
-
-                const auto ticksSinceStart = m_hostTick - session.GetStartInfo().startHostTick;
-                if (m_playerSpawnsQueued && ticksSinceStart % host::STATE_PUBLISH_INTERVAL_TICKS == 0)
-                {
-                    const auto* p0 = GetPlayer(0);
-                    const auto* p1 = GetPlayer(1);
-
-                    if (p0 && p1)
-                    {
-                        std::vector<protocol::ObjectStateRecord> states;
-                        states.push_back(p0->ExportStateRecord(m_playerObjectIds[0]));
-                        states.push_back(p1->ExportStateRecord(m_playerObjectIds[1]));
-
-                        // 몬스터의 상태 추출 함수가 준비되면 같은 틱의 레코드를 여기에 추가한다.
-
-                        const auto result = session.SendSnapshot(states, m_hostTick);
-
-#ifdef _DEBUG
-                        if (result != net::SendResult::Queued && result != net::SendResult::ReplacedPending && result != net::SendResult::QueueFull)
-                            std::cerr << "[HOST] STATE_SNAPSHOT enqueue failed, tick=" << m_hostTick << ", result=" << static_cast<int>(result) << '\n';
-#else
-                        (void)result;
-#endif
-                    }
-                }
-                m_hostTickAccumulator -= host::SIM_FIXED_DT;
-            }
-
-            for (CObject* obj : GetGroupObject(GROUP_TYPE::PROJ_PLAYER)) {
-                if (obj == nullptr || obj->IsDead() ||
-                    obj->GetObjectId() <= m_lastSyncedMissileObjectId)
-                    continue;
-
-                const auto spawn = obj->ExportSpawnPayload(m_nextSpawnEventId + 1);
-                const auto result = session.SendSpawn(spawn, m_hostTick);
-
-                if (result != net::SendResult::Queued)
-                {
-#ifdef _DEBUG
-                    std::cerr << "[HOST] Missile SPAWN enqueue failed, objectId=" << spawn.objectId << ", result=" << static_cast<int>(result) << '\n';
-#endif
-                    break;
-                }
-
-                m_nextSpawnEventId = spawn.eventId;
-                m_lastSyncedMissileObjectId = spawn.objectId;
-            }
-        }
-    }
-    else // Client
-    {
-        const auto inputRate = session.GetStartInfo().inputRateHz;
-        if (inputRate > 0)
-        {
-            const double interval = 1.0 / inputRate;
-            m_inputSendAccumulator += CTimeMgr::GetInst()->GetDT();
-
-            if (m_inputSendAccumulator >= interval)
-            {
-                // 프레임이 밀려도 이번 키 상태는 한 번만 등록한다.
-                m_inputSendAccumulator = std::fmod(m_inputSendAccumulator, interval);
-
-                const auto result = session.SendPlayerInput(moveBits, fireHeld);
-            }
-        }
-
-        network::ReceivedMessage received{};
-        protocol::SpawnPayload spawn{};
-        protocol::DespawnPayload despawn{};
-        protocol::CombatEventPayload combat{};
-        protocol::StateSnapshotPayload snapshot{};
-        protocol::ResultPayload result{};
-        protocol::PacketHeader header{};
-
-        while (true)
-        {
-            bool consumed = false;
-
-            if (session.TryReceiveSpawn(spawn, header))
-            {
-                consumed = true;
-
-                if (spawn.kind == protocol::NetObjectKind::PLAYER && spawn.ownerPlayerId < m_remotePlayers.size())
-                {
-                    auto& remote = m_remotePlayers[spawn.ownerPlayerId];
-                    if (remote.objectId != spawn.objectId)
-                    {
-                        remote.objectId = spawn.objectId;
-                        remote.lastSnapshotTick.reset();
-                    }
-                }
-                else if (spawn.kind == protocol::NetObjectKind::PROJ_PLAYER)
-                {
-                    Vec2 vel(spawn.vel.x / 100.f, spawn.vel.y / 100.f);
-
-                    float speed = vel.Length();
-
-                    CMissile* pMissile = new CMissile();
-                    pMissile->SetObjectId(spawn.objectId);
-                    pMissile->init(GROUP_TYPE::PROJ_PLAYER);
-                    pMissile->SetPos(Vec2(spawn.pos.x / 100.f, spawn.pos.y / 100.f));
-                    pMissile->SetScale(Vec2(25.f, 25.f));
-                    pMissile->SetDir(speed > 0.f ? vel : Vec2(0.f, 1.f));
-                    pMissile->ChangemType(static_cast<MISSILE_TYPE>(spawn.subType));
-                    pMissile->SetVec(static_cast<int>(speed));
-                    pMissile->SetType(spawn.patternType);
-                    pMissile->SetOwnerPlayerId(spawn.ownerPlayerId);
-                    pMissile->SetDamage(spawn.damage);
-                    pMissile->SetName(L"Missile_Player");
-                    AddObject(pMissile, GROUP_TYPE::PROJ_PLAYER);
-                }
-                else if (spawn.kind == protocol::NetObjectKind::MONSTER)
-                {
-                    // spawn.objectId를 기준으로 중복 생성을 막고, 호스트와 같은 ID와 초기 위치로 몬스터를 등록
-                }
-                continue;
-            }
-
-            if (session.TryReceiveDespawn(despawn, header))
-            {
-                consumed = true;
-
-                // despawn.objectId의 객체를 제거하는 코드 연결
-            }
-
-            if (session.TryReceiveCombatEvent(combat, header))
-            {
-                consumed = true;
-
-                // combat.kind에 따라 피해·사망·획득·점수 적용 코드 연결
-            }
-
-            if (session.TryReceiveSnapshot(snapshot, header))
-            {
-                consumed = true;
-
-                for (const auto& object : snapshot.objects)
-                {
-                    if (object.kind == protocol::NetObjectKind::MONSTER)
-                    {
-                        // 생성된 몬스터를 object.objectId로 찾아 보간 샘플 등록
-                        // 생성 전 도착한 상태는 건너뛰고 다음 스냅샷부터 적용
-                        continue;
-                    }
-
-                    if (object.kind != protocol::NetObjectKind::PLAYER)
-                        continue;
-
-                    for (protocol::PlayerSlot slot = 0; slot < m_remotePlayers.size(); ++slot)
-                    {
-                        auto& remote = m_remotePlayers[slot];
-
-                        if (remote.objectId == 0 || remote.objectId != object.objectId)
-                            continue;
-
-                        if (remote.lastSnapshotTick && snapshot.snapshotTick <= *remote.lastSnapshotTick)
-                            break;
-
-                        if (auto* player = GetPlayer(slot))
-                        {
-                            player->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
-                            remote.lastSnapshotTick = snapshot.snapshotTick;
-                        }
-
-                        break;
-                    }
-                }
-            }
-
-            if (session.TryReceiveResult(result, header))
-            {
-                consumed = true;
-
-                CRankMgr::GetInst()->CurrentRanking.Score = static_cast<int>(result.finalTeamScore);
-
-                if (result.outcome == protocol::MatchOutcome::DEFEAT)
-                    Fail();
-
-                else if (result.outcome == protocol::MatchOutcome::VICTORY)
-                    Clear();
-
-                continue;
-            }
-
-            if (!consumed)
-                break;
-        }
-    }
-
-
     if (!m_bFail)
     {
         CScene::update();
         m_dAcc += fDT;
     }
-
-
 
     if (m_bClear)
     {
@@ -320,34 +85,45 @@ void CScene_Stage01::update()
                 message.header.sequence = result.eventId;
                 message.payload = result;
 
-                session.EnqueueSend(net::Channel::Tcp, message);
+                const auto sendResult = session.EnqueueSend(net::Channel::Tcp, message);
+
+#ifdef _DEBUG
+                if (sendResult != net::SendResult::Queued)
+                {
+                    std::cerr << "[HOST] RESULT enqueue failed"
+                        << ", sessionId=" << message.header.sessionId
+                        << ", hostTick=" << message.header.hostTick
+                        << ", eventId=" << result.eventId
+                        << ", sendResult=" << static_cast<int>(sendResult) << '\n';
+                }
+#endif
+                m_pHud->SetActive(false);
+                CRankMgr::GetInst()->SetPlayer(nullptr);
+                CSoundMgr::GetInst()->PlayBGM(m_pClearTheme, false);
+
+                // const Vec2 resolution = CCore::GetInst()->GetResolution();
+                // auto clearCard = new CStageCard(false, L"Stage Clear");
+                // clearCard->SetName(L"Stage Clear Card");
+                // clearCard->SetPos(Vec2(resolution.x / 2.0f, resolution.y / 2.0f));
+                // clearCard->SetScale(Vec2(resolution.x, resolution.y));
+                // AddObject(clearCard, GROUP_TYPE::UI);
+                m_pClearCard = CResMgr::GetInst()->LoadTexture(L"Clear Card", L"texture\\Stage Cards\\StageClear\\slice_16.png");
+
+                for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS; ++slot)
+                {
+                    if (auto* player = GetPlayer(slot))
+                        player->setclear();
+                }
+                CCamera::GetInst()->FadeOut(3.f);
             }
 
-            m_pHud->SetActive(false);
-            CRankMgr::GetInst()->SetPlayer(nullptr);
-            CSoundMgr::GetInst()->PlayBGM(m_pClearTheme, false);
-
-            // const Vec2 resolution = CCore::GetInst()->GetResolution();
-            // auto clearCard = new CStageCard(false, L"Stage Clear");
-            // clearCard->SetName(L"Stage Clear Card");
-            // clearCard->SetPos(Vec2(resolution.x / 2.0f, resolution.y / 2.0f));
-            // clearCard->SetScale(Vec2(resolution.x, resolution.y));
-            // AddObject(clearCard, GROUP_TYPE::UI);
-            m_pClearCard = CResMgr::GetInst()->LoadTexture(L"Clear Card", L"texture\\Stage Cards\\StageClear\\slice_16.png");
-
-            for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS; ++slot)
+            m_fClearAcc += fDT;
+            if (m_fClearAcc > 3.f)
             {
-                if (auto* player = GetPlayer(slot))
-                    player->setclear();
-            }
-            CCamera::GetInst()->FadeOut(3.f);
-        }
-        m_fClearAcc += fDT;
-        if (m_fClearAcc > 3.f)
-        {
 
-            ChangeScene(SCENE_TYPE::CREDITS);
-            m_fClearAcc = 0;
+                ChangeScene(SCENE_TYPE::CREDITS);
+                m_fClearAcc = 0;
+            }
         }
     }
     else if (m_bFail)
@@ -428,6 +204,9 @@ void CScene_Stage01::update()
     }
     else
     {
+        if (session.GetState() != network::SessionState::Started)
+            return;
+
         if (KEY_TAP(KEY::SPACE))
         {
             for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS; ++slot)
@@ -437,34 +216,252 @@ void CScene_Stage01::update()
             }
         }
 
+        // 입력 생성
+        std::uint8_t moveBits = protocol::MoveBit::NONE;
+        std::uint8_t fireHeld = 0;
+        if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
+        if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
+        if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
+        if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
+        if (KEY_HOLD(KEY::S)) fireHeld = 1;
+
         if (session.IsHost())
         {
-            const double hostElapsedSec =
-                static_cast<double>(m_hostTick - session.GetStartInfo().startHostTick)
-                * host::SIM_FIXED_DT;
-            for (auto& evt : m_vEvents)
+            using Clock = std::chrono::steady_clock;
+            const auto nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count());
+
+            // 세션이 승인한 참가자 입력을 호스트 입력 처리기에 전달한다.
+            protocol::PlayerInputPayload input{};
+            std::uint64_t receivedTimeMs = 0;
+            while (session.TryReceivePlayerInput(input, receivedTimeMs)) { m_hostInput.SubmitPlayerInput(input, receivedTimeMs); }
+
+            if (!m_bFail)
             {
-                if (!evt.triggered && hostElapsedSec >= evt.triggerTime) // 11/15 m_dAcc를 hostElapsedSec으로 수정
+                m_hostTickAccumulator += CTimeMgr::GetInst()->GetDT();
+
+                for (std::uint32_t tick = 0; tick < host::MAX_TICKS_PER_FRAME && m_hostTickAccumulator >= host::SIM_FIXED_DT; ++tick)
                 {
-                    static bool trigger = false;
-                    if (hostElapsedSec >= 130.f && !trigger)
+                    m_hostInput.ApplyInputNeutralization(nowMs);
+
+                    if (auto* p0 = GetPlayer(0); p0 && !p0->IsDead())
+                        p0->Simulate(moveBits, fireHeld, host::SIM_FIXED_DT);
+
+                    if (auto* p1 = GetPlayer(1); p1 && !p1->IsDead())
                     {
-                        CSoundMgr::GetInst()->PlayBGM(m_pBossTheme);
-                        trigger = true;
+                        p1->Simulate(
+                            m_hostInput.GetLastAppliedMoveBits(1),
+                            m_hostInput.GetLastAppliedFireHeld(1),
+                            host::SIM_FIXED_DT
+                        );
                     }
 
-                    CMonster* pMon = CMonFactory::CreateMonster(evt.type, evt.mtype, evt.spawnPos, evt.targetPos, evt.exitPos);
-                    pMon->SetName(L"Monster");
-                    AddObject(pMon, GROUP_TYPE::MONSTER);
-                    evt.triggered = true;
+                    ++m_hostTick;
+
+                    const auto ticksSinceStart = m_hostTick - session.GetStartInfo().startHostTick;
+                    if (m_playerSpawnsQueued && ticksSinceStart % host::STATE_PUBLISH_INTERVAL_TICKS == 0)
+                    {
+                        const auto* p0 = GetPlayer(0);
+                        const auto* p1 = GetPlayer(1);
+
+                        if (p0 && p1)
+                        {
+                            std::vector<protocol::ObjectStateRecord> states;
+                            states.push_back(p0->ExportStateRecord(m_playerObjectIds[0]));
+                            states.push_back(p1->ExportStateRecord(m_playerObjectIds[1]));
+
+                            // 몬스터의 상태 추출 함수가 준비되면 같은 틱의 레코드를 여기에 추가한다.
+
+                            const auto result = session.SendSnapshot(states, m_hostTick);
+
+#ifdef _DEBUG
+                            if (result != net::SendResult::Queued && result != net::SendResult::ReplacedPending && result != net::SendResult::QueueFull)
+                                std::cerr << "[HOST] STATE_SNAPSHOT enqueue failed, tick=" << m_hostTick << ", result=" << static_cast<int>(result) << '\n';
+#else
+                            (void)result;
+#endif
+                        }
+                    }
+                    m_hostTickAccumulator -= host::SIM_FIXED_DT;
+                }
+
+                const double hostElapsedSec = static_cast<double>(m_hostTick - session.GetStartInfo().startHostTick) * host::SIM_FIXED_DT;
+                for (auto& evt : m_vEvents)
+                {
+                    if (!evt.triggered && hostElapsedSec >= evt.triggerTime) // 11/15 m_dAcc를 hostElapsedSec으로 수정
+                    {
+                        static bool trigger = false;
+                        if (hostElapsedSec >= 130.f && !trigger)
+                        {
+                            CSoundMgr::GetInst()->PlayBGM(m_pBossTheme);
+                            trigger = true;
+                        }
+
+                        CMonster* pMon = CMonFactory::CreateMonster(evt.type, evt.mtype, evt.spawnPos, evt.targetPos, evt.exitPos);
+                        pMon->SetName(L"Monster");
+                        AddObject(pMon, GROUP_TYPE::MONSTER);
+                        evt.triggered = true;
+                    }
+                }
+
+                for (CObject* obj : GetGroupObject(GROUP_TYPE::PROJ_PLAYER)) {
+                    if (obj == nullptr || obj->IsDead() || obj->GetObjectId() <= m_lastSyncedMissileObjectId)
+                        continue;
+
+                    const auto spawn = obj->ExportSpawnPayload(m_nextSpawnEventId + 1);
+                    const auto result = session.SendSpawn(spawn, m_hostTick);
+
+                    if (result != net::SendResult::Queued)
+                    {
+#ifdef _DEBUG
+                        std::cerr << "[HOST] Missile SPAWN enqueue failed, objectId=" << spawn.objectId << ", result=" << static_cast<int>(result) << '\n';
+#endif
+                        break;
+                    }
+
+                    m_nextSpawnEventId = spawn.eventId;
+                    m_lastSyncedMissileObjectId = spawn.objectId;
+                }
+            }
+        }
+        else // Client
+        {
+            const auto inputRate = session.GetStartInfo().inputRateHz;
+            if (inputRate > 0)
+            {
+                const double interval = 1.0 / inputRate;
+                m_inputSendAccumulator += CTimeMgr::GetInst()->GetDT();
+
+                if (m_inputSendAccumulator >= interval)
+                {
+                    // 프레임이 밀려도 이번 키 상태는 한 번만 등록한다.
+                    m_inputSendAccumulator = std::fmod(m_inputSendAccumulator, interval);
+
+                    const auto result = session.SendPlayerInput(moveBits, fireHeld);
                 }
             }
 
+            network::ReceivedMessage received{};
+            protocol::SpawnPayload spawn{};
+            protocol::DespawnPayload despawn{};
+            protocol::CombatEventPayload combat{};
+            protocol::StateSnapshotPayload snapshot{};
+            protocol::ResultPayload result{};
+            protocol::PacketHeader header{};
+
+            while (true)
+            {
+                bool consumed = false;
+
+                if (session.TryReceiveSpawn(spawn, header))
+                {
+                    consumed = true;
+
+                    if (spawn.kind == protocol::NetObjectKind::PLAYER && spawn.ownerPlayerId < m_remotePlayers.size())
+                    {
+                        auto& remote = m_remotePlayers[spawn.ownerPlayerId];
+                        if (remote.objectId != spawn.objectId)
+                        {
+                            remote.objectId = spawn.objectId;
+                            remote.lastSnapshotTick.reset();
+                        }
+                    }
+                    else if (spawn.kind == protocol::NetObjectKind::PROJ_PLAYER)
+                    {
+                        Vec2 vel(spawn.vel.x / 100.f, spawn.vel.y / 100.f);
+
+                        float speed = vel.Length();
+
+                        CMissile* pMissile = new CMissile();
+                        pMissile->SetObjectId(spawn.objectId);
+                        pMissile->init(GROUP_TYPE::PROJ_PLAYER);
+                        pMissile->SetPos(Vec2(spawn.pos.x / 100.f, spawn.pos.y / 100.f));
+                        pMissile->SetScale(Vec2(25.f, 25.f));
+                        pMissile->SetDir(speed > 0.f ? vel : Vec2(0.f, 1.f));
+                        pMissile->ChangemType(static_cast<MISSILE_TYPE>(spawn.subType));
+                        pMissile->SetVec(static_cast<int>(speed));
+                        pMissile->SetType(spawn.patternType);
+                        pMissile->SetOwnerPlayerId(spawn.ownerPlayerId);
+                        pMissile->SetDamage(spawn.damage);
+                        pMissile->SetName(L"Missile_Player");
+                        AddObject(pMissile, GROUP_TYPE::PROJ_PLAYER);
+                    }
+                    else if (spawn.kind == protocol::NetObjectKind::MONSTER)
+                    {
+                        // spawn.objectId를 기준으로 중복 생성을 막고, 호스트와 같은 ID와 초기 위치로 몬스터를 등록
+                    }
+                    continue;
+                }
+
+                if (session.TryReceiveDespawn(despawn, header))
+                {
+                    consumed = true;
+
+                    // despawn.objectId의 객체를 제거하는 코드 연결
+                }
+
+                if (session.TryReceiveCombatEvent(combat, header))
+                {
+                    consumed = true;
+
+                    // combat.kind에 따라 피해·사망·획득·점수 적용 코드 연결
+                }
+
+                if (session.TryReceiveSnapshot(snapshot, header))
+                {
+                    consumed = true;
+
+                    for (const auto& object : snapshot.objects)
+                    {
+                        if (object.kind == protocol::NetObjectKind::MONSTER)
+                        {
+                            // 생성된 몬스터를 object.objectId로 찾아 보간 샘플 등록
+                            // 생성 전 도착한 상태는 건너뛰고 다음 스냅샷부터 적용
+                            continue;
+                        }
+
+                        if (object.kind != protocol::NetObjectKind::PLAYER)
+                            continue;
+
+                        for (protocol::PlayerSlot slot = 0; slot < m_remotePlayers.size(); ++slot)
+                        {
+                            auto& remote = m_remotePlayers[slot];
+
+                            if (remote.objectId == 0 || remote.objectId != object.objectId)
+                                continue;
+
+                            if (remote.lastSnapshotTick && snapshot.snapshotTick <= *remote.lastSnapshotTick)
+                                break;
+
+                            if (auto* player = GetPlayer(slot))
+                            {
+                                player->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
+                                remote.lastSnapshotTick = snapshot.snapshotTick;
+                            }
+
+                            break;
+                        }
+                    }
+                }
+
+                if (session.TryReceiveResult(result, header))
+                {
+                    CRankMgr::GetInst()->CurrentRanking.Score = static_cast<int>(result.finalTeamScore);
+
+                    if (result.outcome == protocol::MatchOutcome::DEFEAT)
+                        Fail();
+
+                    else if (result.outcome == protocol::MatchOutcome::VICTORY)
+                        Clear();
+
+                    break;
+                }
+
+                if (!consumed)
+                    break;
+            }
         }
 
-
     }
-
 
 
 }
