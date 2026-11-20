@@ -90,6 +90,9 @@ void CScene_Lobby::Enter()
 #endif
 
     auto& session = CCore::GetInst()->GetSession();
+    m_pRoomCodeLogo = session.IsHost()
+        ? CResMgr::GetInst()->LoadTexture(L"ShareRoomCode", L"texture\\Sprite_Logo_ShareRoomCode.png")
+        : CResMgr::GetInst()->LoadTexture(L"EnterRoomCode", L"texture\\Sprite_Logo_EnterRoomCode.png");
 
     if (session.IsHost())
     {
@@ -308,9 +311,23 @@ void CScene_Lobby::render(HDC _dc)
             static_cast<LONG>(resolution.y * 0.59f)
         };
 
-        LPCTSTR message = session.IsHost()
-            ? TEXT("함께할 유저에게 코드를 공유하세요!")
-            : TEXT("함께할 유저의 코드를 입력해주세요");
+        if (m_pRoomCodeLogo && m_pRoomCodeLogo->Width() && m_pRoomCodeLogo->Height())
+        {
+            const int width = static_cast<int>(m_pRoomCodeLogo->Width());
+            const int height = static_cast<int>(m_pRoomCodeLogo->Height());
+            const int availableWidth = messageRect.right - messageRect.left;
+            const int availableHeight = messageRect.bottom - messageRect.top;
+            const float scaleX = static_cast<float>(availableWidth) / width;
+            const float scaleY = static_cast<float>(availableHeight) / height;
+            const float logoScale = scaleX < scaleY ? scaleX : scaleY;
+            const int drawWidth = static_cast<int>(width * logoScale);
+            const int drawHeight = static_cast<int>(height * logoScale);
+            const int drawX = messageRect.left + (availableWidth - drawWidth) / 2;
+            const int drawY = messageRect.top + (availableHeight - drawHeight) / 2;
+
+            TransparentBlt(_dc, drawX, drawY, drawWidth, drawHeight,
+                m_pRoomCodeLogo->GetDC(), 0, 0, width, height, RGB(255, 0, 255));
+        }
 
         const std::string roomCode = session.GetRoomCode();
         const std::wstring hostCode(roomCode.begin(), roomCode.end());
@@ -319,7 +336,6 @@ void CScene_Lobby::render(HDC _dc)
             ? hostCode.c_str()
             : inputRoomCode.c_str();
 
-        DrawText(_dc, message, -1, &messageRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
         DrawText(_dc, address, -1, &addressRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
         SelectObject(_dc, hOld);
