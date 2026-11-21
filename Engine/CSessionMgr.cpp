@@ -38,6 +38,18 @@ namespace network
         return 0;
     }
 
+    static std::string GetCombatEventKindText(const protocol::CombatEventKind& kind) noexcept
+    {
+        switch (kind)
+        {
+        case protocol::CombatEventKind::DAMAGE_APPLIED: return "DAMAGE_APPLIED";
+        case protocol::CombatEventKind::ENTITY_DIED: return "ENTITY_DIED";
+        case protocol::CombatEventKind::ITEM_PICKED: return "ITEM_PICKED";
+        case protocol::CombatEventKind::SCORE_CHANGED: return "SCORE_CHANGED";
+        default: return "";
+        }
+    }
+
 #ifdef _DEBUG
     static void LogGameEvent(const char* label, const protocol::Message& message)
     {
@@ -57,9 +69,42 @@ namespace network
         default:                                 return;
         }
 
-        std::cout << label
-            << " type=" << typeText
-            << " sessionId=" << header.sessionId
+        std::cout << label << " type=" << typeText;
+
+        switch (header.type)
+        {
+        case protocol::MessageType::COMBAT_EVENT: {
+            const auto* combat = std::get_if<protocol::CombatEventPayload>(&message.payload);
+            if (!combat)
+                break;
+
+            std::cout << " kind=" << GetCombatEventKindText(combat->kind);
+        } break;
+
+        case protocol::MessageType::RESULT: {
+            const auto* result = std::get_if<protocol::ResultPayload>(&message.payload);
+            if (!result)
+                break;
+
+            switch (result->outcome)
+            {
+            case protocol::MatchOutcome::DEFEAT:
+                std::cout << " MatchOutcome=DEFEAT";
+                break;
+            case protocol::MatchOutcome::VICTORY:
+                std::cout << " MatchOutcome=VICTORY";
+                break;
+            default:
+                std::cout << " MatchOutcome=INVALID";
+                break;
+            }
+                
+        } break;
+        default:
+            break;
+        }
+
+        std::cout << " sessionId=" << header.sessionId
             << " hostTick=" << header.hostTick
             << " eventId=" << eventId
             << " sequence=" << header.sequence << '\n';

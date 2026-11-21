@@ -297,9 +297,7 @@ void CScene_Stage01::update()
         m_fClearAcc += fDT;
         if (m_fClearAcc > 3.f)
         {
-
             ChangeScene(SCENE_TYPE::CREDITS);
-            m_fClearAcc = 0;
         }
     }
     else if (m_bFail)
@@ -370,8 +368,6 @@ void CScene_Stage01::update()
         {
             CRankMgr::GetInst()->SetPlayer(nullptr);
             ChangeScene(SCENE_TYPE::TITLE);
-
-            m_fClearAcc = 0.f;
         }
     }
     else
