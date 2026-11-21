@@ -30,6 +30,7 @@ class CMonster :
 protected:
    
     tMonInfo    m_tInfo;
+    float       m_fMaxHP = 0.f;
     double      dAccTime0;
     double      dAccTime1;
     AI*         m_pAI;
@@ -57,6 +58,9 @@ public:
     const tMonInfo& GetInfo() { return m_tInfo; }
     void SetAnim(MON_TYPE eType);
     bool GetsignalDead() { return m_signaldead; }
+    void SetConfirmedHP(float _hp) { m_tInfo.fHP = _hp; }
+    protocol::ObjectStateRecord ExportStateRecord() const;
+
     protocol::SpawnPayload
         ExportSpawnPayload(protocol::EventId eventId) const override;
 
@@ -69,6 +73,7 @@ private:
     void SetMonInfo(const tMonInfo& _info)
     {
         m_tInfo = _info;
+        m_fMaxHP = _info.fHP;
     }
    
 

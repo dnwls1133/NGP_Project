@@ -1,7 +1,10 @@
 ﻿#include "pch.h"
 
+#include "CCore.h"
+#include "CSessionMgr.h"
 #include "CSceneMgr.h"
 #include "CScene.h"
+#include "CScene_Stage01.h"
 
 #include "CMonster.h"
 #include "CPlayer.h"
@@ -93,6 +96,9 @@ CMonster::~CMonster()
 
 void CMonster::update()
 {
+    if (!CCore::GetInst()->GetSession().IsHost()) // 11/21 클라이언트는 AI 이동 발사 자체 삭제 실행 안함
+        return;
+
     m_pAI->update();
     Vec2 vBPos = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetPos();
     Vec2 vBScale = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetScale();
@@ -116,7 +122,13 @@ void CMonster::update()
         || vMonPos.y < vBPos.y - vBScale.y - 100.f
         || vMonPos.y > vBPos.y + vBScale.y + 100.f)
     {
-        DeleteObject(this);
+        if (auto* stage = dynamic_cast<CScene_Stage01*>(CSceneMgr::GetInst()
+            ->GetCurScene()))
+        {
+            stage->QueueDespawn(GetObjectId(),
+                protocol::DespawnReason::OUT_OF_BOUNDS);
+            DeleteObject(this);
+        }
     }
    
 }
@@ -229,16 +241,35 @@ void CMonster::OnCollisionEnter(CCollider* _pOther)
         }
         m_tInfo.fHP = max(0.f, m_tInfo.fHP - iDamage);
 
+        bool justDied = false;
+        int scoreDelta = 0;
+
         if (m_tInfo.fHP <= 0 && m_signaldead == false)
         {
             CSoundMgr::GetInst()->PlaySE(m_pDeadSE);
             m_pAI->ChangeState(MON_STATE::DEAD);
             m_signaldead = true;
+            justDied = true;
             SetCollideroff();
             //DeleteObject(this);
 
+            scoreDelta = ((int)m_tInfo.eMType) * 250;
             CRankMgr::GetInst()->CurrentRanking.Score +=
                 ((int)m_tInfo.eMType) * 250;
+        }
+
+        // 11/21 호스트가 확정한 적 피격 사망 팀 점수를 COMBAT_EVENT로 큐에 등록
+        if (auto* stage = dynamic_cast<CScene_Stage01*>(CSceneMgr::GetInst()
+            ->GetCurScene()))
+        {
+            stage->ReportMonsterCombat(
+                GetObjectId(),
+                pMissile->GetObjectId(),
+                pMissile->GetOwnerPlayerId(),
+                static_cast<std::int32_t>(m_tInfo.fHP),
+                justDied,
+                scoreDelta,
+                static_cast<std::uint32_t>(CRankMgr::GetInst()->CurrentRanking.Score));
         }
        
     }
@@ -301,6 +332,22 @@ void CMonster::SetAnim(MON_TYPE eType)
     }
    
    
+}
+
+protocol::ObjectStateRecord CMonster::ExportStateRecord() const
+{
+    protocol::ObjectStateRecord rec{};
+    rec.objectId = GetObjectId();
+    rec.kind = protocol::NetObjectKind::MONSTER;
+    rec.subType = static_cast<std::uint8_t>(m_tInfo.eMType);
+    rec.alive = (!IsDead() && !m_signaldead && m_tInfo.fHP > 0.f) ? 1 : 0;
+    rec.fsmState = m_signaldead ? 2 : (m_bHit ? 1 : 0);
+    rec.pos.x = static_cast<std::int32_t>(GetPos().x * 100.f);
+    rec.pos.y = static_cast<std::int32_t>(GetPos().y * 100.f);
+    rec.hp = static_cast<std::int32_t>(m_tInfo.fHP);
+    rec.maxHp = static_cast<std::int32_t>(m_fMaxHP);
+    return rec;
+
 }
 
 protocol::SpawnPayload CMonster::ExportSpawnPayload(protocol::EventId eventId) const
