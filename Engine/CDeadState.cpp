@@ -204,10 +204,14 @@ void CDeadState::Exit()
         return;
     m_bExited = true;
 
-    if (GetMonster()->GetInfo().eMType == MON_TYPE::BOSS)
-    {
-        CScene_Stage01* curscene = (CScene_Stage01*)CSceneMgr::GetInst()->GetCurScene();
-        curscene->Clear();
+    CScene_Stage01* cursene = dynamic_cast<CScene_Stage01*>
+        (CSceneMgr::GetInst()->GetCurScene());
+    if (cursene != nullptr) {
+        if (GetMonster()->GetInfo().eMType == MON_TYPE::BOSS) {
+            cursene->Clear();
+        }
+        cursene->QueueDespawn(GetMonster()->GetObjectId(),
+            protocol::DespawnReason::DESTROYED);
     }
     
     DeleteObject(GetMonster());

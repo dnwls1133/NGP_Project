@@ -45,8 +45,8 @@ public:
     }
    
 
-	bool IsDead() { return !m_bAlive; }
-	bool IsCollideroff() { return m_bCollideroff; }
+	bool IsDead() const { return !m_bAlive; }
+	bool IsCollideroff() const { return m_bCollideroff; }
 
 
 	Vec2 GetPos() const { return m_vPos; }

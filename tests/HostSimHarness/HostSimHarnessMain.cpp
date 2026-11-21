@@ -867,6 +867,55 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1121Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 3주차 공동 일반 전투 통합: 적 HP·제거·아이템 단일 획득자·팀 점수·스냅샷 권위 상태 일치 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 6);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 4);
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 2, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 20'000 }, {}, 10, 1);
+            const ObjectId proj0 = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 0, FixedVec2{ 15'000, 20'000 }, {}, 1, 6);
+            const ObjectId proj1 = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 1, FixedVec2{ 15'000, 20'000 }, {}, 1, 4);
+            const ObjectId itemId = engine.RequestSpawn(NetObjectKind::ITEM, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 30'000 }, {}, 1, 0);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // 동시 피격(6 + 4 = 10 -> HP 0, 사망 +500점) 및 동시 아이템 접촉(동률 -> P0 레벨 2, P1 레벨 1 유지)
+            const std::size_t hitCount = engine.ResolveSimultaneousProjectileHits(monId, { proj1, proj0 }, sink);
+            const PlayerSlot itemWinner = engine.ResolveItemPickup(itemId, { 1, 0 }, sink);
+
+            // 3틱(50ms) 진행 -> 틱 종료 시 죽은 몬스터/탄환/아이템 제거(DESPAWN) 및 20Hz 스냅샷 발행
+            engine.StepFrame(50'000, script, sink);
+
+            bool snapshotHasOnlyPlayers = false;
+            if (!sink.GetCapturedBatches().empty())
+            {
+                const auto& lastMsg = sink.GetCapturedBatches().back().parts.front();
+                if (const auto* snap = std::get_if<StateSnapshotPayload>(&lastMsg.payload))
+                {
+                    snapshotHasOnlyPlayers = (snap->objects.size() == 2)
+                        && (engine.FindObjectById(monId) == nullptr)
+                        && (engine.FindObjectById(itemId) == nullptr);
+                }
+            }
+
+            Check(hitCount == 2
+                && itemWinner == 0
+                && engine.GetTeamScore() == 500
+                && engine.FindObjectById(p0Id)->subType == 2
+                && engine.FindObjectById(p1Id)->subType == 1
+                && snapshotHasOnlyPlayers,
+                "HostSim1121: Authoritative combat state matches across enemy HP/despawn, single item winner, team score, and snapshot",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -887,6 +936,7 @@ int main()
     RunHostSim1118Suite(counters);
     RunHostSim1119Suite(counters);
     RunHostSim1120Suite(counters);
+    RunHostSim1121Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

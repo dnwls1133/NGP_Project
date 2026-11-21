@@ -64,6 +64,15 @@ public:
     void Fail() { m_bFail = true; }
     void InitEvents();
     bool ConfirmItemPickup(protocol::ObjectId itemId, protocol::PlayerSlot slot);
+    void ReportMonsterCombat(
+        protocol::ObjectId monsterId,
+        protocol::ObjectId missileId,
+        protocol::PlayerSlot ownerSlot,
+        std::int32_t confirmedHp,
+        bool died,
+        std::int32_t scoreDelta,
+        std::uint32_t teamScore); 
+    void QueueDespawn(protocol::ObjectId objectId, protocol::DespawnReason reason);
 public:
     CScene_Stage01();
     ~CScene_Stage01();

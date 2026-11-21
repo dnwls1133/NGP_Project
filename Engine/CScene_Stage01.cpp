@@ -124,6 +124,61 @@ bool CScene_Stage01::ConfirmItemPickup(protocol::ObjectId itemId, protocol::Play
     return true;
 }
 
+void CScene_Stage01::ReportMonsterCombat(protocol::ObjectId monsterId, protocol::ObjectId missileId, protocol::PlayerSlot ownerSlot, std::int32_t confirmedHp, bool died, std::int32_t scoreDelta, std::uint32_t teamScore)
+{
+    auto& session = CCore::GetInst()->GetSession();
+    if (!session.IsHost() || session.GetState() != network::SessionState::Started
+        || monsterId == 0)
+        return;
+
+    protocol::CombatEventPayload combat{};
+    combat.eventId = ++m_nextSpawnEventId;
+    combat.kind = protocol::CombatEventKind::DAMAGE_APPLIED;
+    combat.instigatorPlayerId = ownerSlot;
+    combat.sourceObjectId = missileId;
+    combat.targetObjectId = monsterId;
+    combat.confirmedHp = confirmedHp;
+    combat.scoreDelta = scoreDelta;
+    combat.teamScore = teamScore;
+
+    protocol::Message msg{};
+    msg.header.type = protocol::MessageType::COMBAT_EVENT;
+    msg.header.sessionId = session.GetSessionId();
+    msg.header.sequence = combat.eventId;
+    msg.header.hostTick = m_hostTick;
+    msg.payload = combat;
+    m_pendingItemEvents.push_back(msg);
+
+    if (died) {
+        combat.eventId = ++m_nextSpawnEventId;
+        combat.kind = protocol::CombatEventKind::ENTITY_DIED;
+        msg.header.sequence = combat.eventId;
+        msg.payload = combat;
+        m_pendingItemEvents.push_back(msg);
+    }
+    
+}
+
+void CScene_Stage01::QueueDespawn(protocol::ObjectId objectId, protocol::DespawnReason reason)
+{
+    auto& session = CCore::GetInst()->GetSession();
+    if (!session.IsHost() || session.GetState() != network::SessionState::Started
+        || objectId == 0)
+        return;
+    protocol::DespawnPayload despawn{};
+    despawn.eventId = ++m_nextSpawnEventId;
+    despawn.objectId = objectId;
+    despawn.reason = reason;
+
+    protocol::Message msg{};
+    msg.header.type = protocol::MessageType::DESPAWN;
+    msg.header.sessionId = session.GetSessionId();
+    msg.header.sequence = despawn.eventId;
+    msg.header.hostTick = m_hostTick;
+    msg.payload = despawn;
+    m_pendingItemEvents.push_back(msg);
+}
+
 bool CScene_Stage01::FlushItemEvents()
 {
     auto& session = CCore::GetInst()->GetSession();
@@ -411,7 +466,14 @@ void CScene_Stage01::update()
                             states.push_back(p0->ExportStateRecord(m_playerObjectIds[0]));
                             states.push_back(p1->ExportStateRecord(m_playerObjectIds[1]));
 
-                            // 몬스터의 상태 추출 함수가 준비되면 같은 틱의 레코드를 여기에 추가한다.
+                            // 11/21: 활성 몬스터 상태를 같은 틱의 스냅샷에 추가
+                            for (CObject* obj : GetGroupObject(GROUP_TYPE::MONSTER))
+                            {
+                                if (obj == nullptr || obj->IsDead() || obj->GetObjectId() == 0)
+                                    continue;
+                                states.push_back(static_cast<const CMonster*>(obj)->ExportStateRecord());
+                            }
+
 
                             const auto result = session.SendSnapshot(states, m_hostTick);
 
@@ -512,6 +574,18 @@ void CScene_Stage01::update()
                     else if (spawn.kind == protocol::NetObjectKind::MONSTER)
                     {
                         // spawn.objectId를 기준으로 중복 생성을 막고, 호스트와 같은 ID와 초기 위치로 몬스터를 등록
+                        if (FindObjectById(spawn.objectId) == nullptr)
+                        {
+                            Vec2 initPos(spawn.pos.x / 100.f, spawn.pos.y / 100.f);
+                            CMonster* pMon = CMonFactory::CreateMonster(
+                                static_cast<MON_TYPE>(spawn.subType),
+                                static_cast<MISSILE_PTRN>(spawn.patternType),
+                                initPos, initPos, initPos);
+                            pMon->SetObjectId(spawn.objectId);
+                            pMon->SetConfirmedHP(static_cast<float>(spawn.hp));
+                            pMon->SetName(L"Monster");
+                            AddObject(pMon, GROUP_TYPE::MONSTER);
+                        }
                     }
                     continue;
                 }
@@ -521,6 +595,10 @@ void CScene_Stage01::update()
                     consumed = true;
 
                     // despawn.objectId의 객체를 제거하는 코드 연결
+                    if (CObject* obj = FindObjectById(despawn.objectId))
+                    {
+                        DeleteObject(obj);
+                    }
                 }
 
                 if (session.TryReceiveCombatEvent(combat, header))
@@ -555,6 +633,15 @@ void CScene_Stage01::update()
                         LogItemPickupApplied(session, combat);
 #endif
                     }
+                    else if (combat.kind == protocol::CombatEventKind::DAMAGE_APPLIED
+                        || combat.kind == protocol::CombatEventKind::ENTITY_DIED)
+                    {
+                        if (auto* mon = dynamic_cast<CMonster*>(FindObjectById(combat.targetObjectId)))
+                            mon->SetConfirmedHP(static_cast<float>(combat.confirmedHp));
+
+                        if (combat.kind == protocol::CombatEventKind::ENTITY_DIED)
+                            CRankMgr::GetInst()->CurrentRanking.Score = static_cast<int>(combat.teamScore);
+                    }
                 }
 
                 if (session.TryReceiveSnapshot(snapshot, header))
@@ -567,6 +654,13 @@ void CScene_Stage01::update()
                         {
                             // 생성된 몬스터를 object.objectId로 찾아 보간 샘플 등록
                             // 생성 전 도착한 상태는 건너뛰고 다음 스냅샷부터 적용
+                            if (auto* mon = dynamic_cast<CMonster*>(FindObjectById(object.objectId)))
+                            {
+                                mon->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
+                                mon->SetConfirmedHP(static_cast<float>(object.hp));
+                            }
+
+
                             continue;
                         }
 
