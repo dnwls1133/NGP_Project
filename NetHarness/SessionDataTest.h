@@ -10,10 +10,11 @@ namespace session_data_test
         Spawn,
         Lifecycle,
         Events,
-        DuplicateEvents
+        DuplicateEvents,
+        SnapshotSize
     };
 
-    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, Mode mode = Mode::Data);
+    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, Mode mode = Mode::Data, std::size_t snapshotObjectCount = 0);
     bool RunSnapshotReplayTest();
     bool Compare(const std::string& hostPath, const std::string& clientPath);
 }
