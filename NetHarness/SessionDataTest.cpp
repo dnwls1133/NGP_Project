@@ -161,6 +161,135 @@ namespace session_data_test
         return message;
     }
 
+    static std::vector<protocol::ObjectStateRecord> MakeSnapshotSizeStates(std::size_t objectCount)
+    {
+        std::vector<protocol::ObjectStateRecord> states;
+        states.reserve(objectCount);
+
+        for (std::size_t index = 0; index < objectCount; ++index)
+        {
+            protocol::ObjectStateRecord state{};
+            state.objectId = static_cast<protocol::ObjectId>(index + 1);
+            state.kind = protocol::NetObjectKind::MONSTER;
+            state.pos.x = static_cast<std::int32_t>(state.objectId) * 100;
+            state.hp = 100;
+            state.maxHp = 100;
+
+            states.push_back(state);
+        }
+
+        return states;
+    }
+
+    static bool QueueSnapshotSizeCase(network::CSessionMgr& session, std::size_t objectCount, std::uint32_t hostTick)
+    {
+        const auto states = MakeSnapshotSizeStates(objectCount);
+        const auto result = session.SendSnapshot(states, hostTick);
+
+        if (result != net::SendResult::Queued)
+        {
+            std::cerr << "[FAIL] Snapshot enqueue failed"
+                << ", objects=" << states.size()
+                << ", hostTick=" << hostTick
+                << ", result=" << static_cast<int>(result) << '\n';
+            return false;
+        }
+
+        std::cout << "[HOST] Snapshot queued" << ", objects=" << states.size() << ", hostTick=" << hostTick << '\n';
+
+        return true;
+    }
+
+    static bool ReceiveSnapshotSizeCase(network::CSessionMgr& session, std::size_t objectCount, std::uint32_t hostTick)
+    {
+        const auto expectedStates = MakeSnapshotSizeStates(objectCount);
+        constexpr std::size_t objectsPerPart = protocol::MAX_SNAPSHOT_OBJECTS_PER_PACKET;
+        const std::size_t partCount = (std::max)(std::size_t{ 1 },
+            objectCount / objectsPerPart + (objectCount % objectsPerPart != 0));
+
+        std::vector<bool> seen(partCount, false);
+        std::size_t receivedParts = 0;
+        std::size_t totalBytes = 0;
+
+        const auto deadline = Clock::now() + std::chrono::seconds(5);
+
+        while (Clock::now() < deadline)
+        {
+            session.Update();
+
+            if (session.GetState() != SessionState::Started)
+            {
+                std::cerr << "[FAIL] Session ended during snapshot size test\n";
+                return false;
+            }
+
+            protocol::StateSnapshotPayload snapshot{};
+            protocol::PacketHeader header{};
+
+            while (session.TryReceiveSnapshot(snapshot, header))
+            {
+                const std::size_t index = snapshot.partIndex;
+
+                if (header.sessionId != session.GetSessionId() ||
+                    header.hostTick != hostTick ||
+                    snapshot.snapshotTick != hostTick ||
+                    snapshot.partCount != partCount ||
+                    index >= partCount)
+                {
+                    std::cerr << "[FAIL] Snapshot session, tick or part index mismatch\n";
+                    return false;
+                }
+
+                const std::size_t offset = index * objectsPerPart;
+                const std::size_t expectedObjectCount = (std::min)(objectsPerPart, objectCount - offset);
+                const std::size_t expectedBytes = protocol::HEADER_BYTES + protocol::SNAPSHOT_HEADER_BYTES
+                    + expectedObjectCount * protocol::OBJECT_STATE_RECORD_BYTES;
+
+                if (snapshot.objects.size() != expectedObjectCount ||
+                    header.totalBytes != expectedBytes ||
+                    header.totalBytes > protocol::MAX_UDP_BYTES)
+                {
+                    std::cerr << "[FAIL] Snapshot part size mismatch"
+                        << ", part=" << index + 1
+                        << ", objects=" << snapshot.objects.size()
+                        << ", bytes=" << header.totalBytes << '\n';
+                    return false;
+                }
+
+                const auto expectedPart = std::span{ expectedStates }.subspan(offset, expectedObjectCount);
+
+                if (!std::equal(snapshot.objects.begin(), snapshot.objects.end(), expectedPart.begin(), expectedPart.end()))
+                {
+                    std::cerr << "[FAIL] Snapshot object fields mismatch" << ", part=" << index + 1 << '\n';
+                    return false;
+                }
+
+                if (seen[index])
+                    continue;
+
+                seen[index] = true;
+                ++receivedParts;
+                totalBytes += header.totalBytes;
+
+                std::cout << "[CLIENT] part=" << index + 1
+                    << '/' << partCount
+                    << ", objects=" << snapshot.objects.size()
+                    << ", bytes=" << header.totalBytes << '\n';
+
+                if (receivedParts == partCount)
+                {
+                    std::cout << "[PASS] objects=" << expectedStates.size() << ", parts=" << receivedParts << ", totalBytes=" << totalBytes << '\n';
+                    return true;
+                }
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        std::cerr << "[FAIL] Snapshot receive timeout" << ", parts=" << receivedParts << '/' << partCount << '\n';
+        return false;
+    }
+
     net::SnapshotBatch MakeSnapshot(std::uint32_t sessionId, std::uint32_t number)
     {
         const std::uint32_t tick = START_TICK + number * 3;
@@ -1271,8 +1400,50 @@ namespace session_data_test
         return false;
     }
 
-    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, Mode mode)
+    static bool RunSnapshotSizePhase(network::CSessionMgr& session, std::size_t objectCount)
     {
+        const auto hostTick = session.GetStartInfo().startHostTick;
+
+        if (!session.IsHost())
+            return ReceiveSnapshotSizeCase(session, objectCount, hostTick);
+
+        if (!QueueSnapshotSizeCase(session, objectCount, hostTick))
+            return false;
+
+        const auto deadline = Clock::now() + std::chrono::seconds(8);
+
+        while (Clock::now() < deadline)
+        {
+            session.Update();
+
+            if (session.GetState() == SessionState::Disconnected)
+            {
+                std::cout << "[HOST] Client closed. Check client verification result.\n";
+                return true;
+            }
+
+            if (session.GetState() != SessionState::Started)
+            {
+                std::cerr << "[FAIL] Session ended during snapshot size test\n";
+                return false;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        std::cerr << "[FAIL] Timed out waiting for client to close\n";
+        return false;
+    }
+
+    bool Run(bool host, const std::string& hostIp, unsigned short tcpPort, unsigned short udpPort, Mode mode, std::size_t snapshotObjectCount)
+    {
+        constexpr std::size_t maxSnapshotObjects = protocol::MAX_SNAPSHOT_OBJECTS_PER_PACKET * net::MAX_SNAPSHOT_PARTS_PER_BATCH;
+        if (mode == Mode::SnapshotSize && snapshotObjectCount > maxSnapshotObjects)
+        {
+            std::cerr << "[FAIL] Snapshot object count must be between 0 and " << maxSnapshotObjects << '\n';
+            return false;
+        }
+
         network::CSessionMgr session(*network::CNetworkMgr::GetInst());
 
         const auto started = host
@@ -1364,7 +1535,9 @@ namespace session_data_test
                     {
                         bool eventPassed;
 
-                        if (mode == Mode::Events || mode == Mode::DuplicateEvents)
+                        if (mode == Mode::SnapshotSize)
+                            eventPassed = RunSnapshotSizePhase(session, snapshotObjectCount);
+                        else if (mode == Mode::Events || mode == Mode::DuplicateEvents)
                             eventPassed = RunGameEventPhase(session, mode == Mode::DuplicateEvents);
                         else
                             eventPassed = RunSpawnPhase(session, mode == Mode::Lifecycle);

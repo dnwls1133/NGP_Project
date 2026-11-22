@@ -96,8 +96,8 @@ namespace
 
         std::cout
             << "\nSession data test:\n"
-            << "  NetHarness.exe session-data-host [--spawn|--lifecycle|--events|--duplicate-events]\n"
-            << "  NetHarness.exe session-data-client <Host-IP> [--spawn|--lifecycle|--events|--duplicate-events]\n"
+            << "  NetHarness.exe session-data-host [--spawn|--lifecycle|--events|--duplicate-events|--snapshot-size <object-count>]\n"
+            << "  NetHarness.exe session-data-client <Host-IP> [--spawn|--lifecycle|--events|--duplicate-events|--snapshot-size <object-count>]\n"
             << "  NetHarness.exe session-data-compare <host-trace> <client-trace>\n"
             << "  NetHarness.exe snapshot-replay-test\n";
 
@@ -273,11 +273,31 @@ namespace
         const int requiredArgc = host ? 2 : 3;
         auto mode = Mode::Data;
 
+        std::size_t snapshotObjectCount = 0;
+
         if (argc > requiredArgc)
         {
             const std::string_view option = argv[requiredArgc];
 
-            if (option == "--spawn")
+            if (option == "--snapshot-size")
+            {
+                if (argc != requiredArgc + 2)
+                    return InvalidArguments();
+
+                const std::string_view countText = argv[requiredArgc + 1];
+                const auto* end = countText.data() + countText.size();
+                const auto parsed = std::from_chars(countText.data(), end, snapshotObjectCount);
+
+                if (parsed.ec != std::errc{} || parsed.ptr != end)
+                    return InvalidArguments();
+
+                mode = Mode::SnapshotSize;
+            }
+            else if (argc != requiredArgc + 1)
+            {
+                return InvalidArguments();
+            }
+            else if (option == "--spawn")
                 mode = Mode::Spawn;
             else if (option == "--lifecycle")
                 mode = Mode::Lifecycle;
@@ -289,7 +309,7 @@ namespace
                 return InvalidArguments();
         }
 
-        return session_data_test::Run(host, host ? "" : argv[2], TCP_PORT, UDP_PORT, mode) ? 0 : 1;
+        return session_data_test::Run(host, host ? "" : argv[2], TCP_PORT, UDP_PORT, mode, snapshotObjectCount) ? 0 : 1;
     }
 
     int RunTcpNetworkCommand(bool host, bool sendTest)
@@ -360,8 +380,8 @@ namespace
             { "flow-host", 2, 2, [](int, char**) { return Run(true, "", TCP_PORT, UDP_PORT, TestMode::GameFlow) ? 0 : 1; } },
             { "flow-client", 3, 3, [](int, char** args) { return Run(false, args[2], TCP_PORT, UDP_PORT, TestMode::GameFlow) ? 0 : 1; } },
             { "pong", 2, 2, [](int, char**) { return pong_test::Run(TCP_PORT, UDP_PORT) ? 0 : 1; } },
-            { "session-data-host", 2, 3, [](int count, char** args) { return RunSessionDataCommand(true, count, args); } },
-            { "session-data-client", 3, 4, [](int count, char** args) { return RunSessionDataCommand(false, count, args); } },
+            { "session-data-host", 2, 4, [](int count, char** args) { return RunSessionDataCommand(true, count, args); } },
+            { "session-data-client", 3, 5, [](int count, char** args) { return RunSessionDataCommand(false, count, args); } },
             { "session-data-compare", 4, 4, [](int, char** args) { return session_data_test::Compare(args[2], args[3]) ? 0 : 1; } },
             { "snapshot-replay-test", 2, 2, [](int, char**) { return session_data_test::RunSnapshotReplayTest() ? 0 : 1; } },
         };
