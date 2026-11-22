@@ -297,9 +297,7 @@ void CScene_Stage01::update()
         m_fClearAcc += fDT;
         if (m_fClearAcc > 3.f)
         {
-
             ChangeScene(SCENE_TYPE::CREDITS);
-            m_fClearAcc = 0;
         }
     }
     else if (m_bFail)
@@ -370,8 +368,6 @@ void CScene_Stage01::update()
         {
             CRankMgr::GetInst()->SetPlayer(nullptr);
             ChangeScene(SCENE_TYPE::TITLE);
-
-            m_fClearAcc = 0.f;
         }
     }
     else
@@ -493,11 +489,11 @@ void CScene_Stage01::update()
                 {
                     if (!evt.triggered && hostElapsedSec >= evt.triggerTime) // 11/15 m_dAcc를 hostElapsedSec으로 수정
                     {
-                        static bool trigger = false;
-                        if (hostElapsedSec >= 130.f && !trigger)
+                        
+                        if (hostElapsedSec >= 130.f && !m_bBossBgmPlayed)
                         {
                             CSoundMgr::GetInst()->PlayBGM(m_pBossTheme);
-                            trigger = true;
+                            m_bBossBgmPlayed = true;
                         }
 
                         CMonster* pMon = CMonFactory::CreateMonster(evt.type, evt.mtype, evt.spawnPos, evt.targetPos, evt.exitPos);
@@ -823,6 +819,7 @@ void CScene_Stage01::Enter()
     m_inputSendAccumulator = 0.0;
     m_remotePlayers = {};
     m_pendingItemEvents.clear();
+    m_bBossBgmPlayed = false;
 
     // Monster Object 추가
 
@@ -923,6 +920,7 @@ void CScene_Stage01::Exit()
     m_fClearAcc = 0.f;
     m_vEvents.clear();
     m_pendingSpawns.clear();
+    m_bBossBgmPlayed = false;
     CColliderMgr::GetInst()->Reset();
 }
 

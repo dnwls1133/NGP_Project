@@ -460,7 +460,7 @@ void CreatePenMissile(Vec2 vMonPos, Vec2 vMonScale, float fXdir, MISSILE_TYPE _e
     vMissilePos.y += 50.f;
 
     CScene* CurScene = CSceneMgr::GetInst()->GetCurScene();
-    CObject* pInfo = CurScene->GetPlayer(0);
+    if (CurScene->SelectNearestAlivePlayer(vMissilePos) == nullptr) return;
     Vec2 vpPos = Vec2(fXdir, -3 * PI / 2.f);
 
     vpPos.Normalize();
