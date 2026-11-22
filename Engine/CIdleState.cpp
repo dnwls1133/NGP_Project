@@ -24,11 +24,9 @@ CIdleState::~CIdleState()
 void CIdleState::update()
 {
     // 가만히 있는다.
-    CPlayer* pPlayer = (CPlayer*)CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0);
     Vec2 vBackPos = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetPos();
     Vec2 vBackScale = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetScale();
     // Player 의 위치 체크
-    Vec2 vPlayerPos = pPlayer->GetPos();
 
     // 몬스터의 범위 안에 들어오면 추적 상태로 전환
     CMonster* pMonster = GetMonster();
@@ -119,6 +117,7 @@ void CIdleState::update()
         {
             GetMonster()->SetDestPos(Vec2(vBackPos.x + 100.f, vBackPos.y - 200.f));
             ChangeAIState(GetAi(), MON_STATE::MBOSS0);
+            return;
         }
         break;
       

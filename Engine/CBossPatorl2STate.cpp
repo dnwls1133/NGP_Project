@@ -50,8 +50,9 @@ void CBossPatorl2STate::update()
     if (fLen < GetMonster()->GetInfo().fRecogRange)
     {
         GetMonster()->SetDestPos(m_pDesPos[m_iDestType++]);
-        if (m_iDestType > 4)
+        if (!m_bPhaseChanged && m_iDestType > 4)
         {
+            m_bPhaseChanged = true;
             m_iDestType = 0;
             m_fFlip = 1.f;
             m_fMTimeAcc = 0.f;
@@ -61,6 +62,7 @@ void CBossPatorl2STate::update()
             GetMonster()->SetSpeed(300.f);
             ChangeAIState(GetAi(), MON_STATE::MBOSS2);
             GetMonster()->SetMissiletype(MISSILE_PTRN::PTRN1);
+            return;
         }
     }
     vMonPos += vDir * GetMonster()->GetInfo().fSpeed * 0.5f * fDT;
@@ -139,6 +141,7 @@ void CBossPatorl2STate::update()
 
 void CBossPatorl2STate::Enter()
 {
+    m_bPhaseChanged = false;    
     Vec2 vResolution = CCore::GetInst()->GetResolution();
     Vec2 vBackPos = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetPos();
     Vec2 vBackScale = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetScale();

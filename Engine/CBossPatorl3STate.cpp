@@ -52,8 +52,9 @@ void CBossPatorl3STate::update()
     float fLen = vDiff.Length();
     if (fLen < GetMonster()->GetInfo().fRecogRange)
     {
-        if (m_iDestType > 2)
+        if (!m_bPhaseChanged && m_iDestType > 2)
         {
+            m_bPhaseChanged = true;
             m_iDestType = 0;
             m_fXFlip = 1.f;
             m_fRXdir = -2.f * PI;
@@ -65,6 +66,7 @@ void CBossPatorl3STate::update()
             GetMonster()->SetSpeed(100.f);
             GetMonster()->SetMissiletype(MISSILE_PTRN::PTRN1);
             ChangeAIState(GetAi(), MON_STATE::MBOSS3);
+            return;
         }
         GetMonster()->SetDestPos(m_pDesPos[m_iDestType++]);
        
@@ -181,6 +183,7 @@ void CBossPatorl3STate::update()
 
 void CBossPatorl3STate::Enter()
 {
+    m_bPhaseChanged = false;
     Vec2 vResolution = CCore::GetInst()->GetResolution();
     Vec2 vBackPos = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetPos();
     Vec2 vBackScale = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetScale();
