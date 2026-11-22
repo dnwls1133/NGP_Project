@@ -9,6 +9,7 @@ private:
     float m_fFlip;
     float m_fMTimeAcc;
     int   m_iDestType;
+    bool m_bPhaseChanged = false;
 public:
     virtual void update();
     virtual void Enter();

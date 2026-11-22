@@ -36,7 +36,7 @@ CBossPatorl1STate::~CBossPatorl1STate()
 }
 void CBossPatorl1STate::update()
 {
-    srand(time(NULL));
+    
     Vec2 vResolution = CCore::GetInst()->GetResolution();
     Vec2 vBackPos = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetPos();
     Vec2 vBackScale = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetScale();
@@ -62,8 +62,9 @@ void CBossPatorl1STate::update()
     m_fAdt += fDT;
     m_fSTimeAcc += fDT;
     m_fMTimeAcc += fDT;
-    if (GetMonster()->GetInfo().fHP <= 4000)
+    if (!m_bPhaseChanged && GetMonster()->GetInfo().fHP <= 4000)
     {
+        m_bPhaseChanged = true;
         m_fSTimeAcc = 0.f;
         m_fXdir = -2 * PI;
         m_fMTimeAcc = 0.f;
@@ -71,7 +72,7 @@ void CBossPatorl1STate::update()
         m_iDestType = 0;
         GetMonster()->SetSpeed(200.f);
         ChangeAIState(GetAi(), MON_STATE::MBOSS1);
-
+        return;
     }
     switch (GetMonster()->GetInfo().ePattern)
     {
@@ -176,6 +177,7 @@ void CBossPatorl1STate::update()
 
 void CBossPatorl1STate::Enter()
 {
+    m_bPhaseChanged = false;
     Vec2 vResolution = CCore::GetInst()->GetResolution();
     Vec2 vBackPos = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetPos();
     Vec2 vBackScale = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetScale();

@@ -3,7 +3,7 @@
 #include "../host/HostSimCore.h"
 #include <deque>
 #include <optional>
-#include <deque>
+
 
 class CSound;
 class CStageHUD;
@@ -47,6 +47,7 @@ private:
     std::deque<protocol::SpawnPayload> m_pendingSpawns;
 
     bool m_playerSpawnsQueued = false;
+    bool m_bBossBgmPlayed = false;
     std::deque<protocol::Message> m_pendingItemEvents;
 
     bool FlushItemEvents();
