@@ -48,7 +48,6 @@ CPlayer::CPlayer()
 
     m_pFireSE = CResMgr::GetInst()->LoadSound(L"Player Fire", L"sound\\SE\\SE_FireDanmaku.mp3");
     m_pLvUpSE = CResMgr::GetInst()->LoadSound(L"Player Lv Up", L"sound\\SE\\SE_LevelUp.mp3");
-    m_pDeadSE = CResMgr::GetInst()->LoadSound(L"Player Dead", L"sound\\SE\\SE_EnemyDead.mp3");
 
 	CTexture* m_pTex = CResMgr::GetInst()->LoadTexture(L"PlayerWalk", L"texture\\Player\\Player_Walk.png");
 	CreaeteAnimator();
@@ -392,7 +391,6 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
         if (isMujeok)
             return;
 
-        CSoundMgr::GetInst()->PlaySE(m_pDeadSE);
         if (m_iHp <= 1)
         {
             CScene_Stage01* curscene = (CScene_Stage01*)CSceneMgr::GetInst()->GetCurScene();
@@ -402,7 +400,6 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
         GetAnimator()->Play(L"Player_Invincible", true);
 		CPlayerDead* pDead = new CPlayerDead;
 		pDead->SetPos(GetPos());
-		pDead->SetName(L"Player_Dead");
 		CreateObject(pDead, GROUP_TYPE::DEAD_PLAYER);
 		--m_iHp;
         m_iLvl = 1;

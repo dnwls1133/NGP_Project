@@ -39,7 +39,7 @@ public:
     void init(GROUP_TYPE _eType);
     void ChangemType(MISSILE_TYPE _eType);
 public:
-    virtual void OnCollisionEnter(CCollider* _pOther);
+    void PlayHitEffect();
     virtual void OnCollision(CCollider* _pOther);
     virtual void OnCollisionExit(CCollider* _pOther);
     CLONE(CMissile);

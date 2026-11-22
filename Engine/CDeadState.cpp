@@ -1,6 +1,8 @@
 ﻿#include "pch.h"
 #include "CDeadState.h"
 
+#include "CCore.h"
+
 #include "CTimeMgr.h"
 #include "CResMgr.h"
 #include "CSceneMgr.h"
@@ -140,13 +142,16 @@ void CDeadState::Enter()
     break;
     case MON_TYPE::NORMAL3:
     {
-        Vec2 vMpos = GetMonster()->GetPos();
-        CItem* item = new CItem;
-        item->SetPos(vMpos);
-        item->SetScale(Vec2(0, 0));
-        item->SetName(L"Item");
-        item->InitAfterPlacement();
-        CreateObject(item, GROUP_TYPE::ITEM);
+        if (CCore::GetInst()->GetSession().IsHost())
+        {
+            Vec2 vMpos = GetMonster()->GetPos();
+            CItem* item = new CItem;
+            item->SetPos(vMpos);
+            item->SetScale(Vec2(0, 0));
+            item->SetName(L"Item");
+            item->InitAfterPlacement();
+            CreateObject(item, GROUP_TYPE::ITEM);
+        }
         GetMonster()->GetAnimator()->LoadAnimation(L"animation\\N34Enemy_Dead.anim");
         GetMonster()->GetAnimator()->Play(L"N34Enemy_Dead", false);
     }
@@ -165,10 +170,6 @@ void CDeadState::Enter()
     break;
     case MON_TYPE::BOSS:
     {
-        //CTexture* m_pTex = CResMgr::GetInst()->LoadTexture(L"Boss1Enemy_Dead", L"texture\\Enemies\\Boss1_Enemy_Dead.png");
-        //GetMonster()->GetAnimator()->CreateAnimation(L"Boss1Enemy_Dead", m_pTex, Vec2(0.f, 0.f), Vec2(400.f, 400.f), Vec2(400.f, 0.f), 0.1f, 50);
-        ////Animation 저장
-        //GetMonster()->GetAnimator()->FindAnimation(L"Boss1Enemy_Dead")->Save(L"animation\\Boss1Enemy_Dead.anim");
         GetMonster()->GetAnimator()->LoadAnimation(L"animation\\Boss1Enemy_Dead.anim");
         GetMonster()->GetAnimator()->Play(L"Boss1Enemy_Dead", false);
 
@@ -201,7 +202,7 @@ void CDeadState::Exit()
 
     CScene_Stage01* cursene = dynamic_cast<CScene_Stage01*>
         (CSceneMgr::GetInst()->GetCurScene());
-    if (cursene != nullptr) {
+    if (cursene != nullptr && CCore::GetInst()->GetSession().IsHost()) {
         if (GetMonster()->GetInfo().eMType == MON_TYPE::BOSS) {
             cursene->Clear();
         }
