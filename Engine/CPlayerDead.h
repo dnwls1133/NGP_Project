@@ -10,6 +10,7 @@ public:
 public:
     virtual void update();
     virtual void render(HDC _dc);
+    protocol::SpawnPayload ExportSpawnPayload(protocol::EventId eventId) const override;
 private:
     CLONE(CPlayerDead);
 public:

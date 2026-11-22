@@ -3,6 +3,7 @@
 #include "CObject.h"
 
 #include "CPlayer.h"
+#include "CPlayerDead.h"
 #include "CMonster.h"
 #include "CMissile.h"
 #include "CBackground.h"
@@ -210,7 +211,8 @@ void CScene_Stage01::OnObjectAdded(CObject* _pObj, GROUP_TYPE _eType)
     if (_eType != GROUP_TYPE::PROJ_PLAYER
         && _eType != GROUP_TYPE::PROJ_MONSTER
         && _eType != GROUP_TYPE::MONSTER
-        && _eType != GROUP_TYPE::ITEM)
+        && _eType != GROUP_TYPE::ITEM
+        && !(_eType == GROUP_TYPE::DEAD_PLAYER && dynamic_cast<CPlayerDead*>(_pObj)))
     {
         return;
     }
@@ -570,6 +572,16 @@ void CScene_Stage01::update()
                         pMissile->SetDamage(spawn.damage);
                         pMissile->SetName(isMonsterProjectile ? L"MsMissile" : L"Missile_Player");
                         AddObject(pMissile, group);
+                    }
+                    else if (spawn.kind == protocol::NetObjectKind::PLAYER_DEATH_EFFECT)
+                    {
+                        if (FindObjectById(spawn.objectId) == nullptr)
+                        {
+                            auto* effect = new CPlayerDead();
+                            effect->SetObjectId(spawn.objectId);
+                            effect->SetPos(Vec2(spawn.pos.x / 100.f, spawn.pos.y / 100.f));
+                            AddObject(effect, GROUP_TYPE::DEAD_PLAYER);
+                        }
                     }
                     else if (spawn.kind == protocol::NetObjectKind::MONSTER)
                     {
