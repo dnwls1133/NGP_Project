@@ -916,6 +916,59 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1122Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. 보스 등장 틱 경계(7799 미등장 / 7800 1회 등장) 및 HP 경계(4001 유지 / 4000에서 MBOSS0->MBOSS1 1회 전환)
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId beforeTick = engine.TrySpawnScheduledBoss(BOSS_SPAWN_TICK - 1);
+            const ObjectId bossId = engine.TrySpawnScheduledBoss(BOSS_SPAWN_TICK);
+            const ObjectId dupBoss = engine.TrySpawnScheduledBoss(BOSS_SPAWN_TICK + 1);
+            engine.FlushLifecycleAtTickEnd(sink);
+            // 30틱(500ms) 진행 -> IDLE(0) -> MBOSS0(10)
+            for (int i = 0; i < 6; ++i)
+                engine.StepFrame(83'334, script, sink);
+            const std::uint8_t stateAtStart = engine.FindObjectById(bossId)->fsmState;
+            // HP 4001: 경계 직전 -> 전환 안 됨
+            engine.SetObjectHp(bossId, BOSS_PHASE2_HP_THRESHOLD + 1);
+            const bool transAt4001 = engine.EvaluateBossFsmTransition(bossId);
+            // HP 4000: 정확한 경계 -> MBOSS1(11) 1회 전환, 재호출 시 중복 전환 없음
+            engine.SetObjectHp(bossId, BOSS_PHASE2_HP_THRESHOLD);
+            const bool transAt4000First = engine.EvaluateBossFsmTransition(bossId);
+            const bool transAt4000Dup = engine.EvaluateBossFsmTransition(bossId);
+            Check(beforeTick == 0 && bossId != 0 && dupBoss == 0
+                && stateAtStart == 10
+                && !transAt4001
+                && transAt4000First && !transAt4000Dup
+                && engine.FindObjectById(bossId)->fsmState == 11,
+                "HostSim1122: Spawns boss once at tick 7800 and transitions MBOSS0->MBOSS1 once at HP<=4000 boundary",
+                counters);
+        }
+        // 2. 보스 생존 타깃 정책: 가까운 생존자 우선, 동률 P0, 전원 사망 시 발사 안전 생략
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 2);
+            const ObjectId bossId = engine.TrySpawnScheduledBoss(BOSS_SPAWN_TICK);
+            engine.FlushLifecycleAtTickEnd(sink);
+            const PlayerSlot nearP1 = engine.SelectNearestAlivePlayerId(FixedVec2{ 19'000, 10'000 });
+            const PlayerSlot tieP0 = engine.SelectNearestAlivePlayerId(FixedVec2{ 15'000, 10'000 });
+            engine.SetObjectHp(p0Id, 0);
+            engine.SetObjectHp(p1Id, 0);
+            const ObjectId skippedFire = engine.TryFireEnemyAimedProjectile(bossId);
+            Check(nearP1 == 1 && tieP0 == 0 && skippedFire == 0,
+                "HostSim1122: Boss target policy selects nearest alive player, breaks ties to P0, and skips firing when all dead",
+                counters);
+        }
+    }
+
+
 }
 
 int main()
@@ -937,6 +990,7 @@ int main()
     RunHostSim1119Suite(counters);
     RunHostSim1120Suite(counters);
     RunHostSim1121Suite(counters);
+    RunHostSim1122Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

@@ -35,6 +35,11 @@ namespace host
     // 일반 적 기본 FSM 전환 간격: IDLE(0) -> PAROL/RUN(1) (0.5초 = 30틱)
     inline constexpr std::uint32_t MONSTER_IDLE_TO_PATROL_TICKS = 30;
 
+    // 11/22: 보스 등장 틱(130초 = 7,800틱), 보스 subType(MON_TYPE::BOSS=6), 2페이즈 HP 경계
+    inline constexpr std::uint32_t BOSS_SPAWN_TICK = 130 * SIM_TICK_HZ;
+    inline constexpr std::uint8_t MONSTER_SUBTYPE_BOSS = 6;
+    inline constexpr std::int32_t BOSS_PHASE2_HP_THRESHOLD = 4000;
+
     // 고정 틱 시뮬레이션 dt (전역 fDT와 분리된 호스트 계산 전용 고정 시간 간격)
     inline constexpr float SIM_FIXED_DT = 1.0f / static_cast<float>(SIM_TICK_HZ);
 
@@ -263,6 +268,7 @@ namespace host
             m_totalDestroyedCount = 0;
             m_deathCandiateCount = 0;
             m_teamScore = 0;
+            m_bossSpawned = false;
             m_lastAppliedMoveBits.fill(protocol::MoveBit::NONE);
             m_lastAppliedFireHeld.fill(0);
             m_fireTickAccum.fill(0);
@@ -713,9 +719,53 @@ namespace host
             m_objects.clear();
             m_playerSlotObjectIds.fill(0);
             m_fireTickAccum.fill(0);
+            m_bossSpawned = false;
         }
 
-        
+        // 11/22: 보스 등장 시간 경계(130초 = 7,800틱) 1회 생성
+        protocol::ObjectId TrySpawnScheduledBoss(std::uint32_t currentTick)
+        {
+            if (m_bossSpawned ||currentTick < BOSS_SPAWN_TICK)
+            {
+                return 0;
+            }
+
+            m_bossSpawned = true;
+            return RequestSpawn(
+                protocol::NetObjectKind::MONSTER,
+                MONSTER_SUBTYPE_BOSS,
+                protocol::INVALID_PLAYER_SLOT,
+                protocol::FixedVec2{ 27'000, -20'000 },
+                {},
+                8000,
+                1);
+        }
+
+        // 11/22: 보스 HP/틱 경계 FSM 1회 전환 (전환 발생 시 true, 중복 호출 시 false)
+        // fsmState: 0=IDLE, 10=MBOSS0, 11=MBOSS1, 2=DEAD
+        bool EvaluateBossFsmTransition(protocol::ObjectId bossId) noexcept
+        {
+            for (HostObjectValue& obj : m_objects) {
+                if (obj.objectId != bossId || obj.pendingDestroy
+                    || obj.kind != protocol::NetObjectKind::MONSTER
+                    || obj.subType != MONSTER_SUBTYPE_BOSS
+                    || obj.deathConfirmed || obj.hp <= 0)
+                {
+                    continue;
+                }
+
+                if (obj.fsmState == 0 && obj.stateTickAccum >= MONSTER_IDLE_TO_PATROL_TICKS) {
+                    obj.fsmState = 10;
+                    return true;
+                }
+                if (obj.fsmState == 10 && obj.hp <= BOSS_PHASE2_HP_THRESHOLD) {
+                    obj.fsmState = 11;
+                    return true;
+                }
+            }
+
+            return false;
+        }
 
 
 
@@ -946,7 +996,7 @@ namespace host
                 {
                     ++obj.stateTickAccum;
                     if (obj.stateTickAccum >= MONSTER_IDLE_TO_PATROL_TICKS) {
-                        obj.fsmState = 1; // 30틱(0.5초) 경과 후 IDLE -> PATROL/RUN(1) 전환
+                        obj.fsmState = (obj.subType == MONSTER_SUBTYPE_BOSS) ? 10 : 1; // 30틱(0.5초) 경과 후 IDLE -> PATROL/RUN(1) 전환
                     }
                 }
 
@@ -1027,6 +1077,7 @@ namespace host
         std::uint32_t m_totalDestroyedCount = 0;
         std::uint32_t m_deathCandiateCount = 0;
         std::uint32_t m_teamScore = 0;
+        bool m_bossSpawned = false;
 
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedMoveBits{};
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedFireHeld{};

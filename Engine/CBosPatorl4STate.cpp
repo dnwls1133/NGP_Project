@@ -124,8 +124,9 @@ void CBosPatorl4STate::update()
             {
                 CreateMissile5(vMonPos, vMonScale, MISSILE_TYPE::MIDDLE);
             }
-            if (2.f + fDT >= m_fAdt && m_fAdt > 2.f)
+            if (!m_bPhaseChanged && 2.f + fDT >= m_fAdt && m_fAdt > 2.f)
             {
+                m_bPhaseChanged = true;
                 CreateMissile5(vMonPos, vMonScale, MISSILE_TYPE::MIDDLE);
                 m_fFlip = 1.f;
                 m_fMTimeAcc = 0.f;
@@ -135,6 +136,7 @@ void CBosPatorl4STate::update()
                 GetMonster()->SetMissiletype(MISSILE_PTRN::PTRN1);
                 ChangeAIState(GetAi(), MON_STATE::MBOSS1);
                 m_fAdt = 0;
+                return;
             }
         }
        
@@ -146,6 +148,7 @@ void CBosPatorl4STate::update()
 
 void CBosPatorl4STate::Enter()
 {
+    m_bPhaseChanged = false;
     Vec2 vResolution = CCore::GetInst()->GetResolution();
     Vec2 vBackPos = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetPos();
     Vec2 vBackScale = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetScale();
