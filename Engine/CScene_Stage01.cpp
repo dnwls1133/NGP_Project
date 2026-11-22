@@ -547,15 +547,21 @@ void CScene_Stage01::update()
                             remote.lastSnapshotTick.reset();
                         }
                     }
-                    else if (spawn.kind == protocol::NetObjectKind::PROJ_PLAYER)
+                    else if (spawn.kind == protocol::NetObjectKind::PROJ_PLAYER ||
+                             spawn.kind == protocol::NetObjectKind::PROJ_MONSTER)
                     {
+                        const bool isMonsterProjectile = spawn.kind == protocol::NetObjectKind::PROJ_MONSTER;
+                        if (isMonsterProjectile && FindObjectById(spawn.objectId) != nullptr)
+                            continue;
+
+                        const auto group = isMonsterProjectile ? GROUP_TYPE::PROJ_MONSTER : GROUP_TYPE::PROJ_PLAYER;
                         Vec2 vel(spawn.vel.x / 100.f, spawn.vel.y / 100.f);
 
                         float speed = vel.Length();
 
                         CMissile* pMissile = new CMissile();
                         pMissile->SetObjectId(spawn.objectId);
-                        pMissile->init(GROUP_TYPE::PROJ_PLAYER);
+                        pMissile->init(group);
                         pMissile->SetPos(Vec2(spawn.pos.x / 100.f, spawn.pos.y / 100.f));
                         pMissile->SetScale(Vec2(25.f, 25.f));
                         pMissile->SetDir(speed > 0.f ? vel : Vec2(0.f, 1.f));
@@ -564,8 +570,8 @@ void CScene_Stage01::update()
                         pMissile->SetType(spawn.patternType);
                         pMissile->SetOwnerPlayerId(spawn.ownerPlayerId);
                         pMissile->SetDamage(spawn.damage);
-                        pMissile->SetName(L"Missile_Player");
-                        AddObject(pMissile, GROUP_TYPE::PROJ_PLAYER);
+                        pMissile->SetName(isMonsterProjectile ? L"MsMissile" : L"Missile_Player");
+                        AddObject(pMissile, group);
                     }
                     else if (spawn.kind == protocol::NetObjectKind::MONSTER)
                     {
