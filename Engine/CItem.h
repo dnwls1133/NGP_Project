@@ -15,6 +15,7 @@ private:
     vector<CPlayer*> m_TouchPlayers;
 public:
     void InitAfterPlacement();
+    void ApplySpawnState(const protocol::SpawnPayload& spawn);
     void ResolveSimultaneousPickup();
 
     protocol::SpawnPayload ExportSpawnPayload(protocol::EventId eventId) const override;

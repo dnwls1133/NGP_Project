@@ -4,6 +4,7 @@
 
 #include "CPlayer.h"
 #include "CPlayerDead.h"
+#include "CItem.h"
 #include "CMonster.h"
 #include "CMissile.h"
 #include "CBackground.h"
@@ -572,6 +573,15 @@ void CScene_Stage01::update()
                         pMissile->SetDamage(spawn.damage);
                         pMissile->SetName(isMonsterProjectile ? L"MsMissile" : L"Missile_Player");
                         AddObject(pMissile, group);
+                    }
+                    else if (spawn.kind == protocol::NetObjectKind::ITEM)
+                    {
+                        if (FindObjectById(spawn.objectId) == nullptr)
+                        {
+                            auto* item = new CItem();
+                            item->ApplySpawnState(spawn);
+                            AddObject(item, GROUP_TYPE::ITEM);
+                        }
                     }
                     else if (spawn.kind == protocol::NetObjectKind::PLAYER_DEATH_EFFECT)
                     {
