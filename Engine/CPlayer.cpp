@@ -145,10 +145,8 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
 
             if (dAcc > 2.f) {
                 dAcc = 0;
-                GetAnimator()->LoadAnimation(L"animation\\player_walk_left.anim");
-                GetAnimator()->Play(L"Player_walk", true);
+                SetRespawnInvincible(false);
                 SetCollideron();
-                m_bHit = false;
             }
             SetPos(vPos);
         }
@@ -211,6 +209,23 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
     else if (m_clear) {
         vPos.y -= 300.f * dt;
         SetPos(vPos);
+    }
+}
+
+void CPlayer::SetRespawnInvincible(bool invincible)
+{
+    if (m_bHit == invincible)
+        return;
+
+    m_bHit = invincible;
+    if (invincible)
+    {
+        GetAnimator()->LoadAnimation(L"animation\\player_Invincible.anim");
+        GetAnimator()->Play(L"Player_Invincible", true);
+    }
+    else
+    {
+        GetAnimator()->Play(L"Player_walk", true);
     }
 }
 
@@ -396,14 +411,12 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
             CScene_Stage01* curscene = (CScene_Stage01*)CSceneMgr::GetInst()->GetCurScene();
             curscene->Fail();
         }
-        GetAnimator()->LoadAnimation(L"animation\\player_Invincible.anim");
-        GetAnimator()->Play(L"Player_Invincible", true);
+        SetRespawnInvincible(true);
 		CPlayerDead* pDead = new CPlayerDead;
 		pDead->SetPos(GetPos());
 		CreateObject(pDead, GROUP_TYPE::DEAD_PLAYER);
 		--m_iHp;
         m_iLvl = 1;
-		m_bHit = true;
 		Vec2 vPos = GetPos();
 		vPos.y = 1200;
 		SetPos(vPos);
