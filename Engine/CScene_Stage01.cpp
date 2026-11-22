@@ -731,6 +731,7 @@ void CScene_Stage01::update()
                             if (auto* player = GetPlayer(slot))
                             {
                                 player->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
+                                player->SetRespawnInvincible(object.fsmState == 1);
                                 remote.lastSnapshotTick = snapshot.snapshotTick;
                             }
 
