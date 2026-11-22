@@ -597,7 +597,9 @@ void CScene_Stage01::update()
                     // despawn.objectId의 객체를 제거하는 코드 연결
                     if (CObject* obj = FindObjectById(despawn.objectId))
                     {
-                        DeleteObject(obj);
+                        auto* mon = dynamic_cast<CMonster*>(obj);
+                        if (despawn.reason != protocol::DespawnReason::DESTROYED || mon == nullptr || !mon->GetsignalDead())
+                            DeleteObject(obj);
                     }
                 }
 
@@ -657,7 +659,11 @@ void CScene_Stage01::update()
                         }
 
                         if (auto* mon = dynamic_cast<CMonster*>(FindObjectById(combat.targetObjectId)))
+                        {
                             mon->SetConfirmedHP(static_cast<float>(combat.confirmedHp));
+                            if (combat.kind == protocol::CombatEventKind::ENTITY_DIED)
+                                mon->BeginDeath();
+                        }
 
                         if (combat.kind == protocol::CombatEventKind::ENTITY_DIED)
                             CRankMgr::GetInst()->CurrentRanking.Score = static_cast<int>(combat.teamScore);
@@ -676,6 +682,9 @@ void CScene_Stage01::update()
                             // 생성 전 도착한 상태는 건너뛰고 다음 스냅샷부터 적용
                             if (auto* mon = dynamic_cast<CMonster*>(FindObjectById(object.objectId)))
                             {
+                                if (mon->GetsignalDead() && object.alive)
+                                    continue;
+
                                 mon->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
                                 mon->SetConfirmedHP(static_cast<float>(object.hp));
                             }

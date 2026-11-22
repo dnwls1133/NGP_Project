@@ -94,8 +94,25 @@ CMonster::~CMonster()
     }
 }
 
+void CMonster::BeginDeath()
+{
+    if (IsDead() || m_signaldead)
+        return;
+
+    m_signaldead = true;
+    SetCollideroff();
+    CSoundMgr::GetInst()->PlaySE(m_pDeadSE);
+    m_pAI->ChangeState(MON_STATE::DEAD);
+}
+
 void CMonster::update()
 {
+    if (m_signaldead)
+    {
+        m_pAI->update();
+        return;
+    }
+
     if (!CCore::GetInst()->GetSession().IsHost()) // 11/21 클라이언트는 AI 이동 발사 자체 삭제 실행 안함
         return;
 
@@ -247,12 +264,8 @@ void CMonster::OnCollisionEnter(CCollider* _pOther)
 
         if (m_tInfo.fHP <= 0 && m_signaldead == false)
         {
-            CSoundMgr::GetInst()->PlaySE(m_pDeadSE);
-            m_pAI->ChangeState(MON_STATE::DEAD);
-            m_signaldead = true;
+            BeginDeath();
             justDied = true;
-            SetCollideroff();
-            //DeleteObject(this);
 
             scoreDelta = ((int)m_tInfo.eMType) * 250;
             CRankMgr::GetInst()->CurrentRanking.Score +=
