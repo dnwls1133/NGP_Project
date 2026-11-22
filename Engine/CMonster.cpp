@@ -188,6 +188,7 @@ void CMonster::OnCollisionEnter(CCollider* _pOther)
             return;
 
         CMissile* pMissile = static_cast<CMissile*>(pOtherobj); // 충돌한 탄환에서 직접 피해량 읽기
+        pMissile->PlayHitEffect();
         const int iDamage = pMissile->GetDamage();
 
         m_bHit = true;

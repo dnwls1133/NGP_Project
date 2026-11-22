@@ -233,11 +233,34 @@ void CScene_Stage01::update()
         m_dAcc += fDT;
     }
 
-    // 대기 중인 아이템 획득 이벤트를 RESULT보다 먼저 등록한다.
-    if (session.IsHost() && session.GetState() == network::SessionState::Started &&
-        !FlushItemEvents())
+    if (session.IsHost() && session.GetState() == network::SessionState::Started)
     {
-        return;
+        // Send SPAWN before combat events that reference the new objects.
+        while (!m_pendingSpawns.empty())
+        {
+            auto spawn = m_pendingSpawns.front();
+            spawn.eventId = m_nextSpawnEventId + 1;
+            const auto result = session.SendSpawn(spawn, m_hostTick);
+            if (result == net::SendResult::Queued)
+            {
+                m_nextSpawnEventId = spawn.eventId;
+            }
+            else if (result == net::SendResult::QueueFull)
+            {
+                return;
+            }
+            else
+            {
+#ifdef _DEBUG
+                std::cerr << "[HOST] SPAWN dropped due to error, objectId=" << spawn.objectId
+                    << ", result=" << static_cast<int>(result) << '\n';
+#endif
+            }
+            m_pendingSpawns.pop_front();
+        }
+
+        if (!FlushItemEvents())
+            return;
     }
 
     if (m_bClear)
@@ -405,31 +428,6 @@ void CScene_Stage01::update()
 
             if (!m_bFail)
             {
-                // 11/20: 대기 중인 SPAWN 큐를 FIFO 순서대로 먼저 송신 (스냅샷보다 항상 먼저 전송)
-                while (!m_pendingSpawns.empty())
-                {
-                    auto spawn = m_pendingSpawns.front();
-                    spawn.eventId = m_nextSpawnEventId + 1;
-                    const auto result = session.SendSpawn(spawn, m_hostTick);
-                    if (result == net::SendResult::Queued)
-                    {
-                        m_nextSpawnEventId = spawn.eventId;
-                        m_pendingSpawns.pop_front();
-                    }
-                    else if (result == net::SendResult::QueueFull)
-                    {
-                        break; // 일시적 큐 포화 -> pop하지 않고 다음 프레임에 재시도
-                    }
-                    else
-                    {
-#ifdef _DEBUG
-                        std::cerr << "[HOST] SPAWN dropped due to error, objectId=" << spawn.objectId
-                            << ", result=" << static_cast<int>(result) << '\n';
-#endif
-                        m_pendingSpawns.pop_front(); // 오류 항목은 걸러내어 뒤의 정상 SPAWN이 막히지 않게 처리
-                    }
-                }
-
                 m_hostTickAccumulator += CTimeMgr::GetInst()->GetDT();
 
                 for (std::uint32_t tick = 0; tick < host::MAX_TICKS_PER_FRAME && m_hostTickAccumulator >= host::SIM_FIXED_DT; ++tick)
@@ -638,6 +636,26 @@ void CScene_Stage01::update()
                     else if (combat.kind == protocol::CombatEventKind::DAMAGE_APPLIED
                         || combat.kind == protocol::CombatEventKind::ENTITY_DIED)
                     {
+                        if (combat.kind == protocol::CombatEventKind::DAMAGE_APPLIED && combat.sourceObjectId != 0)
+                        {
+                            auto* missile = dynamic_cast<CMissile*>(FindObjectById(combat.sourceObjectId));
+                            if (missile == nullptr || missile->IsDead())
+                            {
+                                if (auto* target = FindObjectById(combat.targetObjectId))
+                                {
+                                    missile = new CMissile();
+                                    missile->SetObjectId(combat.sourceObjectId);
+                                    missile->SetPos(target->GetPos());
+                                    missile->SetDir(Vec2(0.f, 1.f));
+                                    missile->SetName(L"Missile_Player");
+                                    AddObject(missile, GROUP_TYPE::PROJ_PLAYER);
+                                }
+                            }
+
+                            if (missile != nullptr && !missile->IsDead())
+                                missile->PlayHitEffect();
+                        }
+
                         if (auto* mon = dynamic_cast<CMonster*>(FindObjectById(combat.targetObjectId)))
                             mon->SetConfirmedHP(static_cast<float>(combat.confirmedHp));
 

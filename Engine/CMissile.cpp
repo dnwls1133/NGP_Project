@@ -354,28 +354,25 @@ void CMissile::render(HDC _dc)
 
 
 
-void CMissile::OnCollisionEnter(CCollider* _pOther)
+void CMissile::PlayHitEffect()
 {
-	CObject* pOtherObj = _pOther->GetObj();
-    CMonster* pMonsObj = (CMonster*)_pOther->GetObj();
+    if (m_bHit)
+        return;
 
-	if (GetName() != L"MsMissile" && pOtherObj->GetName() == L"Monster" && !pMonsObj->GetsignalDead() && !m_bHit)
-	{
-		m_pTex = CResMgr::GetInst()->LoadTexture(L"MissileTex1", L"texture\\Missile_explosion.png");
-		CreaeteAnimator();
-		GetAnimator()->CreateAnimation(L"Missile1", m_pTex, Vec2(0.f, 0.f), Vec2(33.88f, 78.f), Vec2(33.88f, 0.f), 0.05f, 17);
-		GetAnimator()->Play(L"Missile1", false);
-		CAnimation* pAnim = GetAnimator()->FindAnimation(L"Missile1");
-		
-		for (int i = 0; i < pAnim->GetMaxFrame(); ++i)
-		{
-			pAnim->GetFrame(i).vOffset = Vec2(0.f, -20.f);
-		}
-        m_bHit = true;
-        SetCollideroff();
-		m_fVec = 100.f;
-	}
-    
+    m_pTex = CResMgr::GetInst()->LoadTexture(L"MissileTex1", L"texture\\Missile_explosion.png");
+    if (GetAnimator() == nullptr)
+        CreaeteAnimator();
+
+    GetAnimator()->CreateAnimation(L"Missile1", m_pTex, Vec2(0.f, 0.f), Vec2(33.88f, 78.f), Vec2(33.88f, 0.f), 0.05f, 17);
+    GetAnimator()->Play(L"Missile1", false);
+    CAnimation* pAnim = GetAnimator()->FindAnimation(L"Missile1");
+
+    for (int i = 0; i < pAnim->GetMaxFrame(); ++i)
+        pAnim->GetFrame(i).vOffset = Vec2(0.f, -20.f);
+
+    m_bHit = true;
+    SetCollideroff();
+    m_fVec = 100.f;
 }
 
 void CMissile::OnCollision(CCollider* _pOther)
