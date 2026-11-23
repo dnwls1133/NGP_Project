@@ -245,6 +245,72 @@ namespace host
     };
 
     // ─────────────────────────────────────────────────────────────────────────
+    // 5-1. 11/23 CHostWorldSync: 36개 단위 독립 상태 조각 분할기 (모든 조각 <= 1,200B)
+    // ─────────────────────────────────────────────────────────────────────────
+    class CHostWorldSync
+    {
+    public:
+        static net::SendResult BuildSnapshotBatch(
+            std::uint32_t sessionId,
+            std::uint32_t hostTick,
+            std::uint32_t& nextSequence,
+            const std::vector<protocol::ObjectStateRecord>& records,
+            net::SnapshotBatch& outBatch)
+        {
+            outBatch.parts.clear();
+
+            if (sessionId == 0)
+                return net::SendResult::InvalidRequest;
+
+            constexpr std::size_t perPart = protocol::MAX_SNAPSHOT_OBJECTS_PER_PACKET; //36
+            const std::size_t partCount = records.empty()
+                ? 1
+                : ((records.size() + perPart - 1) / perPart);
+
+            if (partCount > net::MAX_SNAPSHOT_PARTS_PER_BATCH)
+                return net::SendResult::TooLarge;
+
+            outBatch.parts.reserve(partCount);
+
+            for (std::size_t partIndex = 0; partIndex < partCount; ++partIndex) {
+                protocol::StateSnapshotPayload snap{};
+                snap.snapshotTick = hostTick;
+                snap.partIndex = static_cast<std::uint8_t>(partIndex);
+                snap.partCount = static_cast<std::uint8_t>(partCount);
+
+                if (!records.empty()) {
+                    const std::size_t offset = partIndex * perPart;
+                    const std::size_t count = (std::min)(perPart, records.size() - offset);
+                    snap.objects.assign(
+                        records.begin() + static_cast<std::ptrdiff_t>(offset),
+                        records.begin() + static_cast<std::ptrdiff_t>(offset + count));
+                }
+                protocol::Message msg{};
+                msg.header.magic = protocol::MAGIC;
+                msg.header.version = protocol::VERSION;
+                msg.header.type = protocol::MessageType::STATE_SNAPSHOT;
+                msg.header.flags = protocol::FLAGS_NONE;
+                msg.header.totalBytes = static_cast<std::uint32_t>(
+                     protocol::HEADER_BYTES
+                    + protocol::SNAPSHOT_HEADER_BYTES
+                    + (snap.objects.size() * protocol::OBJECT_STATE_RECORD_BYTES));
+                msg.header.sessionId = sessionId;
+                msg.header.roundId = 1;
+                msg.header.sequence = nextSequence++;
+                msg.header.hostTick = hostTick;
+                msg.header.reserved = protocol::RESERVED_VALUE;
+                msg.payload = std::move(snap);
+
+                outBatch.parts.push_back(std::move(msg));
+
+
+            }
+            return net::ValidateSnapshotBatch(outBatch);
+        }
+    };
+
+
+    // ─────────────────────────────────────────────────────────────────────────
     // 6. HostSimEngine: 고정 틱(60Hz)과 표시 분리 + 틱 종료 수명 관리 경계
     // ─────────────────────────────────────────────────────────────────────────
     class HostSimEngine
@@ -289,7 +355,8 @@ namespace host
             protocol::FixedVec2 pos,
             protocol::FixedVec2 vel = {},
             std::int32_t hp = 3,
-            std::int32_t damage = 1)
+            std::int32_t damage = 1,
+            std::uint8_t patternType = 0)
         {
 
             if (kind == protocol::NetObjectKind::PLAYER) {
@@ -313,6 +380,9 @@ namespace host
             obj.kind = kind;
             obj.subType = subType;
             obj.ownerPlayerId = ownerPlayerId;
+            obj.patternType = patternType;
+            if (kind == protocol::NetObjectKind::PROJ_MONSTER)
+                obj.fsmState = patternType;
             obj.pos = pos;
             obj.vel = vel;
             obj.hp = hp;
@@ -999,6 +1069,19 @@ namespace host
                         obj.fsmState = (obj.subType == MONSTER_SUBTYPE_BOSS) ? 10 : 1; // 30틱(0.5초) 경과 후 IDLE -> PATROL/RUN(1) 전환
                     }
                 }
+                else if (obj.kind == protocol::NetObjectKind::PROJ_MONSTER
+                    && (obj.patternType == 2 || obj.patternType == 3))
+                {
+                    ++obj.stateTickAccum;
+                    if (obj.patternType == 2 && obj.stateTickAccum == 30) {
+                        obj.vel.x = (obj.vel.x * 3) / 2;
+                        obj.vel.y = (obj.vel.y * 3) / 2;
+                    }
+                    else if (obj.patternType == 3 && obj.stateTickAccum == 42) {
+                        obj.vel.x /= 2;
+                        obj.vel.y /= 2;
+                    }
+                }
 
                 obj.pos.x += (obj.vel.x / static_cast<std::int32_t>(SIM_TICK_HZ));
                 obj.pos.y += (obj.vel.y / static_cast<std::int32_t>(SIM_TICK_HZ));
@@ -1016,10 +1099,8 @@ namespace host
 
         void PublishSnapshotBatch(std::uint32_t currentTick, net::ISendSink& sendSink)
         {
-            protocol::StateSnapshotPayload snap{};
-            snap.snapshotTick = currentTick;
-            snap.partIndex = 0;
-            snap.partCount = 1;
+            std::vector<protocol::ObjectStateRecord> records;
+            records.reserve(m_objects.size());
 
             for (const HostObjectValue& obj : m_objects)
             {
@@ -1038,31 +1119,22 @@ namespace host
                 rec.vel = obj.vel;
                 rec.hp = obj.hp;
                 rec.maxHp = obj.maxHp;
-                snap.objects.push_back(rec);
+                records.push_back(rec);
             }
 
-            if (snap.objects.empty())
+            if (records.empty())
             {
                 return;
             }
 
-            protocol::Message msg{};
-            msg.header.magic = protocol::MAGIC;
-            msg.header.version = protocol::VERSION;
-            msg.header.type = protocol::MessageType::STATE_SNAPSHOT;
-            msg.header.flags = protocol::FLAGS_NONE;
-            msg.header.totalBytes = static_cast<std::uint32_t>(
-                protocol::HEADER_BYTES + 8 + (snap.objects.size() * 32));
-            msg.header.sessionId = m_sessionId;
-            msg.header.roundId = 1;
-            msg.header.sequence = m_nextSequence++;
-            msg.header.hostTick = currentTick;
-            msg.header.reserved = protocol::RESERVED_VALUE;
-            msg.payload = snap;
-
+            
             net::SnapshotBatch batch{};
-            batch.parts.push_back(std::move(msg));
-            sendSink.EnqueueSnapshotBatch(batch);
+            if (CHostWorldSync::BuildSnapshotBatch(m_sessionId, currentTick, m_nextSequence, records, batch)
+                == net::SendResult::Queued)
+            {
+                sendSink.EnqueueSnapshotBatch(batch);
+            }
+            
         }
 
     private:
