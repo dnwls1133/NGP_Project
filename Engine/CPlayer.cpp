@@ -48,7 +48,6 @@ CPlayer::CPlayer()
 
     m_pFireSE = CResMgr::GetInst()->LoadSound(L"Player Fire", L"sound\\SE\\SE_FireDanmaku.mp3");
     m_pLvUpSE = CResMgr::GetInst()->LoadSound(L"Player Lv Up", L"sound\\SE\\SE_LevelUp.mp3");
-    m_pDeadSE = CResMgr::GetInst()->LoadSound(L"Player Dead", L"sound\\SE\\SE_EnemyDead.mp3");
 
 	CTexture* m_pTex = CResMgr::GetInst()->LoadTexture(L"PlayerWalk", L"texture\\Player\\Player_Walk.png");
 	CreaeteAnimator();
@@ -146,10 +145,8 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
 
             if (dAcc > 2.f) {
                 dAcc = 0;
-                GetAnimator()->LoadAnimation(L"animation\\player_walk_left.anim");
-                GetAnimator()->Play(L"Player_walk", true);
+                SetRespawnInvincible(false);
                 SetCollideron();
-                m_bHit = false;
             }
             SetPos(vPos);
         }
@@ -212,6 +209,23 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
     else if (m_clear) {
         vPos.y -= 300.f * dt;
         SetPos(vPos);
+    }
+}
+
+void CPlayer::SetRespawnInvincible(bool invincible)
+{
+    if (m_bHit == invincible)
+        return;
+
+    m_bHit = invincible;
+    if (invincible)
+    {
+        GetAnimator()->LoadAnimation(L"animation\\player_Invincible.anim");
+        GetAnimator()->Play(L"Player_Invincible", true);
+    }
+    else
+    {
+        GetAnimator()->Play(L"Player_walk", true);
     }
 }
 
@@ -392,21 +406,17 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
         if (isMujeok)
             return;
 
-        CSoundMgr::GetInst()->PlaySE(m_pDeadSE);
         if (m_iHp <= 1)
         {
             CScene_Stage01* curscene = (CScene_Stage01*)CSceneMgr::GetInst()->GetCurScene();
             curscene->Fail();
         }
-        GetAnimator()->LoadAnimation(L"animation\\player_Invincible.anim");
-        GetAnimator()->Play(L"Player_Invincible", true);
+        SetRespawnInvincible(true);
 		CPlayerDead* pDead = new CPlayerDead;
 		pDead->SetPos(GetPos());
-		pDead->SetName(L"Player_Dead");
 		CreateObject(pDead, GROUP_TYPE::DEAD_PLAYER);
 		--m_iHp;
         m_iLvl = 1;
-		m_bHit = true;
 		Vec2 vPos = GetPos();
 		vPos.y = 1200;
 		SetPos(vPos);

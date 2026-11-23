@@ -33,7 +33,6 @@ CItem::CItem()
     CTexture* m_pTex = CResMgr::GetInst()->LoadTexture(L"ItemTex0", L"texture\\Item.png");
     CreaeteAnimator();
     GetAnimator()->CreateAnimation(L"Item0", m_pTex, Vec2(0.f, 0.f), Vec2(20.f, 20.f), Vec2(20.f, 0.f), 0.05f, 15);
-    GetAnimator()->FindAnimation(L"Item0")->Save(L"animation\\Item0.anim");
     GetAnimator()->Play(L"Item0", true);
 }
 
@@ -56,6 +55,18 @@ void CItem::InitAfterPlacement()
     vPpos.x -= vIpos.x;
     vPpos.y = vIpos.y - vPpos.y;
     m_vDir = vPpos.Normalize();
+}
+
+void CItem::ApplySpawnState(const protocol::SpawnPayload& spawn)
+{
+    SetObjectId(spawn.objectId);
+    SetName(L"Item");
+    SetPos(Vec2(spawn.pos.x / 100.f, spawn.pos.y / 100.f));
+    m_iType = spawn.subType;
+
+    Vec2 velocity(spawn.vel.x / 100.f, spawn.vel.y / 100.f);
+    m_fVec = velocity.Length();
+    m_vDir = m_fVec > 0.f ? Vec2(velocity.x / m_fVec, velocity.y / m_fVec) : Vec2(0.f, 0.f);
 }
 
 void CItem::ResolveSimultaneousPickup()
@@ -106,6 +117,7 @@ void CItem::ResolveSimultaneousPickup()
             return;
         }
 
+        stage->QueueDespawn(GetObjectId(), protocol::DespawnReason::COLLECTED);
         m_bCollected = true;
         SetCollideroff();
         DeleteObject(this);

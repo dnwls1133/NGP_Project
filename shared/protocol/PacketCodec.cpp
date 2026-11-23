@@ -554,12 +554,17 @@ namespace protocol
             return CodecError::NONE;
         }
 
-        // 13. SPAWN: 몬스터/탄환/아이템 생성 이벤트 (본문 36바이트)
+        constexpr bool IsValidSpawnKind(NetObjectKind kind) noexcept
+        {
+            return IsValidNetObjectKind(kind) || kind == NetObjectKind::PLAYER_DEATH_EFFECT;
+        }
+
+        // 13. SPAWN: 객체 생성 이벤트 (본문 36바이트)
         CodecError EncodePayload(const SpawnPayload& p, ByteWriter& w)
         {
             if (p.eventId == 0
                 || p.objectId == 0
-                || !IsValidNetObjectKind(p.kind)
+                || !IsValidSpawnKind(p.kind)
                 || !IsValidOptionalPlayerSlot(p.ownerPlayerId))
             {
                 return CodecError::INVALID_FIELD;
@@ -963,7 +968,7 @@ namespace protocol
 
                 if (p.eventId == 0
                     || p.objectId == 0
-                    || !IsValidNetObjectKind(p.kind)
+                    || !IsValidSpawnKind(p.kind)
                     || !IsValidOptionalPlayerSlot(p.ownerPlayerId))
                 {
                     return CodecError::INVALID_FIELD;

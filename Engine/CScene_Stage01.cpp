@@ -3,6 +3,8 @@
 #include "CObject.h"
 
 #include "CPlayer.h"
+#include "CPlayerDead.h"
+#include "CItem.h"
 #include "CMonster.h"
 #include "CMissile.h"
 #include "CBackground.h"
@@ -210,7 +212,8 @@ void CScene_Stage01::OnObjectAdded(CObject* _pObj, GROUP_TYPE _eType)
     if (_eType != GROUP_TYPE::PROJ_PLAYER
         && _eType != GROUP_TYPE::PROJ_MONSTER
         && _eType != GROUP_TYPE::MONSTER
-        && _eType != GROUP_TYPE::ITEM)
+        && _eType != GROUP_TYPE::ITEM
+        && !(_eType == GROUP_TYPE::DEAD_PLAYER && dynamic_cast<CPlayerDead*>(_pObj)))
     {
         return;
     }
@@ -233,11 +236,34 @@ void CScene_Stage01::update()
         m_dAcc += fDT;
     }
 
-    // 대기 중인 아이템 획득 이벤트를 RESULT보다 먼저 등록한다.
-    if (session.IsHost() && session.GetState() == network::SessionState::Started &&
-        !FlushItemEvents())
+    if (session.IsHost() && session.GetState() == network::SessionState::Started)
     {
-        return;
+        // Send SPAWN before combat events that reference the new objects.
+        while (!m_pendingSpawns.empty())
+        {
+            auto spawn = m_pendingSpawns.front();
+            spawn.eventId = m_nextSpawnEventId + 1;
+            const auto result = session.SendSpawn(spawn, m_hostTick);
+            if (result == net::SendResult::Queued)
+            {
+                m_nextSpawnEventId = spawn.eventId;
+            }
+            else if (result == net::SendResult::QueueFull)
+            {
+                return;
+            }
+            else
+            {
+#ifdef _DEBUG
+                std::cerr << "[HOST] SPAWN dropped due to error, objectId=" << spawn.objectId
+                    << ", result=" << static_cast<int>(result) << '\n';
+#endif
+            }
+            m_pendingSpawns.pop_front();
+        }
+
+        if (!FlushItemEvents())
+            return;
     }
 
     if (m_bClear)
@@ -405,31 +431,6 @@ void CScene_Stage01::update()
 
             if (!m_bFail)
             {
-                // 11/20: 대기 중인 SPAWN 큐를 FIFO 순서대로 먼저 송신 (스냅샷보다 항상 먼저 전송)
-                while (!m_pendingSpawns.empty())
-                {
-                    auto spawn = m_pendingSpawns.front();
-                    spawn.eventId = m_nextSpawnEventId + 1;
-                    const auto result = session.SendSpawn(spawn, m_hostTick);
-                    if (result == net::SendResult::Queued)
-                    {
-                        m_nextSpawnEventId = spawn.eventId;
-                        m_pendingSpawns.pop_front();
-                    }
-                    else if (result == net::SendResult::QueueFull)
-                    {
-                        break; // 일시적 큐 포화 -> pop하지 않고 다음 프레임에 재시도
-                    }
-                    else
-                    {
-#ifdef _DEBUG
-                        std::cerr << "[HOST] SPAWN dropped due to error, objectId=" << spawn.objectId
-                            << ", result=" << static_cast<int>(result) << '\n';
-#endif
-                        m_pendingSpawns.pop_front(); // 오류 항목은 걸러내어 뒤의 정상 SPAWN이 막히지 않게 처리
-                    }
-                }
-
                 m_hostTickAccumulator += CTimeMgr::GetInst()->GetDT();
 
                 for (std::uint32_t tick = 0; tick < host::MAX_TICKS_PER_FRAME && m_hostTickAccumulator >= host::SIM_FIXED_DT; ++tick)
@@ -547,15 +548,21 @@ void CScene_Stage01::update()
                             remote.lastSnapshotTick.reset();
                         }
                     }
-                    else if (spawn.kind == protocol::NetObjectKind::PROJ_PLAYER)
+                    else if (spawn.kind == protocol::NetObjectKind::PROJ_PLAYER ||
+                             spawn.kind == protocol::NetObjectKind::PROJ_MONSTER)
                     {
+                        const bool isMonsterProjectile = spawn.kind == protocol::NetObjectKind::PROJ_MONSTER;
+                        if (isMonsterProjectile && FindObjectById(spawn.objectId) != nullptr)
+                            continue;
+
+                        const auto group = isMonsterProjectile ? GROUP_TYPE::PROJ_MONSTER : GROUP_TYPE::PROJ_PLAYER;
                         Vec2 vel(spawn.vel.x / 100.f, spawn.vel.y / 100.f);
 
                         float speed = vel.Length();
 
                         CMissile* pMissile = new CMissile();
                         pMissile->SetObjectId(spawn.objectId);
-                        pMissile->init(GROUP_TYPE::PROJ_PLAYER);
+                        pMissile->init(group);
                         pMissile->SetPos(Vec2(spawn.pos.x / 100.f, spawn.pos.y / 100.f));
                         pMissile->SetScale(Vec2(25.f, 25.f));
                         pMissile->SetDir(speed > 0.f ? vel : Vec2(0.f, 1.f));
@@ -564,8 +571,27 @@ void CScene_Stage01::update()
                         pMissile->SetType(spawn.patternType);
                         pMissile->SetOwnerPlayerId(spawn.ownerPlayerId);
                         pMissile->SetDamage(spawn.damage);
-                        pMissile->SetName(L"Missile_Player");
-                        AddObject(pMissile, GROUP_TYPE::PROJ_PLAYER);
+                        pMissile->SetName(isMonsterProjectile ? L"MsMissile" : L"Missile_Player");
+                        AddObject(pMissile, group);
+                    }
+                    else if (spawn.kind == protocol::NetObjectKind::ITEM)
+                    {
+                        if (FindObjectById(spawn.objectId) == nullptr)
+                        {
+                            auto* item = new CItem();
+                            item->ApplySpawnState(spawn);
+                            AddObject(item, GROUP_TYPE::ITEM);
+                        }
+                    }
+                    else if (spawn.kind == protocol::NetObjectKind::PLAYER_DEATH_EFFECT)
+                    {
+                        if (FindObjectById(spawn.objectId) == nullptr)
+                        {
+                            auto* effect = new CPlayerDead();
+                            effect->SetObjectId(spawn.objectId);
+                            effect->SetPos(Vec2(spawn.pos.x / 100.f, spawn.pos.y / 100.f));
+                            AddObject(effect, GROUP_TYPE::DEAD_PLAYER);
+                        }
                     }
                     else if (spawn.kind == protocol::NetObjectKind::MONSTER)
                     {
@@ -593,7 +619,9 @@ void CScene_Stage01::update()
                     // despawn.objectId의 객체를 제거하는 코드 연결
                     if (CObject* obj = FindObjectById(despawn.objectId))
                     {
-                        DeleteObject(obj);
+                        auto* mon = dynamic_cast<CMonster*>(obj);
+                        if (despawn.reason != protocol::DespawnReason::DESTROYED || mon == nullptr || !mon->GetsignalDead())
+                            DeleteObject(obj);
                     }
                 }
 
@@ -632,8 +660,32 @@ void CScene_Stage01::update()
                     else if (combat.kind == protocol::CombatEventKind::DAMAGE_APPLIED
                         || combat.kind == protocol::CombatEventKind::ENTITY_DIED)
                     {
+                        if (combat.kind == protocol::CombatEventKind::DAMAGE_APPLIED && combat.sourceObjectId != 0)
+                        {
+                            auto* missile = dynamic_cast<CMissile*>(FindObjectById(combat.sourceObjectId));
+                            if (missile == nullptr || missile->IsDead())
+                            {
+                                if (auto* target = FindObjectById(combat.targetObjectId))
+                                {
+                                    missile = new CMissile();
+                                    missile->SetObjectId(combat.sourceObjectId);
+                                    missile->SetPos(target->GetPos());
+                                    missile->SetDir(Vec2(0.f, 1.f));
+                                    missile->SetName(L"Missile_Player");
+                                    AddObject(missile, GROUP_TYPE::PROJ_PLAYER);
+                                }
+                            }
+
+                            if (missile != nullptr && !missile->IsDead())
+                                missile->PlayHitEffect();
+                        }
+
                         if (auto* mon = dynamic_cast<CMonster*>(FindObjectById(combat.targetObjectId)))
+                        {
                             mon->SetConfirmedHP(static_cast<float>(combat.confirmedHp));
+                            if (combat.kind == protocol::CombatEventKind::ENTITY_DIED)
+                                mon->BeginDeath();
+                        }
 
                         if (combat.kind == protocol::CombatEventKind::ENTITY_DIED)
                             CRankMgr::GetInst()->CurrentRanking.Score = static_cast<int>(combat.teamScore);
@@ -652,6 +704,9 @@ void CScene_Stage01::update()
                             // 생성 전 도착한 상태는 건너뛰고 다음 스냅샷부터 적용
                             if (auto* mon = dynamic_cast<CMonster*>(FindObjectById(object.objectId)))
                             {
+                                if (mon->GetsignalDead() && object.alive)
+                                    continue;
+
                                 mon->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
                                 mon->SetConfirmedHP(static_cast<float>(object.hp));
                             }
@@ -676,6 +731,7 @@ void CScene_Stage01::update()
                             if (auto* player = GetPlayer(slot))
                             {
                                 player->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
+                                player->SetRespawnInvincible(object.fsmState == 1);
                                 remote.lastSnapshotTick = snapshot.snapshotTick;
                             }
 

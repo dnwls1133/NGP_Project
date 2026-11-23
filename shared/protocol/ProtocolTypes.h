@@ -195,7 +195,8 @@ namespace protocol
         MONSTER = 2,      // GROUP_TYPE::MONSTER (CMonster: NORMAL1~5, EPIC, EPIC2, BOSS)
         PROJ_PLAYER = 3,  // GROUP_TYPE::PROJ_PLAYER (CMissile: LVL1~LVL6)
         PROJ_MONSTER = 4, // GROUP_TYPE::PROJ_MONSTER (CMissile: SMALL, SPIN, MIDDLE, BSMALL)
-        ITEM = 5          // GROUP_TYPE::ITEM (CItem)
+        ITEM = 5,         // GROUP_TYPE::ITEM (CItem)
+        PLAYER_DEATH_EFFECT = 6 // GROUP_TYPE::DEAD_PLAYER (CPlayerDead), SPAWN only
     };
 
     // DESPAWN 사유

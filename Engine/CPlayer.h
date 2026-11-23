@@ -22,11 +22,11 @@ private:
 
     CSound* m_pFireSE;
     CSound* m_pLvUpSE;
-    CSound* m_pDeadSE;
 
 public:
     virtual void update();
     void Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt);
+    void SetRespawnInvincible(bool invincible);
 
     void SetPlayerId(PlayerId id) { m_PlayerId = id; }
     PlayerId GetPlayerId() { return m_PlayerId; }
