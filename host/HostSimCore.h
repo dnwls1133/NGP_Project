@@ -39,6 +39,7 @@ namespace host
     inline constexpr std::uint32_t BOSS_SPAWN_TICK = 130 * SIM_TICK_HZ;
     inline constexpr std::uint8_t MONSTER_SUBTYPE_BOSS = 6;
     inline constexpr std::int32_t BOSS_PHASE2_HP_THRESHOLD = 4000;
+    inline constexpr std::uint32_t PLAYER_RESPAWN_INVINCIBLE_TICKS = 120;
 
     // 고정 틱 시뮬레이션 dt (전역 fDT와 분리된 호스트 계산 전용 고정 시간 간격)
     inline constexpr float SIM_FIXED_DT = 1.0f / static_cast<float>(SIM_TICK_HZ);
@@ -837,7 +838,37 @@ namespace host
             return false;
         }
 
+        // 11/24: 플레이어 피격 처리 (사망·삭제 예정·무적 상태는 제외)
+        bool ApplyDamageToPlayer(protocol::PlayerSlot slot, std::int32_t damage = 1) noexcept
+        {
+            if (slot >= protocol::MAX_PROTOCOL_PLAYERS)
+                return false;
 
+            const protocol::ObjectId playerObjId = m_playerSlotObjectIds[slot];
+            for (HostObjectValue& obj : m_objects) {
+                if (obj.objectId != playerObjId || obj.pendingDestroy || obj.hp <= 0 ||
+                    obj.fsmState == 1)
+                    continue;
+
+                obj.hp = (std::max)(std::int32_t{ 0 }, obj.hp - damage);
+                obj.stateTickAccum = 0;
+                obj.fsmState = (obj.hp > 0) ? 1 : 0; // 생존 잔여 시 무적/재등장(1),
+                // 0이면 개인 전투 불능(alive = 0)
+                return true;
+            }
+            return false;
+        }
+
+        // 11/24: 등록된 플레이어 전원 전투 불능(또는 삭제) 여부
+        bool AreAllPlayersDead() const noexcept
+        {
+            for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS; ++slot) {
+                const HostObjectValue* p = FindObjectById(m_playerSlotObjectIds[slot]);
+                if (p != nullptr && !p->pendingDestroy && p->hp > 0)
+                    return false;
+            }
+            return true;
+        }
 
         // 11/11: 마지막 유효 입력 시각 기준 300ms 경과 시 이동·발사 중립화
         // - 경계 직전(elapsedMs == 299): 유지
@@ -1032,6 +1063,17 @@ namespace host
                 if (obj.kind == protocol::NetObjectKind::PLAYER
                     && obj.ownerPlayerId < protocol::MAX_PROTOCOL_PLAYERS)
                 {
+                    if (obj.hp <= 0) {
+                        obj.vel = {};
+                        continue; // 개인 전투 불능 상태는 이동·발사 계산 제외 (객체 삭제는 아니다.)
+                    }
+                    if (obj.fsmState == 1) {
+                        ++obj.stateTickAccum;
+                        if (obj.stateTickAccum >= PLAYER_RESPAWN_INVINCIBLE_TICKS) {
+                            obj.fsmState = 0;
+                            obj.stateTickAccum = 0;
+                        }
+                    }
                     const std::uint8_t bits = m_lastAppliedMoveBits[obj.ownerPlayerId];
                     std::int32_t vx = 0;
                     std::int32_t vy = 0;
