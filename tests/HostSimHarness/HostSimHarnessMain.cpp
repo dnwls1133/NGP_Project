@@ -967,7 +967,115 @@ namespace
                 counters);
         }
     }
-
+    void RunHostSim1123Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. CHostWorldSync 분할기: 0/1/36/37/9181(255조각 초과) 실제 Encode 크기(<=1,200B), 단독 Decode, 다중 조각 미전송 교체 확인
+        {
+            auto makeRecords = [](std::size_t n) {
+                std::vector<ObjectStateRecord> recs;
+                recs.reserve(n);
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    ObjectStateRecord r{};
+                    r.objectId = static_cast<ObjectId>(i + 1);
+                    r.kind = NetObjectKind::MONSTER;
+                    r.subType = 1;
+                    r.alive = 1;
+                    r.hp = 100;
+                    r.maxHp = 100;
+                    recs.push_back(r);
+                }
+                return recs;
+                };
+            std::uint32_t seq = 1;
+            net::SnapshotBatch b0{}, b1{}, b36{}, b37{}, bOver{};
+            const auto r0 = CHostWorldSync::BuildSnapshotBatch(1000, 10, seq, makeRecords(0), b0);
+            const auto r1 = CHostWorldSync::BuildSnapshotBatch(1000, 11, seq, makeRecords(1), b1);
+            const auto r36 = CHostWorldSync::BuildSnapshotBatch(1000, 12, seq, makeRecords(36), b36);
+            const auto r37 = CHostWorldSync::BuildSnapshotBatch(1000, 13, seq, makeRecords(37), b37);
+            const auto rOver = CHostWorldSync::BuildSnapshotBatch(
+                1000, 14, seq, makeRecords(MAX_SNAPSHOT_OBJECTS_PER_PACKET * net::MAX_SNAPSHOT_PARTS_PER_BATCH + 1), bOver);
+            std::vector<std::uint8_t> bytes0, bytes1, bytes36, bytes37p0, bytes37p1;
+            const bool encodeOk =
+                (CPacketCodec::Encode(b0.parts[0], bytes0) == CodecError::NONE && bytes0.size() == 40)
+                && (CPacketCodec::Encode(b1.parts[0], bytes1) == CodecError::NONE && bytes1.size() == 72)
+                && (CPacketCodec::Encode(b36.parts[0], bytes36) == CodecError::NONE && bytes36.size() == 1192)
+                && (CPacketCodec::Encode(b37.parts[0], bytes37p0) == CodecError::NONE && bytes37p0.size() == 1192)
+                && (CPacketCodec::Encode(b37.parts[1], bytes37p1) == CodecError::NONE && bytes37p1.size() == 72)
+                && (bytes36.size() <= MAX_UDP_BYTES && bytes37p0.size() <= MAX_UDP_BYTES);
+            // 타 조각(part 0) 없이 part 1 단독 Decode 해석 가능 확인
+            Message decodedPart1{};
+            const bool standaloneDecodeOk =
+                (CPacketCodec::Decode(bytes37p1, decodedPart1) == CodecError::NONE)
+                && (std::get<StateSnapshotPayload>(decodedPart1.payload).partIndex == 1)
+                && (std::get<StateSnapshotPayload>(decodedPart1.payload).objects.size() == 1)
+                && (std::get<StateSnapshotPayload>(decodedPart1.payload).objects[0].objectId == 37);
+            // 다중 조각 배치 미전송 교체 확인 (틱 13 -> 틱 15 교체 시 혼합 없음)
+            net::FakeSendSink sink;
+            net::SnapshotBatch b37Next{};
+            CHostWorldSync::BuildSnapshotBatch(1000, 15, seq, makeRecords(37), b37Next);
+            const auto q1 = sink.EnqueueSnapshotBatch(b37);
+            const auto q2 = sink.EnqueueSnapshotBatch(b37Next);
+            const auto taken = sink.TakePendingBatchForSend();
+            const bool replaceOk =
+                (q1 == net::SendResult::Queued)
+                && (q2 == net::SendResult::ReplacedPending)
+                && taken.has_value()
+                && (taken->parts.size() == 2)
+                && (taken->parts[0].header.hostTick == 15 && taken->parts[1].header.hostTick == 15);
+            Check(r0 == net::SendResult::Queued && b0.parts.size() == 1
+                && r1 == net::SendResult::Queued && b1.parts.size() == 1
+                && r36 == net::SendResult::Queued && b36.parts.size() == 1
+                && r37 == net::SendResult::Queued && b37.parts.size() == 2
+                && rOver == net::SendResult::TooLarge
+                && encodeOk && standaloneDecodeOk && replaceOk,
+                "HostSim1123: Splits 0/1/36/37/overflow snapshots <=1200B, decodes parts independently, and replaces pending multi-part batch",
+                counters);
+        }
+        // 2. 특수 탄환(가속 patternType=2 30틱 x1.5 / 감속 patternType=3 42틱 /2) 속도·패턴 스냅샷 보존 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId accelId = engine.RequestSpawn(
+                NetObjectKind::PROJ_MONSTER, 2, INVALID_PLAYER_SLOT,
+                FixedVec2{ 10'000, 10'000 }, FixedVec2{ 0, 40'000 }, 1, 1, 2);
+            const ObjectId decelId = engine.RequestSpawn(
+                NetObjectKind::PROJ_MONSTER, 3, INVALID_PLAYER_SLOT,
+                FixedVec2{ 20'000, 10'000 }, FixedVec2{ 0, 40'000 }, 1, 1, 3);
+            engine.FlushLifecycleAtTickEnd(sink);
+            // 30틱(500ms) 진행 -> 가속 탄환만 40,000 -> 60,000 전환
+            for (int i = 0; i < 6; ++i)
+                engine.StepFrame(83'334, script, sink);
+            const bool at30Ok =
+                (engine.FindObjectById(accelId)->vel.y == 60'000)
+                && (engine.FindObjectById(decelId)->vel.y == 40'000);
+            // +12틱(총 42틱 = 700ms) 진행 -> 감속 탄환 40,000 -> 20,000 전환 및 42틱 스냅샷 반영
+            engine.StepFrame(83'334, script, sink);
+            engine.StepFrame(83'334, script, sink);
+            engine.StepFrame(33'334, script, sink);
+            bool snapOk = false;
+            if (!sink.GetCapturedBatches().empty())
+            {
+                const auto& snap = std::get<StateSnapshotPayload>(sink.GetCapturedBatches().back().parts[0].payload);
+                std::int32_t accelVelY = 0, decelVelY = 0;
+                std::uint8_t accelState = 0, decelState = 0;
+                for (const auto& rec : snap.objects)
+                {
+                    if (rec.objectId == accelId) { accelVelY = rec.vel.y; accelState = rec.fsmState; }
+                    if (rec.objectId == decelId) { decelVelY = rec.vel.y; decelState = rec.fsmState; }
+                }
+                snapOk = (snap.snapshotTick == 42)
+                    && (accelVelY == 60'000 && accelState == 2)
+                    && (decelVelY == 20'000 && decelState == 3);
+            }
+            Check(at30Ok && snapOk,
+                "HostSim1123: Preserves special projectile patternType and tick-based accel/decel velocity in snapshot",
+                counters);
+        }
+    }
 
 }
 
@@ -991,6 +1099,7 @@ int main()
     RunHostSim1120Suite(counters);
     RunHostSim1121Suite(counters);
     RunHostSim1122Suite(counters);
+    RunHostSim1123Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';
