@@ -25,6 +25,8 @@ public:
         m_vDir.Normalize();
     }
     void SetType(int _iType) { m_iType = _iType; }
+    int GetType() const { return m_iType; }
+    bool IsSpecialPattern() const { return m_iType == 2 || m_iType == 3; }
     void SetVec(int _iVec) { m_fVec = (float)_iVec; }
     void SetOwnerPlayerId(PlayerId _id) { m_ownerPlayerId = _id; }
     PlayerId GetOwnerPlayerId() const { return m_ownerPlayerId; }
@@ -32,6 +34,8 @@ public:
     int GetDamage() const { return m_iDamage; }
 
     protocol::SpawnPayload ExportSpawnPayload(protocol::EventId eventId) const override;
+    protocol::ObjectStateRecord ExportStateRecord() const;
+    void ApplySnapshotState(Vec2 pos, Vec2 vel);
 
 public:
     virtual void update();

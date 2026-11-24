@@ -471,6 +471,14 @@ void CScene_Stage01::update()
                                 states.push_back(static_cast<const CMonster*>(obj)->ExportStateRecord());
                             }
 
+                            // 11/23: 가속/감속 특수 탄환(m_iType 2, 3) 상태를 스냅샷에 포함
+                            for (CObject* obj : GetGroupObject(GROUP_TYPE::PROJ_MONSTER)) {
+                                if (obj == nullptr || obj->IsDead() || obj->GetObjectId() == 0)
+                                    continue;
+                                const auto* missile = static_cast<const CMissile*>(obj);
+                                if (missile->IsSpecialPattern())
+                                    states.push_back(missile->ExportStateRecord());
+                            }
 
                             const auto result = session.SendSnapshot(states, m_hostTick);
 
@@ -712,6 +720,16 @@ void CScene_Stage01::update()
                             }
 
 
+                            continue;
+                        }
+
+                        if (object.kind == protocol::NetObjectKind::PROJ_MONSTER) {
+                            if (auto* missile = dynamic_cast<CMissile*>
+                                (FindObjectById(object.objectId))) {
+                                missile->ApplySnapshotState(
+                                    Vec2(object.pos.x / 100.f, object.pos.y / 100.f),
+                                    Vec2(object.vel.x / 100.f, object.vel.y / 100.f));
+                            }
                             continue;
                         }
 
