@@ -24,38 +24,40 @@
 #include "resource.h"
 //CCore* CCore::g_pInst = nullptr;
 
-
+#ifdef _DEBUG
+#include <iostream>
+#endif
 
 
 
 CCore::CCore()
-	: m_hWnd(0)
-	, m_ptResolution{}
-	, m_hDC(0)
-	, m_pMemTex(nullptr)
-	, m_arrBrush{}
-	, m_arrPen{}
+    : m_hWnd(0)
+    , m_ptResolution{}
+    , m_hDC(0)
+    , m_pMemTex(nullptr)
+    , m_arrBrush{}
+    , m_arrPen{}
     , session(*network::CNetworkMgr::GetInst())
 {
 }
 
 CCore::~CCore()
 {
-	ReleaseDC(m_hWnd, m_hDC);
-	
-	for (int i = 0; i < (UINT)PEN_TYPE::END; ++i)
-	{
-		DeleteObject(m_arrPen[i]);
-	}
+    ReleaseDC(m_hWnd, m_hDC);
+
+    for (int i = 0; i < (UINT)PEN_TYPE::END; ++i)
+    {
+        DeleteObject(m_arrPen[i]);
+    }
     DestroyMenu(m_hMenu);
     session.Stop();
 }
 
 int CCore::init(HWND _hWnd, POINT _ptresolution)
 {
-	m_hWnd = _hWnd;
-	m_ptResolution = _ptresolution;
-	// 해상도에 맞게 윈도우 크기 조정
+    m_hWnd = _hWnd;
+    m_ptResolution = _ptresolution;
+    // 해상도에 맞게 윈도우 크기 조정
     ChangeWindowSize(m_ptResolution, false);
     RECT rt = { 0,0, m_ptResolution.x,m_ptResolution.y };
     SetWindowPos(m_hWnd, nullptr, 100, 50, rt.right - rt.left, rt.bottom - rt.top, 0);
@@ -64,66 +66,87 @@ int CCore::init(HWND _hWnd, POINT _ptresolution)
 
 
 
-	m_hDC = GetDC(m_hWnd);
+    m_hDC = GetDC(m_hWnd);
 
 
-	// 이중 버퍼링 용도의 텍스쳐 한장을 만든다.
+    // 이중 버퍼링 용도의 텍스쳐 한장을 만든다.
     m_pMemTex = CResMgr::GetInst()->CreateTexture(L"BackVuffer", (UINT)m_ptResolution.x, (UINT)m_ptResolution.y);
 
 
 
 
     // 자주 사용할 펜 브러쉬 생성
-	CreateBrushPen();
+    CreateBrushPen();
 
-	// Manager 초기화
-	CPathMgr::GetInst()->init();
-	CTimeMgr::GetInst()->init();
-	CKeyMgr::GetInst()->init();
+    // Manager 초기화
+    CPathMgr::GetInst()->init();
+    CTimeMgr::GetInst()->init();
+    CKeyMgr::GetInst()->init();
     CCamera::GetInst()->init();
-	CSceneMgr::GetInst()->init();
+    CSceneMgr::GetInst()->init();
 
 
 
-	return S_OK;
+    return S_OK;
 }
 
 void CCore::progress()
 {
-	// Manager Update
-	CTimeMgr::GetInst()->update();
-	CKeyMgr::GetInst()->update();
-	//CCamera::GetInst()->update();
+    // Manager Update
+    CTimeMgr::GetInst()->update();
+    CKeyMgr::GetInst()->update();
+    //CCamera::GetInst()->update();
+
+#ifdef _DEBUG
+    const auto previousState = session.GetState();
+#endif
 
     session.Update();
-	CSceneMgr::GetInst()->update();
 
-	// 충돌체크 
-	CColliderMgr::GetInst()->update();
-	
-	// UI 체크
-	CUIMgr::GetInst()->update();
+#ifdef _DEBUG
+    using network::SessionState;
 
-	// =========
-	// Rendering
-	// =========
-	// 화면 Clear
+    const auto currentState = session.GetState();
+
+    if (previousState == SessionState::Started && (currentState == SessionState::Disconnected || currentState == SessionState::Failed))
+    {
+        const auto& event = session.GetLastNetworkEvent();
+
+        const char* reason = "Network failed";
+        if (currentState == SessionState::Disconnected)
+            reason = event.socketError == WSAETIMEDOUT ? "Heartbeat timeout" : "Peer disconnected";
+
+        std::cout << (session.IsHost() ? "[HOST] " : "[CLIENT] ") << reason << ", socketError=" << event.socketError << ", codecError=" << static_cast<int>(event.codecError) << '\n';
+    }
+#endif
+    CSceneMgr::GetInst()->update();
+
+    // 충돌체크 
+    CColliderMgr::GetInst()->update();
+
+    // UI 체크
+    CUIMgr::GetInst()->update();
+
+    // =========
+    // Rendering
+    // =========
+    // 화면 Clear
 
     Clear();
 
-	CSceneMgr::GetInst()->render((m_pMemTex->GetDC()));
+    CSceneMgr::GetInst()->render((m_pMemTex->GetDC()));
 
     CCamera::GetInst()->render((m_pMemTex->GetDC()));
 
-	BitBlt(m_hDC, 0, 0, m_ptResolution.x, m_ptResolution.y , m_pMemTex->GetDC(), 0, 0, SRCCOPY);
+    BitBlt(m_hDC, 0, 0, m_ptResolution.x, m_ptResolution.y, m_pMemTex->GetDC(), 0, 0, SRCCOPY);
 
-	CTimeMgr::GetInst()->render();
+    CTimeMgr::GetInst()->render();
 
 
-	//===============
-	// 이벤트 지연처리
-	//===============
-	CEventMgr::GetInst()->update();
+    //===============
+    // 이벤트 지연처리
+    //===============
+    CEventMgr::GetInst()->update();
 }
 
 
@@ -136,14 +159,14 @@ void CCore::Clear()
 
 void CCore::CreateBrushPen()
 {
-	// hollow brush
-	m_arrBrush[(UINT)BRUSH_TYPE::HOLLOW] = (HBRUSH)GetStockObject(HOLLOW_BRUSH);
+    // hollow brush
+    m_arrBrush[(UINT)BRUSH_TYPE::HOLLOW] = (HBRUSH)GetStockObject(HOLLOW_BRUSH);
     m_arrBrush[(UINT)BRUSH_TYPE::BLACK] = (HBRUSH)GetStockObject(BLACK_BRUSH);
 
-	// red pen
-	m_arrPen[(UINT)PEN_TYPE::RED] = CreatePen(PS_SOLID, 1, RGB(255, 0, 0));
-	m_arrPen[(UINT)PEN_TYPE::BLUE] = CreatePen(PS_SOLID, 1, RGB(0, 0, 255));
-	m_arrPen[(UINT)PEN_TYPE::GREEN] = CreatePen(PS_SOLID, 1, RGB(0, 255, 0));
+    // red pen
+    m_arrPen[(UINT)PEN_TYPE::RED] = CreatePen(PS_SOLID, 1, RGB(255, 0, 0));
+    m_arrPen[(UINT)PEN_TYPE::BLUE] = CreatePen(PS_SOLID, 1, RGB(0, 0, 255));
+    m_arrPen[(UINT)PEN_TYPE::GREEN] = CreatePen(PS_SOLID, 1, RGB(0, 255, 0));
 }
 
 void CCore::DockMenu()

@@ -158,7 +158,7 @@ void CScene_Stage01::ReportMonsterCombat(protocol::ObjectId monsterId, protocol:
         msg.payload = combat;
         m_pendingItemEvents.push_back(msg);
     }
-    
+
 }
 
 void CScene_Stage01::QueueDespawn(protocol::ObjectId objectId, protocol::DespawnReason reason)
@@ -202,7 +202,7 @@ bool CScene_Stage01::FlushItemEvents()
 void CScene_Stage01::OnObjectAdded(CObject* _pObj, GROUP_TYPE _eType)
 {
     auto& session = CCore::GetInst()->GetSession();
-    if(!session.IsHost() || session.GetState() !=
+    if (!session.IsHost() || session.GetState() !=
         network::SessionState::Started)
         return;
 
@@ -229,6 +229,8 @@ void CScene_Stage01::OnObjectAdded(CObject* _pObj, GROUP_TYPE _eType)
 void CScene_Stage01::update()
 {
     auto& session = CCore::GetInst()->GetSession();
+    using network::SessionState;
+    const auto state = session.GetState();
 
     if (!m_bFail)
     {
@@ -236,7 +238,7 @@ void CScene_Stage01::update()
         m_dAcc += fDT;
     }
 
-    if (session.IsHost() && session.GetState() == network::SessionState::Started)
+    if (session.IsHost() && state == network::SessionState::Started)
     {
         // Send SPAWN before combat events that reference the new objects.
         while (!m_pendingSpawns.empty())
@@ -398,7 +400,33 @@ void CScene_Stage01::update()
     }
     else
     {
-        if (session.GetState() != network::SessionState::Started)
+        if (state == SessionState::Disconnected || state == SessionState::Failed)
+        {
+            // TODO: 상대 연결 끊어지거나 종료했을 때 연결
+#ifdef _DEBUG
+            const auto& event = session.GetLastNetworkEvent();
+            const char* reason = "Network failed";
+
+            if (state == SessionState::Disconnected)
+            {
+                if (event.socketError == WSAETIMEDOUT)
+                    reason = "Heartbeat timeout";
+                else if (event.socketError == 0)
+                    reason = "Peer closed the TCP connection";
+                else
+                    reason = "Connection lost";
+            }
+
+            std::cout << (session.IsHost() ? "[HOST]" : "[CLIENT]")
+                << " [Stage01] " << reason
+                << ", socketError=" << event.socketError
+                << ", codecError=" << static_cast<int>(event.codecError)
+                << '\n';
+#endif
+            return;
+        }
+
+        if (state != SessionState::Started)
             return;
 
         if (KEY_TAP(KEY::SPACE))
@@ -498,7 +526,7 @@ void CScene_Stage01::update()
                 {
                     if (!evt.triggered && hostElapsedSec >= evt.triggerTime) // 11/15 m_dAcc를 hostElapsedSec으로 수정
                     {
-                        
+
                         if (hostElapsedSec >= 130.f && !m_bBossBgmPlayed)
                         {
                             CSoundMgr::GetInst()->PlayBGM(m_pBossTheme);
@@ -557,7 +585,7 @@ void CScene_Stage01::update()
                         }
                     }
                     else if (spawn.kind == protocol::NetObjectKind::PROJ_PLAYER ||
-                             spawn.kind == protocol::NetObjectKind::PROJ_MONSTER)
+                        spawn.kind == protocol::NetObjectKind::PROJ_MONSTER)
                     {
                         const bool isMonsterProjectile = spawn.kind == protocol::NetObjectKind::PROJ_MONSTER;
                         if (isMonsterProjectile && FindObjectById(spawn.objectId) != nullptr)
