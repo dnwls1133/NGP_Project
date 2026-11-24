@@ -1077,6 +1077,82 @@ namespace
         }
     }
 
+    void RunHostSim1124Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 무적/재등장(fsmState=1), 개인 전투 불능(hp=0, 이동/발사 제외, P1 생존 계속), 객체 삭제(RequestDestroy) 구분
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 2, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 2, 2);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // P0 피격 (HP 2->1): 재등장 무적(fsmState=1) 진입, 무적 중 추가 피격 무시, 120틱 후 무적 해제
+            const bool firstHit = engine.ApplyDamageToPlayer(0, 1);
+            const bool ignoredDuringInv = !engine.ApplyDamageToPlayer(0, 1);
+            const std::uint8_t stateInv = engine.FindObjectById(p0Id)->fsmState;
+            for (int i = 0; i < 24; ++i)
+                engine.StepFrame(83'334, script, sink); // 24 * 5 = 120틱 (2초)
+            const std::uint8_t stateAfterInv = engine.FindObjectById(p0Id)->fsmState;
+
+            // P0 치명타 (HP 1->0): 개인 전투 불능(alive=0, 객체는 유지), P1 생존으로 게임 계속(!AreAllPlayersDead)
+            const bool lethalHit = engine.ApplyDamageToPlayer(0, 1);
+            const bool continuesWithP1 = !engine.AreAllPlayersDead() && (engine.FindObjectById(p0Id) != nullptr);
+
+            // P0 이동/발사 입력을 넣어도 위치 고정 및 탄환 미생성 확인
+            const FixedVec2 deadPosBefore = engine.FindObjectById(p0Id)->pos;
+            script.ScheduleInput(121, 0, MoveBit::RIGHT, 1, 1, 2000);
+            for (int i = 0; i < 3; ++i)
+                engine.StepFrame(83'334, script, sink); // 15틱 진행
+            bool deadNoMoveNoFire = (engine.FindObjectById(p0Id)->pos == deadPosBefore);
+            for (const auto& obj : engine.GetActiveObjects())
+            {
+                if (obj.kind == NetObjectKind::PROJ_PLAYER && obj.ownerPlayerId == 0)
+                    deadNoMoveNoFire = false;
+            }
+
+            // P1도 사망 시 전원 사망, 객체 삭제 요청 후에는 FindObjectById == nullptr
+            engine.ApplyDamageToPlayer(1, 2);
+            const bool allDead = engine.AreAllPlayersDead();
+            engine.RequestDestroy(p0Id, DespawnReason::STAGE_END);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            Check(firstHit && ignoredDuringInv && stateInv == 1 && stateAfterInv == 0
+                && lethalHit && continuesWithP1 && deadNoMoveNoFire
+                && allDead && engine.FindObjectById(p0Id) == nullptr && p1Id != 0,
+                "HostSim1124: Distinguishes respawn invincibility, combat-disabled player, and object destruction while continuing if P1 lives",
+                counters);
+        }
+
+        // 2. 사망자 조준·아이템 획득 대상 제외 확인 (P0 사망·P1 생존 시 P1만 조준/획득)
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 1, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 30'000, 30'000 }, {}, 1, 2);
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 10'100, 29'000 }, {}, 50, 1);
+            const ObjectId itemId = engine.RequestSpawn(NetObjectKind::ITEM, 1, INVALID_PLAYER_SLOT, FixedVec2{ 10'100, 30'000 }, {}, 1, 0);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // P0 사망 -> 적/아이템 바로 옆에 P0가 있어도 조준·획득 모두 P1 선택
+            engine.ApplyDamageToPlayer(0, 1);
+            const PlayerSlot aimedSlot = engine.SelectNearestAlivePlayerId(FixedVec2{ 10'100, 29'000 });
+            const ObjectId firedProj = engine.TryFireEnemyAimedProjectile(monId);
+            const PlayerSlot itemWinner = engine.ResolveItemPickup(itemId, { 0, 1 }, sink);
+
+            Check(aimedSlot == 1 && firedProj != 0 && itemWinner == 1
+                && engine.FindObjectById(p0Id)->subType == 1
+                && engine.FindObjectById(p1Id)->subType == 2,
+                "HostSim1124: Excludes combat-disabled P0 from enemy aiming and item pickup",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -1100,6 +1176,7 @@ int main()
     RunHostSim1121Suite(counters);
     RunHostSim1122Suite(counters);
     RunHostSim1123Suite(counters);
+    RunHostSim1124Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

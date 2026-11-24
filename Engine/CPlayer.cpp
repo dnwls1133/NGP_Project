@@ -125,7 +125,7 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
                 vPos.x += 300.f * dt;
         };
 
-    if (!m_clear && !m_dead)
+    if (!m_clear && IsAlivePlayer())
     {
         if (dStartAcc > 0.f)
         {
@@ -236,7 +236,7 @@ protocol::ObjectStateRecord CPlayer::ExportStateRecord(protocol::ObjectId object
     rec.kind = protocol::NetObjectKind::PLAYER;
     rec.subType = static_cast<std::uint8_t>(m_iLvl);
     rec.alive = (!m_dead && m_iHp > 0) ? 1 : 0;
-    rec.fsmState = m_clear ? 2 : (m_bHit ? 1 : 0);
+    rec.fsmState = m_clear ? 2 : ((!m_dead && m_bHit) ? 1 : 0);
     rec.pos.x = static_cast<std::int32_t>(m_vPos.x * 100.f);
     rec.pos.y = static_cast<std::int32_t>(m_vPos.y * 100.f);
     rec.hp = m_iHp;
@@ -278,7 +278,9 @@ void CPlayer::render(HDC _dc)
 	//	, m_pTex->GetDC()
 	//	, 0, 0, iWidith, iHeight
 	//	, RGB(255, 0, 255)); // 색상을 무시하고 나머지 복사해라
-	
+
+    if (m_dead)
+        return;
 	component_render(_dc);
    /* CTexture* pTex  = CResMgr::GetInst()->LoadTexture(L"M4Tex", L"texture\\Player_Walk_A.png");
 
@@ -399,6 +401,9 @@ void CPlayer::ApplyConfirmedItemLevel(std::uint8_t level)
 
 void CPlayer::OnCollisionEnter(CCollider* _pOther)
 {
+    if (m_dead || m_iHp <= 0)
+        return;
+
 	CObject* pOtherObj = _pOther->GetObj();
   
 	if (pOtherObj->GetName() == L"MsMissile" && m_bHit == false)
@@ -406,22 +411,39 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
         if (isMujeok)
             return;
 
-        if (m_iHp <= 1)
-        {
-            CScene_Stage01* curscene = (CScene_Stage01*)CSceneMgr::GetInst()->GetCurScene();
-            curscene->Fail();
-        }
-        SetRespawnInvincible(true);
-		CPlayerDead* pDead = new CPlayerDead;
-		pDead->SetPos(GetPos());
-		CreateObject(pDead, GROUP_TYPE::DEAD_PLAYER);
-		--m_iHp;
+        CPlayerDead* pDead = new CPlayerDead;
+        pDead->SetPos(GetPos());
+        CreateObject(pDead, GROUP_TYPE::DEAD_PLAYER);
+
+        --m_iHp;
         m_iLvl = 1;
-		Vec2 vPos = GetPos();
-		vPos.y = 1200;
-		SetPos(vPos);
-		SetCollideroff();
         m_iBoomb = 1;
+        Vec2 vPos = GetPos();
+        vPos.y = 1200.f;
+        SetPos(vPos);
+        SetCollideroff();
+
+        if (m_iHp <= 0) {
+            m_iHp = 0;
+            m_dead = true;
+            SetRespawnInvincible(false);
+
+            CScene_Stage01* curscene = static_cast<CScene_Stage01*>
+                (CSceneMgr::GetInst()->GetCurScene());
+            bool anyAlive = false;
+            for (PlayerId slot = 0; slot < MAX_PLAYERS; ++slot) {
+                if (auto* player = curscene->GetPlayer(slot); player &&
+                    player->IsAlivePlayer()) {
+                    anyAlive = true;
+                    break;
+                }
+            }
+            if (!anyAlive)
+                curscene->Fail();
+        }
+        else {
+            SetRespawnInvincible(true);
+        }
 	}
 
     // 아이템 보상은 CItem의 단일 획득자 확정 경로에서만 적용합니다.
