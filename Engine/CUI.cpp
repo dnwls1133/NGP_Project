@@ -179,14 +179,16 @@ void CUI::render_child(HDC _dc)
 void CUI::MouseOnCheck()
 {
 	Vec2 vMousePos = MOUSE_POS;
+	Vec2 vPosition = m_vFinalPos;
 	Vec2 vScale = GetScale();
+	AdjustBounds(vPosition, vScale);
 	if (m_bCamAffected)
 	{
 		vMousePos = CCamera::GetInst()->GetRealPos(vMousePos);
 	}
 
-	if (m_vFinalPos.x <= vMousePos.x && vMousePos.x <= m_vFinalPos.x + vScale.x
-		&& m_vFinalPos.y <= vMousePos.y && vMousePos.y <= m_vFinalPos.y + vScale.y)
+	if (vPosition.x <= vMousePos.x && vMousePos.x <= vPosition.x + vScale.x
+		&& vPosition.y <= vMousePos.y && vMousePos.y <= vPosition.y + vScale.y)
 	{
 		m_bMouseOn = true;
 	}

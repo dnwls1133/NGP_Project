@@ -21,6 +21,7 @@ public:
     virtual void render(HDC canvas_) override;
 
 protected:
+    void AdjustBounds(Vec2& position, Vec2& size) const override;
     void ResetMouseState() override;
 
 private:

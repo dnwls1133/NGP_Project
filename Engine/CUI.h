@@ -33,6 +33,7 @@ public:
     virtual void render(HDC _dc);
 
 protected:
+    virtual void AdjustBounds(Vec2&, Vec2&) const {}
     virtual void ResetMouseState();
     void render_child(HDC _dc);
 
