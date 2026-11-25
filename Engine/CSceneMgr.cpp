@@ -10,7 +10,7 @@
 #include "CScene_Title.h"
 #include "CScene_Tool.h"
 
-#include "CSceneTransition.h"
+#include "CLoadingTransition.h"
 
 CSceneMgr::CSceneMgr()
 	: m_arrScene{}
@@ -62,7 +62,7 @@ void CSceneMgr::init()
 
 	//m_arrScene[(UINT)SCENE_TYPE::STAGE_01] = new CScene_Stage_01;
 	//m_arrScene[(UINT)SCENE_TYPE::STAGE_02] = new CScene_Stage_02;
-    m_sceneTransition = std::make_unique<CSceneTransition>();
+    m_loadingTransition = std::make_unique<CLoadingTransition>();
 
 	m_pCurScene = m_arrScene[(UINT)SCENE_TYPE::TITLE];
 	m_pCurScene->Enter();
@@ -70,7 +70,7 @@ void CSceneMgr::init()
 
 void CSceneMgr::update()
 {
-    m_sceneTransition->Update();
+    m_loadingTransition->Update();
 
 	m_pCurScene->update();
 	finalupdate();
@@ -84,7 +84,18 @@ void CSceneMgr::finalupdate()
 void CSceneMgr::render(HDC _dc)
 {
 	m_pCurScene->render(_dc);
-    m_sceneTransition->Render(_dc);
+    m_loadingTransition->Render(_dc);
+}
+
+bool CSceneMgr::IsLoadingTransitionActive() const noexcept
+{
+    if (!m_loadingTransition)
+    {
+        return false;
+    }
+
+    const auto state = m_loadingTransition->GetCurrentState();
+    return state != ETransitionState::Idle && state != ETransitionState::CloseComplete;
 }
 
 void CSceneMgr::ChangeScene(SCENE_TYPE _eNext)
@@ -95,11 +106,17 @@ void CSceneMgr::ChangeScene(SCENE_TYPE _eNext)
         return;
     }
 
+    if (IsLoadingTransitionActive())
+    {
+        return;
+    }
+
     CScene* nextScene = m_arrScene[index];
-    m_sceneTransition->Start([this, nextScene]
+    m_loadingTransition->OnOpenComplete() = [this, nextScene]
     {
         m_pCurScene->Exit();
         m_pCurScene = nextScene;
         m_pCurScene->Enter();
-    });
+    };
+    m_loadingTransition->Open();
 }

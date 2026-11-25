@@ -41,6 +41,14 @@
 #include <cmath>
 #include <utility>
 
+namespace
+{
+    constexpr float EntryFadeDuration = 1.5f;
+    constexpr float ClearFadeDuration = 3.f;
+    constexpr float FailCardDuration = 5.f;
+    constexpr float FailFadeDuration = 5.f;
+}
+
 #ifdef _DEBUG
 namespace
 {
@@ -253,6 +261,18 @@ void CScene_Stage01::OnObjectAdded(CObject* _pObj, GROUP_TYPE _eType)
 
 void CScene_Stage01::update()
 {
+    if (m_entryFadeAlpha > 0.f && !CSceneMgr::GetInst()->IsLoadingTransitionActive())
+    {
+        if (m_waitingForEntryFade)
+        {
+            m_waitingForEntryFade = false;
+        }
+        else
+        {
+            m_entryFadeAlpha = std::clamp(m_entryFadeAlpha - fDT / EntryFadeDuration, 0.f, 1.f);
+        }
+    }
+
     auto& session = CCore::GetInst()->GetSession();
     using network::SessionState;
     const auto state = session.GetState();
@@ -345,10 +365,9 @@ void CScene_Stage01::update()
                 if (auto* player = GetPlayer(slot))
                     player->setclear();
             }
-            CCamera::GetInst()->FadeOut(3.f);
         }
         m_fClearAcc += fDT;
-        if (m_fClearAcc > 3.f)
+        if (m_fClearAcc >= ClearFadeDuration)
         {
             ChangeScene(SCENE_TYPE::CREDITS);
         }
@@ -413,11 +432,7 @@ void CScene_Stage01::update()
             //CCamera::GetInst()->FadeIn(0.5f);
         }
         */
-        if (5.f + fDT >= m_fClearAcc && m_fClearAcc > 5.f)
-        {
-            CCamera::GetInst()->FadeOut(5.f);
-        }
-        if (m_fClearAcc >= 10.f)
+        if (m_fClearAcc >= FailCardDuration + FailFadeDuration)
         {
             CRankMgr::GetInst()->SetPlayer(nullptr);
             ChangeScene(SCENE_TYPE::TITLE);
@@ -498,11 +513,7 @@ void CScene_Stage01::update()
                 //CCamera::GetInst()->FadeIn(0.5f);
             }
             */
-            if (5.f + fDT >= m_fClearAcc && m_fClearAcc > 5.f)
-            {
-                CCamera::GetInst()->FadeOut(5.f);
-            }
-            if (m_fClearAcc >= 10.f)
+            if (m_fClearAcc >= FailCardDuration + FailFadeDuration)
             {
                 CRankMgr::GetInst()->SetPlayer(nullptr);
                 ChangeScene(SCENE_TYPE::TITLE);
@@ -959,6 +970,26 @@ void CScene_Stage01::render(HDC _dc)
             RGB(255, 0, 255)
         );
     }
+
+    float exitFadeAlpha = 0.f;
+    if (m_bClear)
+    {
+        exitFadeAlpha = m_fClearAcc / ClearFadeDuration;
+    }
+    else if (m_fClearAcc >= FailCardDuration)
+    {
+        exitFadeAlpha = (m_fClearAcc - FailCardDuration) / FailFadeDuration;
+    }
+
+    const float fadeAlpha = (std::max)(m_entryFadeAlpha, std::clamp(exitFadeAlpha, 0.f, 1.f));
+    if (fadeAlpha > 0.f && m_fadeTexture)
+    {
+        BLENDFUNCTION blend = {};
+        blend.BlendOp = AC_SRC_OVER;
+        blend.SourceConstantAlpha = static_cast<BYTE>(fadeAlpha * 255.f);
+        AlphaBlend(_dc, 0, 0, resolution.x, resolution.y,
+            m_fadeTexture->GetDC(), 0, 0, 1, 1, blend);
+    }
 }
 void CScene_Stage01::Enter()
 {
@@ -1038,11 +1069,11 @@ void CScene_Stage01::Enter()
 
     CCamera::GetInst()->SetLookAt(vResolution / 2.f);
 
-    CCamera::GetInst()->FadeOut(1.5f);
-    CCamera::GetInst()->FadeIn(1.5f);
+    m_fadeTexture = CResMgr::GetInst()->CreateTexture(L"Stage Black Fade", 1, 1);
+    PatBlt(m_fadeTexture->GetDC(), 0, 0, 1, 1, BLACKNESS);
+    m_entryFadeAlpha = 1.f;
+    m_waitingForEntryFade = true;
     m_dAcc = 0.f;
-    //Camera 효과 지정
-   // CCamera::GetInst()->Fadeout(5.f);
 
     CSoundMgr::GetInst()->PlayBGM(m_pStageTheme);
 
