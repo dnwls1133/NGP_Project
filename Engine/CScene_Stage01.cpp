@@ -181,6 +181,31 @@ void CScene_Stage01::QueueDespawn(protocol::ObjectId objectId, protocol::Despawn
     m_pendingItemEvents.push_back(msg);
 }
 
+void CScene_Stage01::EvaluateHostMatchOutcome()
+{
+    if (m_bClear || m_bFail)
+        return;
+
+    bool anyAlive = false;
+    for (PlayerId slot = 0; slot < MAX_PLAYERS; ++slot) {
+        if (auto* player = GetPlayer(slot); player && player->IsAlivePlayer()) {
+            anyAlive = true;
+            break;
+        }
+    }
+
+    const auto outcome = host::EvaluateTeamOutcome(m_bBossDefeated, !anyAlive);
+    if (!outcome.has_value())
+        return;
+
+    if (*outcome == protocol::MatchOutcome::VICTORY) {
+        Clear();
+    }
+    else if (*outcome == protocol::MatchOutcome::DEFEAT) {
+        Fail();
+    }
+}
+
 bool CScene_Stage01::FlushItemEvents()
 {
     auto& session = CCore::GetInst()->GetSession();
@@ -539,6 +564,8 @@ void CScene_Stage01::update()
                         evt.triggered = true;
                     }
                 }
+
+                EvaluateHostMatchOutcome();
 
             }
         }
@@ -928,6 +955,7 @@ void CScene_Stage01::Enter()
     m_remotePlayers = {};
     m_pendingItemEvents.clear();
     m_bBossBgmPlayed = false;
+    m_bBossDefeated = false;
 
     // Monster Object 추가
 
@@ -1029,6 +1057,7 @@ void CScene_Stage01::Exit()
     m_vEvents.clear();
     m_pendingSpawns.clear();
     m_bBossBgmPlayed = false;
+    m_bBossDefeated = false;
     CColliderMgr::GetInst()->Reset();
 }
 

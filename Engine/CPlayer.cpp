@@ -427,19 +427,6 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
             m_iHp = 0;
             m_dead = true;
             SetRespawnInvincible(false);
-
-            CScene_Stage01* curscene = static_cast<CScene_Stage01*>
-                (CSceneMgr::GetInst()->GetCurScene());
-            bool anyAlive = false;
-            for (PlayerId slot = 0; slot < MAX_PLAYERS; ++slot) {
-                if (auto* player = curscene->GetPlayer(slot); player &&
-                    player->IsAlivePlayer()) {
-                    anyAlive = true;
-                    break;
-                }
-            }
-            if (!anyAlive)
-                curscene->Fail();
         }
         else {
             SetRespawnInvincible(true);

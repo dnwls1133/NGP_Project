@@ -276,6 +276,9 @@ void CMonster::OnCollisionEnter(CCollider* _pOther)
         if (auto* stage = dynamic_cast<CScene_Stage01*>(CSceneMgr::GetInst()
             ->GetCurScene()))
         {
+            if (justDied && m_tInfo.eMType == MON_TYPE::BOSS)
+                stage->MarkBossDefeated();
+
             stage->ReportMonsterCombat(
                 GetObjectId(),
                 pMissile->GetObjectId(),
@@ -363,6 +366,8 @@ protocol::ObjectStateRecord CMonster::ExportStateRecord() const
     return rec;
 
 }
+
+
 
 protocol::SpawnPayload CMonster::ExportSpawnPayload(protocol::EventId eventId) const
 {

@@ -1153,6 +1153,81 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1125Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 동일 틱 보스 사망 + 전원 사망: 콜백 순서({보스->전원} vs {전원->보스})와 무관하게 틱 종료 후 VICTORY 확정
+        {
+            auto runSameTick = [](bool bossFirst) {
+                InputScript script;
+                CaptureSink sink;
+                HostSimEngine engine{ 1000 };
+
+                engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 1, 100);
+                engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 1, 100);
+                const ObjectId bossId = engine.RequestSpawn(NetObjectKind::MONSTER, MONSTER_SUBTYPE_BOSS, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 10'000 }, {}, 100, 1);
+                const ObjectId projId = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 0, FixedVec2{ 15'000, 10'000 }, {}, 1, 100);
+                engine.FlushLifecycleAtTickEnd(sink);
+
+                if (bossFirst)
+                {
+                    engine.ApplyProjectileHit(projId, bossId, sink);
+                    engine.ApplyDamageToPlayer(0, 1);
+                    engine.ApplyDamageToPlayer(1, 1);
+                }
+                else
+                {
+                    engine.ApplyDamageToPlayer(0, 1);
+                    engine.ApplyDamageToPlayer(1, 1);
+                    engine.ApplyProjectileHit(projId, bossId, sink);
+                }
+
+                // 개별 충돌 콜백 직후(틱 종료 전)에는 결과가 먼저 확정되지 않아야 함
+                const bool deferredBeforeTickEnd = !engine.GetTeamOutcome().has_value();
+
+                // 1틱 종료 후 집계 -> VICTORY 우선 확정
+                engine.StepFrame(16'667, script, sink);
+                return deferredBeforeTickEnd
+                    && engine.GetTeamOutcome().has_value()
+                    && (*engine.GetTeamOutcome() == MatchOutcome::VICTORY);
+                };
+
+            Check(runSameTick(true) && runSameTick(false),
+                "HostSim1125: Same-tick boss death + all players dead resolves to VICTORY at tick-end regardless of callback order",
+                counters);
+        }
+
+        // 2. 보스 생존 중 1명 사망이면 계속(nullopt), 전원 사망이면 틱 종료 후 DEFEAT 확정
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 1, 2);
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 1, 2);
+            engine.RequestSpawn(NetObjectKind::MONSTER, MONSTER_SUBTYPE_BOSS, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 10'000 }, {}, 100, 1);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // P0만 사망 -> 틱 종료 후에도 미확정(계속 진행)
+            engine.ApplyDamageToPlayer(0, 1);
+            engine.StepFrame(16'667, script, sink);
+            const bool stillRunning = !engine.GetTeamOutcome().has_value();
+
+            // P1도 사망 -> 콜백 직후 미확정, 틱 종료 후 DEFEAT 확정
+            engine.ApplyDamageToPlayer(1, 1);
+            const bool deferred = !engine.GetTeamOutcome().has_value();
+            engine.StepFrame(16'667, script, sink);
+            const bool defeatConfirmed = engine.GetTeamOutcome().has_value()
+                && (*engine.GetTeamOutcome() == MatchOutcome::DEFEAT);
+
+            Check(stillRunning && deferred && defeatConfirmed,
+                "HostSim1125: Continues while one player lives and confirms DEFEAT at tick-end when all players die",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -1177,6 +1252,7 @@ int main()
     RunHostSim1122Suite(counters);
     RunHostSim1123Suite(counters);
     RunHostSim1124Suite(counters);
+    RunHostSim1125Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';
