@@ -2,14 +2,13 @@
 
 #include "CScene.h"
 #include "CMenuTransition.h"
+#include "CTitleTransition.h"
 class CScene;
 
 class CTitleLogo;
-class CTitleBackground;
 // class CTitleMessage;
 
 class CSound;
-class CTexture;
 
 class CBtnUI;
 class CMenuItem;
@@ -36,28 +35,16 @@ private:
     };
 
     void CreateMenus();
+    void ShowTitle();
     void OpenMenu(CTitleMenu& menu);
     bool UpdateMenuOpen();
 
-    class CTitleRevealTransition final : public CTransitionBase
-    {
-    public:
-        void Start();
-        void Render(HDC dc) override;
-
-    private:
-        CTexture* m_whiteTexture = nullptr;
-        float m_alpha = 0.f;
-    };
-
-    CTitleRevealTransition m_titleReveal;
+    CTitleTransition m_titleTransition;
     CMenuTransition m_menuTransition;
     std::vector<Vec2> m_menuTargetPositions;
     float m_menuOpenElapsed = 0.f;
 
     EState m_CurrentState;
-
-    CTitleBackground* m_pBackground;
 
     CSound* m_pTitleTheme;
 

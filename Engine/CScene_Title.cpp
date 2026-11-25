@@ -21,59 +21,12 @@
 #include "CTitleMenu.hpp"
 
 #include "CTitleLogo.h"
-#include "CTitleBackground.h"
 #include "CRankMgr.h"
 #include "CTimeMgr.h"
-#include "CTexture.h"
 // include "CPanelUI.h"
-
-void CScene_Title::CTitleRevealTransition::Start()
-{
-    constexpr float fadeDuration = 1.f;
-
-    m_whiteTexture = CResMgr::GetInst()->CreateTexture(L"Title Reveal White", 1, 1);
-    PatBlt(m_whiteTexture->GetDC(), 0, 0, 1, 1, WHITENESS);
-
-    m_alpha = 1.f;
-    Open();
-    Close([this]
-    {
-        const float delta = CTimeMgr::GetInst()->GetfDT() / fadeDuration;
-        m_alpha = std::clamp(m_alpha - delta, 0.f, 1.f);
-        return m_alpha == 0.f;
-    });
-}
-
-void CScene_Title::CTitleRevealTransition::Render(HDC dc)
-{
-    if (m_alpha <= 0.f)
-    {
-        return;
-    }
-
-    const POINT resolution = CCore::GetInst()->GetResolution();
-    BLENDFUNCTION blend = {};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = static_cast<BYTE>(m_alpha * 255.f);
-    AlphaBlend(dc, 0, 0, resolution.x, resolution.y,
-        m_whiteTexture->GetDC(), 0, 0, 1, 1, blend);
-}
 
 void CScene_Title::Enter()
 {
-    const Vec2 resolution = CCore::GetInst()->GetResolution();
-    // CCamera::GetInst()->SetLookAt(vResolution / 2.f);
-
-    m_pBackground = new CTitleBackground();
-    m_pBackground->SetName(L"Background");
-    m_pBackground->SetPos(Vec2(resolution.x / 2.0f, resolution.y / 2.0f));
-    m_pBackground->SetScale(Vec2(resolution.x, resolution.y));
-
-    AddObject(m_pBackground, GROUP_TYPE::BACKGROUND);
-
-    // m_pLogo = new CTitleLogo();
-    // m_pLogo->SetPos
-   
     m_pTitleTheme = CResMgr::GetInst()->LoadSound(L"Title", L"sound\\BGM\\BGM_OpeningTheme.mp3");
 
     CRankMgr::GetInst()->LoadRanking();
@@ -84,13 +37,15 @@ void CScene_Title::Enter()
     CreateMenus();
     m_pFirstMenu->SetActive(false);
 
-    m_pBackground->PlayIntroAnimation();
     m_CurrentState = EState::Intro;
+    m_titleTransition.OnOpenComplete() = [this] { ShowTitle(); };
+    m_titleTransition.OnCloseComplete() = [this] { OpenMenu(*m_pFirstMenu); };
+    m_titleTransition.Open();
 }
 
 void CScene_Title::update()
 {
-    m_titleReveal.Update();
+    m_titleTransition.Update();
 
     if (m_CurrentState == EState::Title && m_menuTransition.GetCurrentState() == ETransitionState::Idle &&
         (m_menuSwitchRequested || (m_pSecondMenu->IsActive() && KEY_TAP(KEY::ESC))))
@@ -108,44 +63,43 @@ void CScene_Title::update()
 
     CScene::update();
 
-    if (m_CurrentState == EState::Intro)
+    if (m_CurrentState == EState::Intro && KEY_TAP(KEY::ENTER))
     {
-        if (!m_pBackground->IsPlayIntroAnimation() || KEY_TAP(KEY::ENTER))
+        m_titleTransition.OpenComplete();
+    }
+}
+
+void CScene_Title::ShowTitle()
+{
+    m_CurrentState = EState::Title;
+
+    auto m_pLogo = new CTitleLogo();
+    m_pLogo->SetName(L"Game Logo");
+    m_pLogo->SetPos(Vec2(150.0f, 50.0f));
+    m_pLogo->SetScale(Vec2(404.6f, 352.8f));
+    AddObject(m_pLogo, GROUP_TYPE::UI);
+
+    const float logoCenterX = m_pLogo->GetImageCenterX();
+    for (CTitleMenu* menu : {m_pFirstMenu, m_pSecondMenu})
+    {
+        for (CUI* item : menu->GetChildUI())
         {
-            m_CurrentState = EState::Title;
-            m_pBackground->PlayTitleAnimation();
-
-            auto m_pLogo = new CTitleLogo();
-            m_pLogo->SetName(L"Game Logo");
-            m_pLogo->SetPos(Vec2(150.0f, 50.0f));
-            m_pLogo->SetScale(Vec2(404.6f, 352.8f));
-            AddObject(m_pLogo, GROUP_TYPE::UI);
-
-            const float logoCenterX = m_pLogo->GetImageCenterX();
-            for (CTitleMenu* menu : {m_pFirstMenu, m_pSecondMenu})
-            {
-                for (CUI* item : menu->GetChildUI())
-                {
-                    const float x = logoCenterX - menu->GetPos().x - item->GetScale().x * 0.5f;
-                    item->SetPos(Vec2(x, item->GetPos().y));
-                }
-            }
-
-            m_titleReveal.OnCloseComplete() = [this] { OpenMenu(*m_pFirstMenu); };
-            m_titleReveal.Start();
+            const float x = logoCenterX - menu->GetPos().x - item->GetScale().x * 0.5f;
+            item->SetPos(Vec2(x, item->GetPos().y));
         }
     }
 }
 
 void CScene_Title::render(HDC dc)
 {
+    m_titleTransition.Render(dc);
     CScene::render(dc);
-    m_titleReveal.Render(dc);
+    m_titleTransition.RenderOverlay(dc);
 }
 
 void CScene_Title::Exit()
 {
-    m_titleReveal = {};
+    m_titleTransition = {};
     m_menuTransition = {};
     m_menuTargetPositions.clear();
     DeleteAll();

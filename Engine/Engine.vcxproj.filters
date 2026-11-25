@@ -313,7 +313,7 @@
     <ClInclude Include="CScene_Title.h">
       <Filter>Engine\05.Scene\Scene_Title</Filter>
     </ClInclude>
-    <ClInclude Include="CTitleBackground.h">
+    <ClInclude Include="CTitleTransition.h">
       <Filter>Engine\04.Object\Background\TitleBackground</Filter>
     </ClInclude>
     <ClInclude Include="CCamera.h">
@@ -556,7 +556,7 @@
     <ClCompile Include="CScene_Title.cpp">
       <Filter>Engine\05.Scene\Scene_Title</Filter>
     </ClCompile>
-    <ClCompile Include="CTitleBackground.cpp">
+    <ClCompile Include="CTitleTransition.cpp">
       <Filter>Engine\04.Object\Background\TitleBackground</Filter>
     </ClCompile>
     <ClCompile Include="CCamera.cpp">

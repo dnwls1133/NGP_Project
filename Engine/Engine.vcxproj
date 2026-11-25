@@ -227,7 +227,7 @@
     <ClInclude Include="CTexture.h" />
     <ClInclude Include="CTile.h" />
     <ClInclude Include="CTimeMgr.h" />
-    <ClInclude Include="CTitleBackground.h" />
+    <ClInclude Include="CTitleTransition.h" />
     <ClInclude Include="CTitleMenu.hpp" />
     <ClInclude Include="CTitleLogo.h" />
     <ClInclude Include="CTraceState.h" />
@@ -314,7 +314,7 @@
     <ClCompile Include="CTexture.cpp" />
     <ClCompile Include="CTile.cpp" />
     <ClCompile Include="CTimeMgr.cpp" />
-    <ClCompile Include="CTitleBackground.cpp" />
+    <ClCompile Include="CTitleTransition.cpp" />
     <ClCompile Include="CTitleLogo.cpp" />
     <ClCompile Include="CTraceState.cpp" />
     <ClCompile Include="CUI.cpp" />
