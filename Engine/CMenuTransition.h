@@ -8,16 +8,18 @@ class CMenuItem;
 class CMenuTransition : public CTransitionBase
 {
 public:
+    using MenuItemList = std::vector<CMenuItem*>;
+
     void AddMenuItem(CMenuItem& item);
 
-    [[nodiscard]] std::vector<CMenuItem*>& GetMenuItems() noexcept;
-    [[nodiscard]] const std::vector<CMenuItem*>& GetMenuItems() const noexcept;
+    [[nodiscard]] MenuItemList& GetMenuItems() noexcept;
+    [[nodiscard]] const MenuItemList& GetMenuItems() const noexcept;
 
     void Update() override;
     void Render(HDC _dc) override;
 
 private:
-    std::vector<CMenuItem*> m_menuItems;
+    MenuItemList m_menuItems;
 };
 
 inline std::vector<CMenuItem*>& CMenuTransition::GetMenuItems() noexcept
