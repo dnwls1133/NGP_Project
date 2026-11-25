@@ -7,6 +7,7 @@
 #include "CTimeMgr.h"
 
 #include <algorithm>
+#include <format>
 
 void CTitleTransition::Open()
 {
@@ -19,8 +20,7 @@ void CTitleTransition::Open()
     m_currentFrame = 0;
     m_frameElapsed = 0.f;
     m_alpha = 0.f;
-    m_texture = CResMgr::GetInst()->LoadTexture(
-        L"Introduction No.0", L"texture\\Opening\\Sprite_Background_Opening_0.png");
+    LoadOpeningFrame();
 
     CTransitionBase::Open([this]
     {
@@ -34,9 +34,7 @@ void CTitleTransition::Open()
             return true;
         }
 
-        const auto key = std::format(L"Introduction No.{}", m_currentFrame);
-        const auto path = std::format(L"texture\\Opening\\Sprite_Background_Opening_{}.png", m_currentFrame);
-        m_texture = CResMgr::GetInst()->LoadTexture(key, path);
+        LoadOpeningFrame();
         return false;
     });
 }
@@ -54,8 +52,7 @@ void CTitleTransition::OpenComplete()
     m_alpha = 1.f;
     m_currentFrame = 0;
     m_frameElapsed = 0.f;
-    m_texture = CResMgr::GetInst()->LoadTexture(
-        L"Main Title No.0", L"texture\\Main Title\\Sprite_Background_MainTitle_0.png");
+    LoadTitleFrame();
 
     CTransitionBase::OpenComplete();
     Close();
@@ -82,6 +79,20 @@ void CTitleTransition::CloseComplete()
     CTransitionBase::CloseComplete();
 }
 
+void CTitleTransition::LoadOpeningFrame()
+{
+    const auto key = std::format(L"Introduction No.{}", m_currentFrame);
+    const auto path = std::format(L"texture\\Opening\\Sprite_Background_Opening_{}.png", m_currentFrame);
+    m_texture = CResMgr::GetInst()->LoadTexture(key, path);
+}
+
+void CTitleTransition::LoadTitleFrame()
+{
+    const auto key = std::format(L"Main Title No.{}", m_currentFrame);
+    const auto path = std::format(L"texture\\Main Title\\Sprite_Background_MainTitle_{}.png", m_currentFrame);
+    m_texture = CResMgr::GetInst()->LoadTexture(key, path);
+}
+
 bool CTitleTransition::AdvanceFrame()
 {
     m_frameElapsed += CTimeMgr::GetInst()->GetfDT();
@@ -100,9 +111,7 @@ void CTitleTransition::Update()
     if ((state == ETransitionState::Close || state == ETransitionState::CloseComplete) && AdvanceFrame())
     {
         m_currentFrame = (m_currentFrame + 1) % TitleFrameCount;
-        const auto key = std::format(L"Main Title No.{}", m_currentFrame);
-        const auto path = std::format(L"texture\\Main Title\\Sprite_Background_MainTitle_{}.png", m_currentFrame);
-        m_texture = CResMgr::GetInst()->LoadTexture(key, path);
+        LoadTitleFrame();
     }
 
     CTransitionBase::Update();

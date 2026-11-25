@@ -19,6 +19,8 @@ public:
     void RenderOverlay(HDC dc);
 
 private:
+    void LoadOpeningFrame();
+    void LoadTitleFrame();
     bool AdvanceFrame();
 
     static constexpr std::size_t OpeningLastFrame = 70;
