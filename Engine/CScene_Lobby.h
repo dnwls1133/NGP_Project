@@ -5,6 +5,7 @@
 #endif
 
 #include <windows.h>
+#include <optional>
 #include <string>
 
 #include "CScene.h"
@@ -37,13 +38,20 @@ private:
     CSound* m_pTheme;
 
     CMenuItem* m_startButton;
+    CMenuItem* m_readyButton;
     CMenuItem* m_backButton;
 
     HFONT m_hFont;
 
     std::wstring inputRoomCode;
     bool leavingLobby = false;
+    std::optional<bool> requestedReady;
+    bool readyAfterJoin = false;
 
+    void SubmitClientAction();
+    void SubmitReady(bool ready);
+    void SubmitHostStart();
+    void UpdateActionButtons();
     void LogSessionState();
     void ResumeHostWaiting();
 

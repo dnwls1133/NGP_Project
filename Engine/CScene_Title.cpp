@@ -122,7 +122,7 @@ void CScene_Title::CreateMenus()
         CResMgr::GetInst()->LoadTexture(L"Manuel_Hover", L"texture\\Menu Items\\Manual\\Sprite_Label_Manual_1.png"),
         cursorTexture
     );
-    m_pManuelButton->SetPos(Vec2(325.0f, 600.0f));
+    m_pManuelButton->SetPos(Vec2(315.0f, 600.0f));
     m_pManuelButton->SetScale(Vec2(160.0f, 70.0f));
     m_pManuelButton->SetClickedCallBack(
         [](DWORD_PTR, DWORD_PTR) {

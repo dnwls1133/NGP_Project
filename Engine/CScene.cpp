@@ -5,6 +5,7 @@
 #include "CPathMgr.h"
 
 #include "CObject.h"
+#include "CUI.h"
 #include "CPlayer.h"
 #include "CTile.h"
 
@@ -119,7 +120,10 @@ void CScene::render(HDC _dc)
 			
 			if (!(*iter)->IsDead())
 			{
-				(*iter)->render(_dc);
+				if (i != (UINT)GROUP_TYPE::UI || static_cast<CUI*>(*iter)->IsActive())
+				{
+					(*iter)->render(_dc);
+				}
 				++iter;
 			}
 			else
