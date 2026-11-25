@@ -35,7 +35,9 @@ public:
     [[nodiscard]] bool IsPlaying() const noexcept;
 
     void Open(TransitionStep step = {});
+    void OpenComplete();
     void Close(TransitionStep step = {});
+    void CloseComplete();
 
     [[nodiscard]] TransitionCallback& OnOpen() noexcept;
     [[nodiscard]] const TransitionCallback& OnOpen() const noexcept;
@@ -50,8 +52,6 @@ public:
     [[nodiscard]] const TransitionCallback& OnCloseComplete() const noexcept;
 
 private:
-    void OpenComplete();
-    void CloseComplete();
 
     std::vector<CMenuItem*> m_menuItems;
 
