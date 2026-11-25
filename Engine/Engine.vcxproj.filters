@@ -437,7 +437,7 @@
       <Filter>Engine\04.Object\UI</Filter>
     </ClInclude>
     <ClInclude Include="CSceneTransition.h">
-      <Filter>Engine\04.Object\Background\LoadingBackground</Filter>
+      <Filter>Engine\04.Object\UI</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -671,7 +671,7 @@
       <Filter>Engine\04.Object\UI</Filter>
     </ClCompile>
     <ClCompile Include="CSceneTransition.cpp">
-      <Filter>Engine\04.Object\Background\LoadingBackground</Filter>
+      <Filter>Engine\04.Object\UI</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

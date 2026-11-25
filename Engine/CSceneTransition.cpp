@@ -3,8 +3,6 @@
 
 #include "CTimeMgr.h"
 
-#include <utility>
-
 void CSceneTransition::Start(TransitionCallback switchScene)
 {
     if (m_background.IsActive())
