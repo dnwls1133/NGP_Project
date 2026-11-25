@@ -448,7 +448,65 @@ void CScene_Stage01::update()
                 << ", codecError=" << static_cast<int>(event.codecError)
                 << '\n';
 #endif
-            return;
+            if (m_fClearAcc == 0.f)
+            {
+                if (session.IsHost())
+                {
+                    protocol::ResultPayload result{};
+                    result.eventId = ++m_nextSpawnEventId;
+                    result.outcome = protocol::MatchOutcome::DEFEAT;
+                    result.finalTeamScore = static_cast<std::uint32_t>(
+                        CRankMgr::GetInst()->CurrentRanking.Score > 0
+                        ? CRankMgr::GetInst()->CurrentRanking.Score
+                        : 0);
+                    protocol::Message message{};
+                    message.header.type = protocol::MessageType::RESULT;
+                    message.header.sessionId = session.GetSessionId();
+                    message.header.hostTick = m_hostTick;
+                    message.header.sequence = result.eventId;
+                    message.payload = result;
+                    session.EnqueueSend(net::Channel::Tcp, message);
+                }
+
+                m_pHud->SetActive(false);
+
+                CSoundMgr::GetInst()->PlayBGM(m_pFailTheme, false);
+
+                m_pFailCard = CResMgr::GetInst()->LoadTexture(L"Connection Lost Card", L"texture\\Stage Cards\\ConnectionLost.png");
+            }
+            m_fClearAcc += fDT;
+
+            /*
+            if (KEY_TAP(KEY::SPACE))
+            {
+                CPlayer* player = CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0);
+                player->FullHP();
+                m_bFail = false;
+                m_fClearAcc = 0.f;
+                m_pFailCard = nullptr;
+                if (m_dAcc >= 130.f)
+                {
+                    CSoundMgr::GetInst()->PlayBGM(m_pBossTheme);
+                }
+                else
+                {
+                    CSoundMgr::GetInst()->PlayBGM(m_pStageTheme);
+                }
+
+                m_pHud->SetActive(true);
+
+                //CCamera::GetInst()->FadeIn(0.5f);
+            }
+            */
+            if (5.f + fDT >= m_fClearAcc && m_fClearAcc > 5.f)
+            {
+                CCamera::GetInst()->FadeOut(5.f);
+            }
+            if (m_fClearAcc >= 10.f)
+            {
+                CRankMgr::GetInst()->SetPlayer(nullptr);
+                ChangeScene(SCENE_TYPE::TITLE);
+            }
         }
 
         if (state != SessionState::Started)
