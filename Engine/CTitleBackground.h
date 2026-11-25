@@ -19,7 +19,7 @@ public:
     virtual void render(HDC dc) override;
 
     void PlayIntroAnimation() noexcept; // 인트로 애니메이션 재생.
-    void PlayTitleAnimation() noexcept; // 타이틀 애니메이션 재생.
+    void PlayTitleAnimation(); // 타이틀 애니메이션 재생.
 
     bool IsPlayIntroAnimation() const noexcept; // 인트로 애니메이션 재생 여부 확인.
 

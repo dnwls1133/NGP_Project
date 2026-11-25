@@ -24,7 +24,40 @@
 #include "CTitleBackground.h"
 #include "CRankMgr.h"
 #include "CTimeMgr.h"
+#include "CTexture.h"
 // include "CPanelUI.h"
+
+void CScene_Title::CTitleRevealTransition::Start()
+{
+    constexpr float fadeDuration = 1.f;
+
+    m_whiteTexture = CResMgr::GetInst()->CreateTexture(L"Title Reveal White", 1, 1);
+    PatBlt(m_whiteTexture->GetDC(), 0, 0, 1, 1, WHITENESS);
+
+    m_alpha = 1.f;
+    Open();
+    Close([this]
+    {
+        const float delta = CTimeMgr::GetInst()->GetfDT() / fadeDuration;
+        m_alpha = std::clamp(m_alpha - delta, 0.f, 1.f);
+        return m_alpha == 0.f;
+    });
+}
+
+void CScene_Title::CTitleRevealTransition::Render(HDC dc)
+{
+    if (m_alpha <= 0.f)
+    {
+        return;
+    }
+
+    const POINT resolution = CCore::GetInst()->GetResolution();
+    BLENDFUNCTION blend = {};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = static_cast<BYTE>(m_alpha * 255.f);
+    AlphaBlend(dc, 0, 0, resolution.x, resolution.y,
+        m_whiteTexture->GetDC(), 0, 0, 1, 1, blend);
+}
 
 void CScene_Title::Enter()
 {
@@ -57,6 +90,8 @@ void CScene_Title::Enter()
 
 void CScene_Title::update()
 {
+    m_titleReveal.Update();
+
     if (m_CurrentState == EState::Title && m_menuTransition.GetCurrentState() == ETransitionState::Idle &&
         (m_menuSwitchRequested || (m_pSecondMenu->IsActive() && KEY_TAP(KEY::ESC))))
     {
@@ -96,13 +131,21 @@ void CScene_Title::update()
                 }
             }
 
-            OpenMenu(*m_pFirstMenu);
+            m_titleReveal.OnCloseComplete() = [this] { OpenMenu(*m_pFirstMenu); };
+            m_titleReveal.Start();
         }
     }
 }
 
+void CScene_Title::render(HDC dc)
+{
+    CScene::render(dc);
+    m_titleReveal.Render(dc);
+}
+
 void CScene_Title::Exit()
 {
+    m_titleReveal = {};
     m_menuTransition = {};
     m_menuTargetPositions.clear();
     DeleteAll();

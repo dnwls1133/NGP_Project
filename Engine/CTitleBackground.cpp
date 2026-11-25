@@ -96,11 +96,14 @@ void CTitleBackground::PlayIntroAnimation() noexcept
     m_currentIndex = IDX_INTRO_START;
 }
 
-void CTitleBackground::PlayTitleAnimation() noexcept
+void CTitleBackground::PlayTitleAnimation()
 {
     m_bIsIntroState = false;
     m_bIsPlaying = true;
     m_currentIndex = IDX_TITLE_START;
+    m_dAnimDeltaTime = 0.f;
+    m_pTexture = CResMgr::GetInst()->LoadTexture(
+        L"Main Title No.0", L"texture\\Main Title\\Sprite_Background_MainTitle_0.png");
 }
 
 bool CTitleBackground::IsPlayIntroAnimation() const noexcept
