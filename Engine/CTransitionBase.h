@@ -25,9 +25,9 @@ public:
     virtual void Render(HDC _dc) = 0;
 
     void Open(TransitionStep step = {});
-    void OpenComplete();
+    virtual void OpenComplete();
     void Close(TransitionStep step = {});
-    void CloseComplete();
+    virtual void CloseComplete();
 
     [[nodiscard]] ETransitionState GetCurrentState() const noexcept;
     [[nodiscard]] bool IsPlaying() const noexcept;

@@ -25,7 +25,7 @@ public:
 
     bool IsActive() const { return m_isActive; }
     float GetAlpha() const { return m_alpha; }
-    void SetAlpha(float alpha) { m_alpha = std::clamp(alpha, 0.0f, 255.0f); }
+    void SetAlpha(float alpha) { m_alpha = std::clamp(alpha, 0.0f, 1.0f); }
 
 private:
     static constexpr size_t IDX_START = 0;

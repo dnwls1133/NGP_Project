@@ -11,7 +11,12 @@ public:
     void Render(HDC dc) override;
 
 private:
-    bool Fade(float direction, float targetAlpha);
+    void Open();
+    void OpenComplete() override;
+    void Close();
+    void CloseComplete() override;
+
+    static constexpr float FadeDuration = 0.5f;
 
     CLoadingBackground m_background;
 };

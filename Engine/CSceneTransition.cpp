@@ -13,37 +13,61 @@ void CSceneTransition::Start(TransitionCallback switchScene)
     }
 
     OnOpenComplete() = std::move(switchScene);
+    Open();
+}
+
+void CSceneTransition::Open()
+{
     m_background.Open();
-    Open([this] { return Fade(1.f, 255.f); });
+    CTransitionBase::Open([this]
+    {
+        const float delta = CTimeMgr::GetInst()->GetfDT() / FadeDuration;
+        m_background.SetAlpha(m_background.GetAlpha() + delta);
+        return m_background.GetAlpha() >= 1.f;
+    });
+}
+
+void CSceneTransition::OpenComplete()
+{
+    if (GetCurrentState() != ETransitionState::Open)
+    {
+        return;
+    }
+
+    m_background.SetAlpha(1.f);
+    CTransitionBase::OpenComplete();
+    Close();
+}
+
+void CSceneTransition::Close()
+{
+    CTransitionBase::Close([this]
+    {
+        const float delta = CTimeMgr::GetInst()->GetfDT() / FadeDuration;
+        m_background.SetAlpha(m_background.GetAlpha() - delta);
+        return m_background.GetAlpha() <= 0.f;
+    });
+}
+
+void CSceneTransition::CloseComplete()
+{
+    if (GetCurrentState() != ETransitionState::Close)
+    {
+        return;
+    }
+
+    m_background.SetAlpha(0.f);
+    m_background.Close();
+    CTransitionBase::CloseComplete();
 }
 
 void CSceneTransition::Update()
 {
-    const bool wasOpening = GetCurrentState() == ETransitionState::Open;
     CTransitionBase::Update();
-
-    if (wasOpening && GetCurrentState() == ETransitionState::Idle)
-    {
-        Close([this] { return Fade(-1.f, 0.f); });
-    }
-
-    if (GetCurrentState() == ETransitionState::CloseComplete && m_background.IsActive())
-    {
-        m_background.Close();
-    }
-
     m_background.Update();
 }
 
 void CSceneTransition::Render(HDC dc)
 {
     m_background.Render(dc);
-}
-
-bool CSceneTransition::Fade(float direction, float targetAlpha)
-{
-    constexpr float fadeSpeed = 510.f;
-    const float alphaDelta = CTimeMgr::GetInst()->GetfDT() * fadeSpeed;
-    m_background.SetAlpha(m_background.GetAlpha() + direction * alphaDelta);
-    return m_background.GetAlpha() == targetAlpha;
 }
