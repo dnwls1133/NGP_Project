@@ -48,6 +48,8 @@ private:
 
     bool m_playerSpawnsQueued = false;
     bool m_bBossBgmPlayed = false;
+    bool m_bBossDefeated = false;
+    void EvaluateHostMatchOutcome();
     std::deque<protocol::Message> m_pendingItemEvents;
 
     bool FlushItemEvents();
@@ -63,6 +65,7 @@ public:
 
     void Clear() { m_bClear = true; }
     void Fail() { m_bFail = true; }
+    void MarkBossDefeated() { m_bBossDefeated = true; }
     void InitEvents();
     bool ConfirmItemPickup(protocol::ObjectId itemId, protocol::PlayerSlot slot);
     void ReportMonsterCombat(

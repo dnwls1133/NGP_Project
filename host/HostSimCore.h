@@ -41,6 +41,18 @@ namespace host
     inline constexpr std::int32_t BOSS_PHASE2_HP_THRESHOLD = 4000;
     inline constexpr std::uint32_t PLAYER_RESPAWN_INVINCIBLE_TICKS = 120;
 
+    // 11/25: 공동 승패 결정 함수 (보스 사망 + 전원 사망 동일 틱은 승리 우선)
+    inline std::optional<protocol::MatchOutcome> EvaluateTeamOutcome(
+        bool bossDefeated,
+        bool allPlayersDead) noexcept
+    {
+        if (bossDefeated)
+            return protocol::MatchOutcome::VICTORY;
+        if (allPlayersDead)
+            return protocol::MatchOutcome::DEFEAT;
+        return std::nullopt;
+    }
+
     // 고정 틱 시뮬레이션 dt (전역 fDT와 분리된 호스트 계산 전용 고정 시간 간격)
     inline constexpr float SIM_FIXED_DT = 1.0f / static_cast<float>(SIM_TICK_HZ);
 
@@ -336,6 +348,8 @@ namespace host
             m_deathCandiateCount = 0;
             m_teamScore = 0;
             m_bossSpawned = false;
+            m_bossDefeated = false;
+            m_teamOutcome.reset();
             m_lastAppliedMoveBits.fill(protocol::MoveBit::NONE);
             m_lastAppliedFireHeld.fill(0);
             m_fireTickAccum.fill(0);
@@ -613,6 +627,9 @@ namespace host
                 monster->fsmState = 2; // MON_STATE::DEAD
                 justDied = true;
                 ++m_deathCandiateCount;
+                if (monster->subType == MONSTER_SUBTYPE_BOSS) {
+                    m_bossDefeated = true;
+                }
                 scoreDelta = static_cast<std::int32_t>(monster->subType) * 250;
                 m_teamScore += static_cast<std::int32_t>(scoreDelta);
                 RequestDestroy(monsterId, protocol::DespawnReason::DESTROYED);
@@ -791,6 +808,8 @@ namespace host
             m_playerSlotObjectIds.fill(0);
             m_fireTickAccum.fill(0);
             m_bossSpawned = false;
+            m_bossDefeated = false;
+            m_teamOutcome.reset();
         }
 
         // 11/22: 보스 등장 시간 경계(130초 = 7,800틱) 1회 생성
@@ -868,6 +887,11 @@ namespace host
                     return false;
             }
             return true;
+        }
+
+        std::optional<protocol::MatchOutcome> GetTeamOutcome() const noexcept
+        {
+            return m_teamOutcome;
         }
 
         // 11/11: 마지막 유효 입력 시각 기준 300ms 경과 시 이동·발사 중립화
@@ -1132,6 +1156,12 @@ namespace host
             // Step 7: 틱 종료 경계에서 안전한 생성/삭제 및 슬롯 참조 정리 수행 (render가 아닌 시뮬레이션 틱 경계)
             FlushLifecycleAtTickEnd(sendSink);
 
+            // 11/25: 틱 종료 후 공동 승패 집계 (보스 사망 + 전우너 사망 동일 틱은 승리 우선)
+            if (!m_teamOutcome.has_value()) {
+                m_teamOutcome = EvaluateTeamOutcome(m_bossDefeated, AreAllPlayersDead());
+            }
+
+
             // Step 8: 20Hz 주기(3틱마다)이고 활성 객체가 존재하면 STATE_SNAPSHOT 배치 발행
             if ((currentTick % STATE_PUBLISH_INTERVAL_TICKS) == 0 && !m_objects.empty())
             {
@@ -1192,6 +1222,8 @@ namespace host
         std::uint32_t m_deathCandiateCount = 0;
         std::uint32_t m_teamScore = 0;
         bool m_bossSpawned = false;
+        bool m_bossDefeated = false;
+        std::optional<protocol::MatchOutcome> m_teamOutcome;
 
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedMoveBits{};
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedFireHeld{};
