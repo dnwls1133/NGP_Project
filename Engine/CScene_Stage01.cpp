@@ -1048,6 +1048,7 @@ void CScene_Stage01::Enter()
 
 void CScene_Stage01::Exit()
 {
+    CCore::GetInst()->GetSession().Stop();
     m_pendingItemEvents.clear();
     DeleteAll();
     m_dAcc = 0;
