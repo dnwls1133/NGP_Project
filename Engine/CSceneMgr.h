@@ -3,7 +3,7 @@
 #include <memory>
 
 class CScene;
-class CSceneTransition;
+class CLoadingTransition;
 
 class CSceneMgr // 씬을 전환시켜주는 역활
 {
@@ -12,7 +12,7 @@ private:
 	CScene*		m_arrScene[(UINT)SCENE_TYPE::END];     // 모든 씬 목록
 	CScene*		m_pCurScene;					       // 현재 씬
 
-    std::unique_ptr<CSceneTransition> m_sceneTransition;
+    std::unique_ptr<CLoadingTransition> m_loadingTransition;
 
 public:
 	void init();

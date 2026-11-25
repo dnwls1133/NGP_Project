@@ -421,9 +421,6 @@
     <ClInclude Include="NetworkTypes.h">
       <Filter>Engine\01.Header</Filter>
     </ClInclude>
-    <ClInclude Include="CLoadingBackground.h">
-      <Filter>Engine\04.Object\Background\LoadingBackground</Filter>
-    </ClInclude>
     <ClInclude Include="MissileMgr.h">
       <Filter>Engine\03.Manager\MissileMgr</Filter>
     </ClInclude>
@@ -436,7 +433,7 @@
     <ClInclude Include="CTransitionBase.h">
       <Filter>Engine\04.Object\UI</Filter>
     </ClInclude>
-    <ClInclude Include="CSceneTransition.h">
+    <ClInclude Include="CLoadingTransition.h">
       <Filter>Engine\04.Object\UI</Filter>
     </ClInclude>
   </ItemGroup>
@@ -655,9 +652,6 @@
     <ClCompile Include="CNetworkMgr.cpp">
       <Filter>Engine\03.Manager\NetworkMgr</Filter>
     </ClCompile>
-    <ClCompile Include="CLoadingBackground.cpp">
-      <Filter>Engine\04.Object\Background\LoadingBackground</Filter>
-    </ClCompile>
     <ClCompile Include="MissileMgr.cpp">
       <Filter>Engine\03.Manager\MissileMgr</Filter>
     </ClCompile>
@@ -670,7 +664,7 @@
     <ClCompile Include="CTransitionBase.cpp">
       <Filter>Engine\04.Object\UI</Filter>
     </ClCompile>
-    <ClCompile Include="CSceneTransition.cpp">
+    <ClCompile Include="CLoadingTransition.cpp">
       <Filter>Engine\04.Object\UI</Filter>
     </ClCompile>
   </ItemGroup>
