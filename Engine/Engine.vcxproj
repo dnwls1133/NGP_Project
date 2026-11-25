@@ -183,6 +183,9 @@
     <ClInclude Include="CEenemi0.h" />
     <ClInclude Include="CEventMgr.h" />
     <ClInclude Include="CExposion.h" />
+    <ClInclude Include="CMenuTransition.h" />
+    <ClInclude Include="CTransitionBase.h" />
+    <ClInclude Include="CSceneTransition.h" />
     <ClInclude Include="CNetworkMgr.h" />
     <ClInclude Include="CSessionMgr.h" />
     <ClInclude Include="Common.h" />
@@ -268,6 +271,9 @@
     <ClCompile Include="CEenemi0.cpp" />
     <ClCompile Include="CEventMgr.cpp" />
     <ClCompile Include="CExposion.cpp" />
+    <ClCompile Include="CMenuTransition.cpp" />
+    <ClCompile Include="CTransitionBase.cpp" />
+    <ClCompile Include="CSceneTransition.cpp" />
     <ClCompile Include="CNetworkMgr.cpp" />
     <ClCompile Include="CSessionMgr.cpp" />
     <ClCompile Include="CLoadingBackground.cpp" />

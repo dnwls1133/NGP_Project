@@ -55,7 +55,7 @@ void CLoadingBackground::Render(HDC canvas_)
 
     BLENDFUNCTION blend = {};
     blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = static_cast<BYTE>(m_alpha);
+    blend.SourceConstantAlpha = static_cast<BYTE>(m_alpha * 255.f);
 
     AlphaBlend(
         canvas_,

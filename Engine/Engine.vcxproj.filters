@@ -430,6 +430,15 @@
     <ClInclude Include="CSessionMgr.h">
       <Filter>Engine\03.Manager\SessionMgr</Filter>
     </ClInclude>
+    <ClInclude Include="CMenuTransition.h">
+      <Filter>Engine\04.Object\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="CTransitionBase.h">
+      <Filter>Engine\04.Object\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="CSceneTransition.h">
+      <Filter>Engine\04.Object\UI</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Engine.rc">
@@ -654,6 +663,15 @@
     </ClCompile>
     <ClCompile Include="CSessionMgr.cpp">
       <Filter>Engine\03.Manager\SessionMgr</Filter>
+    </ClCompile>
+    <ClCompile Include="CMenuTransition.cpp">
+      <Filter>Engine\04.Object\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="CTransitionBase.cpp">
+      <Filter>Engine\04.Object\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="CSceneTransition.cpp">
+      <Filter>Engine\04.Object\UI</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>
