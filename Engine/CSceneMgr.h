@@ -19,6 +19,7 @@ public:
 	void update();
 	void finalupdate();
 	void render(HDC _dc);
+    [[nodiscard]] bool IsLoadingTransitionActive() const noexcept;
 
 public:
 	CScene* GetCurScene() { return m_pCurScene; }

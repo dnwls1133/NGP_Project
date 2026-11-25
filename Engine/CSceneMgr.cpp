@@ -87,6 +87,17 @@ void CSceneMgr::render(HDC _dc)
     m_loadingTransition->Render(_dc);
 }
 
+bool CSceneMgr::IsLoadingTransitionActive() const noexcept
+{
+    if (!m_loadingTransition)
+    {
+        return false;
+    }
+
+    const auto state = m_loadingTransition->GetCurrentState();
+    return state != ETransitionState::Idle && state != ETransitionState::CloseComplete;
+}
+
 void CSceneMgr::ChangeScene(SCENE_TYPE _eNext)
 {
     const auto index = static_cast<UINT>(_eNext);
@@ -95,8 +106,7 @@ void CSceneMgr::ChangeScene(SCENE_TYPE _eNext)
         return;
     }
 
-    const auto state = m_loadingTransition->GetCurrentState();
-    if (state != ETransitionState::Idle && state != ETransitionState::CloseComplete)
+    if (IsLoadingTransitionActive())
     {
         return;
     }

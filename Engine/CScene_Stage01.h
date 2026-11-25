@@ -18,6 +18,10 @@ private:
     bool               m_bFail;
     float              m_fClearAcc;
 
+    CTexture* m_fadeTexture = nullptr;
+    float m_entryFadeAlpha = 1.f;
+    bool m_waitingForEntryFade = true;
+
     CStageHUD* m_pHud;
 
     CSound* m_pStageTheme;          // 스테이지 메인테마.
