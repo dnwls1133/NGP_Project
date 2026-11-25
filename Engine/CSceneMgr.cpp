@@ -10,8 +10,7 @@
 #include "CScene_Title.h"
 #include "CScene_Tool.h"
 
-#include "CLoadingBackground.h"
-#include "CTimeMgr.h"
+#include "CSceneTransition.h"
 
 CSceneMgr::CSceneMgr()
 	: m_arrScene{}
@@ -23,7 +22,6 @@ CSceneMgr::CSceneMgr()
 
 CSceneMgr::~CSceneMgr()
 {
-	delete m_pBackground;
 	// 씬 전부 삭제
 	for (UINT i = 0; i < (UINT)SCENE_TYPE::END; ++i)
 	{
@@ -64,7 +62,7 @@ void CSceneMgr::init()
 
 	//m_arrScene[(UINT)SCENE_TYPE::STAGE_01] = new CScene_Stage_01;
 	//m_arrScene[(UINT)SCENE_TYPE::STAGE_02] = new CScene_Stage_02;
-    m_pBackground = new CLoadingBackground();
+    m_sceneTransition = std::make_unique<CSceneTransition>();
 
 	m_pCurScene = m_arrScene[(UINT)SCENE_TYPE::TITLE];
 	m_pCurScene->Enter();
@@ -72,35 +70,7 @@ void CSceneMgr::init()
 
 void CSceneMgr::update()
 {
-    constexpr float fadeSpeed = 510.0f;
-    const float alphaDelta = CTimeMgr::GetInst()->GetfDT() * fadeSpeed;
-
-    if (m_pNextScene)
-    {
-        m_pBackground->SetAlpha(m_pBackground->GetAlpha() + alphaDelta);
-
-        if (m_pBackground->GetAlpha() >= 255)
-        {
-            m_pBackground->SetAlpha(255);
-            m_pCurScene->Exit();
-            m_pCurScene = m_pNextScene;
-
-            m_pCurScene->Enter();
-            m_pNextScene = nullptr;
-        }
-    }
-    else if (m_pBackground->IsActive())
-    {
-        m_pBackground->SetAlpha(m_pBackground->GetAlpha() - alphaDelta);
-
-        if (m_pBackground->GetAlpha() <= 0)
-        {
-            m_pBackground->SetAlpha(0);
-            m_pBackground->Close();
-        }
-    }
-
-    m_pBackground->Update();
+    m_sceneTransition->Update();
 
 	m_pCurScene->update();
 	finalupdate();
@@ -114,17 +84,22 @@ void CSceneMgr::finalupdate()
 void CSceneMgr::render(HDC _dc)
 {
 	m_pCurScene->render(_dc);
-    m_pBackground->Render(_dc);
+    m_sceneTransition->Render(_dc);
 }
 
 void CSceneMgr::ChangeScene(SCENE_TYPE _eNext)
 {
-    if (m_pBackground->IsActive())
+    const auto index = static_cast<UINT>(_eNext);
+    if (index >= static_cast<UINT>(SCENE_TYPE::END) || !m_arrScene[index])
     {
         return;
     }
 
-    m_pNextScene = m_arrScene[(UINT)_eNext];
-    m_pBackground->Open();
+    CScene* nextScene = m_arrScene[index];
+    m_sceneTransition->Start([this, nextScene]
+    {
+        m_pCurScene->Exit();
+        m_pCurScene = nextScene;
+        m_pCurScene->Enter();
+    });
 }
-

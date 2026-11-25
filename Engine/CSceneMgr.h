@@ -1,7 +1,9 @@
 ﻿#pragma once
 
+#include <memory>
+
 class CScene;
-class CLoadingBackground;
+class CSceneTransition;
 
 class CSceneMgr // 씬을 전환시켜주는 역활
 {
@@ -9,9 +11,8 @@ class CSceneMgr // 씬을 전환시켜주는 역활
 private:
 	CScene*		m_arrScene[(UINT)SCENE_TYPE::END];     // 모든 씬 목록
 	CScene*		m_pCurScene;					       // 현재 씬
-    CScene*     m_pNextScene = nullptr;				       // 다음 씬
 
-    CLoadingBackground* m_pBackground = nullptr;
+    std::unique_ptr<CSceneTransition> m_sceneTransition;
 
 public:
 	void init();
