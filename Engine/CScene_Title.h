@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "CScene.h"
+#include "CMenuTransition.h"
 class CScene;
 
 class CTitleLogo;
@@ -33,6 +34,12 @@ private:
     };
 
     void CreateMenus();
+    void OpenMenu(CTitleMenu& menu);
+    bool UpdateMenuOpen();
+
+    CMenuTransition m_menuTransition;
+    std::vector<Vec2> m_menuTargetPositions;
+    float m_menuOpenElapsed = 0.f;
 
     EState m_CurrentState;
 
