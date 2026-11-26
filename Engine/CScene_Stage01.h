@@ -2,7 +2,6 @@
 #include "CScene.h"
 #include "../host/HostSimCore.h"
 #include <deque>
-#include <optional>
 
 
 class CSound;
@@ -38,7 +37,6 @@ private:
     struct RemotePlayerState
     {
         protocol::ObjectId objectId = 0;
-        std::optional<std::uint32_t> lastSnapshotTick;
     };
 
     double m_inputSendAccumulator = 0.0;

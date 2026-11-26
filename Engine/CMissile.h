@@ -35,7 +35,7 @@ public:
 
     protocol::SpawnPayload ExportSpawnPayload(protocol::EventId eventId) const override;
     protocol::ObjectStateRecord ExportStateRecord() const;
-    void ApplySnapshotState(Vec2 pos, Vec2 vel);
+    void ApplySnapshotVelocity(Vec2 vel);
 
 public:
     virtual void update();

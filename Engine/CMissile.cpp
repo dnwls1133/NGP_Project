@@ -198,9 +198,8 @@ protocol::ObjectStateRecord CMissile::ExportStateRecord() const
     return rec;
 }
 
-void CMissile::ApplySnapshotState(Vec2 pos, Vec2 vel)
+void CMissile::ApplySnapshotVelocity(Vec2 vel)
 {
-    SetPos(pos);
     const float speed = vel.Length();
     if (speed > 0.f) {
         SetDir(vel);
