@@ -830,21 +830,8 @@ void CScene_Stage01::update()
                     {
                         if (object.kind == protocol::NetObjectKind::MONSTER)
                         {
-                            // 생성된 몬스터를 object.objectId로 찾아 보간 샘플 등록
-                            // 생성 전 도착한 상태는 건너뛰고 다음 스냅샷부터 적용
                             if (auto* mon = dynamic_cast<CMonster*>(FindObjectById(object.objectId)))
-                            {
-                                if (mon->GetsignalDead() && object.alive)
-                                    continue;
-
-                                if (!mon->IsDead() && mon->ApplySnapshotPosition(
-                                    Vec2(object.pos.x / 100.f, object.pos.y / 100.f),
-                                    snapshot.snapshotTick, SnapshotLerpDuration))
-                                {
-                                    mon->SetConfirmedHP(static_cast<float>(object.hp));
-                                }
-                            }
-
+                                mon->ApplyMonsterSnapshot(object, snapshot.snapshotTick);
 
                             continue;
                         }
