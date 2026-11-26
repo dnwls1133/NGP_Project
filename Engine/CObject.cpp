@@ -5,6 +5,11 @@
 
 #include "CCollider.h"
 #include "CAnimator.h"
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 CObject::CObject()
 	: m_vPos{}
 	, m_vScale{}
@@ -67,8 +72,41 @@ void CObject::SafeColliderdelete()
     }
 }
 
+bool CObject::ApplySnapshotPosition(Vec2 target, std::uint32_t tick, float duration)
+{
+    if (m_lastPositionTick && tick <= *m_lastPositionTick)
+        return false;
+
+    if (m_positionElapsed < m_positionDuration)
+        m_vPos = m_positionStart + (m_positionTarget - m_positionStart) *
+            (m_positionElapsed / m_positionDuration);
+
+    m_lastPositionTick = tick;
+    m_positionStart = m_vPos;
+    m_positionTarget = target;
+    m_positionDuration = duration;
+    m_positionElapsed = 0.f;
+    if (duration == 0.f)
+        SetPos(target);
+
+    return true;
+}
+
+void CObject::ResetSnapshotPosition()
+{
+    m_lastPositionTick.reset();
+    m_positionDuration = 0.f;
+}
+
 void CObject::finalupdate()
 {
+    if (m_positionElapsed < m_positionDuration)
+    {
+        m_positionElapsed = min(m_positionElapsed + fDT, m_positionDuration);
+        const float t = m_positionElapsed / m_positionDuration;
+        SetPos(m_positionStart + (m_positionTarget - m_positionStart) * t);
+    }
+
 	if (m_pCollider)
 	{
 		m_pCollider->finalupdate();

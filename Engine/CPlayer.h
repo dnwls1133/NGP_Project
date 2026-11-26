@@ -25,6 +25,11 @@ private:
 
 public:
     virtual void update();
+    void finalupdate() override;
+    static std::uint8_t ReadMoveBits();
+    void ResetNetworkPosition(Vec2 pos);
+    bool ApplyLocalSnapshotPosition(const protocol::ObjectStateRecord& state,
+        std::uint32_t tick, float hostElapsed, float interpolationDuration);
     void Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt);
     void SetRespawnInvincible(bool invincible);
 
@@ -50,6 +55,13 @@ public:
 
     bool isMujeok = false;
 private:
+    static constexpr float EntryMovementDuration = 3.f;
+    std::optional<std::uint32_t> m_localSnapshotTick;
+    bool m_predictLocalMovement = false;
+    Vec2 m_localPositionError;
+    std::uint8_t m_localMoveBits = protocol::MoveBit::NONE;
+    float m_localMoveDt = 0.f;
+    Vec2 MoveFrom(Vec2 pos, std::uint8_t moveBits, float dt) const;
     void CreateMissile(int type,float _fVec, MISSILE_TYPE _etype);
 
     virtual void OnCollisionEnter(CCollider* _pOther);

@@ -1,4 +1,5 @@
 ﻿#include "pch.h"
+#include <cmath>
 #include "CPlayer.h"
 
 #include "CCore.h"
@@ -32,7 +33,7 @@ CPlayer::CPlayer()
 	:dAcc(0.)
 	,m_iHp(3)
     ,m_iAtk(2)
-    ,dStartAcc(3.f)
+    ,dStartAcc(EntryMovementDuration)
     ,m_bHit(false)
     ,m_iLvl(1)
     ,m_iBoomb(1)
@@ -69,62 +70,104 @@ CPlayer::~CPlayer()
 {
 	
 }
+std::uint8_t CPlayer::ReadMoveBits()
+{
+    std::uint8_t moveBits = protocol::MoveBit::NONE;
+    if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
+    if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
+    if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
+    if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
+    return moveBits;
+}
+
 void CPlayer::update()
 {
     auto& session = CCore::GetInst()->GetSession();
-    if (session.IsHost())
-    {
+    if (session.GetState() != network::SessionState::Started || session.IsHost()
+        || m_PlayerId != session.GetLocalPlayerId() || !m_predictLocalMovement
+        || m_clear || !IsAlivePlayer())
+        return;
 
+    m_localMoveBits = ReadMoveBits();
+    m_localMoveDt = fDT;
+}
+
+void CPlayer::finalupdate()
+{
+    // The stage can switch position modes while processing snapshots after update().
+    if (m_predictLocalMovement && m_localMoveDt > 0.f && !m_clear && IsAlivePlayer())
+    {
+        constexpr float correctionTime = 0.15f;
+        const float weight = 1.f - std::exp(-m_localMoveDt / correctionTime);
+        const Vec2 correction = m_localPositionError * weight;
+        SetPos(MoveFrom(GetPos(), m_localMoveBits, m_localMoveDt) + correction);
+        m_localPositionError = m_localPositionError - correction;
+    }
+    m_localMoveDt = 0.f;
+    CObject::finalupdate();
+}
+
+void CPlayer::ResetNetworkPosition(Vec2 pos)
+{
+    ResetSnapshotPosition();
+    m_localSnapshotTick.reset();
+    m_predictLocalMovement = false;
+    m_localMoveDt = 0.f;
+    m_localPositionError = Vec2();
+    SetPos(pos);
+}
+
+bool CPlayer::ApplyLocalSnapshotPosition(const protocol::ObjectStateRecord& state,
+    std::uint32_t tick, float hostElapsed, float interpolationDuration)
+{
+    if (m_localSnapshotTick && tick <= *m_localSnapshotTick)
+        return false;
+
+    m_localSnapshotTick = tick;
+    const Vec2 target(state.pos.x / 100.f, state.pos.y / 100.f);
+    const bool predict = state.alive && state.fsmState == 0
+        && hostElapsed >= EntryMovementDuration;
+    if (predict != m_predictLocalMovement)
+    {
+        ResetSnapshotPosition();
+        m_localMoveDt = 0.f;
+    }
+    m_predictLocalMovement = predict;
+
+    if (predict)
+    {
+        const Vec2 current = GetPos();
+        m_localPositionError = Vec2(target.x - current.x, target.y - current.y);
     }
     else
-    {
-        /*
-        std::uint8_t moveBits = protocol::MoveBit::NONE;
-        std::uint8_t fireHeld = 0;
+        ApplySnapshotPosition(target, tick, state.alive ? interpolationDuration : 0.f);
 
-        // 11/10: 로컬 슬롯(0) 임시 키 수집 (11/14 통합 시 이현범 담당 BuildInput/호스트 루프로 연결)
-        if (m_PlayerId == 0)
-        {
-            if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
-            if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
-            if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
-            if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
-            if (KEY_HOLD(KEY::S)) fireHeld = 1;
-            if (KEY_TAP(KEY::L)) m_iLvl = 5;
-        }
+    return true;
+}
 
-        Simulate(moveBits, fireHeld, fDT);
-        */
-    }
-    
-	
-	
-	//GetAnimator()->update();
+Vec2 CPlayer::MoveFrom(Vec2 pos, std::uint8_t moveBits, float dt) const
+{
+    const auto* back = CSceneMgr::GetInst()->GetCurScene()->GetBackground();
+    Vec2 vBackpos = back->GetPos();
+    Vec2 vBackScale = back->GetScale();
+    if ((moveBits & protocol::MoveBit::UP) != 0
+        && pos.y >= vBackpos.y - vBackScale.y / 2.f)
+        pos.y -= 300.f * dt;
+    if ((moveBits & protocol::MoveBit::DOWN) != 0
+        && pos.y <= vBackpos.y + vBackScale.y / 2.f)
+        pos.y += 300.f * dt;
+    if ((moveBits & protocol::MoveBit::LEFT) != 0
+        && pos.x >= vBackpos.x - vBackScale.x / 2.f)
+        pos.x -= 300.f * dt;
+    if ((moveBits & protocol::MoveBit::RIGHT) != 0
+        && pos.x <= vBackpos.x + vBackScale.x / 2.f)
+        pos.x += 300.f * dt;
+    return pos;
 }
 
 void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
 {
     Vec2 vPos = GetPos();
-    CBackground* back = (CBackground*)CSceneMgr::GetInst()->GetCurScene()->GetBackground();
-    Vec2 vBackpos = back->GetPos();
-    Vec2 vBackScale = back->GetScale();
-
-    auto ApplyMove = [&]()
-        {
-            if ((moveBits & protocol::MoveBit::UP) != 0
-                && vPos.y >= vBackpos.y - vBackScale.y / 2.f)
-                vPos.y -= 300.f * dt;
-            if ((moveBits & protocol::MoveBit::DOWN) != 0
-                && vPos.y <= vBackpos.y + vBackScale.y / 2.f)
-                vPos.y += 300.f * dt;
-            if ((moveBits & protocol::MoveBit::LEFT) != 0
-                && vPos.x >= vBackpos.x - vBackScale.x / 2.f)
-                vPos.x -= 300.f * dt;
-            if ((moveBits & protocol::MoveBit::RIGHT) != 0
-                && vPos.x <= vBackpos.x + vBackScale.x / 2.f)
-                vPos.x += 300.f * dt;
-        };
-
     if (!m_clear && IsAlivePlayer())
     {
         if (dStartAcc > 0.f)
@@ -140,7 +183,7 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
                 vPos.y -= 300.f * dt;
             }
             else {
-                ApplyMove();
+                vPos = MoveFrom(vPos, moveBits, dt);
             }
 
             if (dAcc > 2.f) {
@@ -151,7 +194,7 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
             SetPos(vPos);
         }
         else {
-            ApplyMove();
+            vPos = MoveFrom(vPos, moveBits, dt);
 
             if (fireHeld != 0)
             {

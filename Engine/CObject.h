@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 
+#include <optional>
 #include "CCamera.h"
 #include "../shared/protocol/ProtocolTypes.h"
 
@@ -27,10 +28,17 @@ private:
 	bool	   m_bCollideroff;
 
     std::uint32_t m_objectId = 0;
+    std::optional<std::uint32_t> m_lastPositionTick;
+    Vec2 m_positionStart;
+    Vec2 m_positionTarget;
+    float m_positionDuration = 0.f;
+    float m_positionElapsed = 0.f;
 public:
 	void SetPos(Vec2 _vPos) { m_vPos = _vPos; }
 	void SetScale(Vec2 _vScale) { m_vScale = _vScale; }
 	void SetName(const wstring& _strName) { m_strName = _strName; }
+    bool ApplySnapshotPosition(Vec2 target, std::uint32_t tick, float duration);
+    void ResetSnapshotPosition();
     void SetObjectId(std::uint32_t _id) { m_objectId = _id; }
     std::uint32_t GetObjectId() const { return m_objectId; }
 

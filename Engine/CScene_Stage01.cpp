@@ -43,6 +43,7 @@
 
 namespace
 {
+    constexpr float SnapshotLerpDuration = host::SIM_FIXED_DT * host::STATE_PUBLISH_INTERVAL_TICKS;
     constexpr float EntryFadeDuration = 1.5f;
     constexpr float ClearFadeDuration = 3.f;
     constexpr float FailCardDuration = 5.f;
@@ -533,12 +534,8 @@ void CScene_Stage01::update()
         }
 
         // 입력 생성
-        std::uint8_t moveBits = protocol::MoveBit::NONE;
+        const auto moveBits = CPlayer::ReadMoveBits();
         std::uint8_t fireHeld = 0;
-        if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
-        if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
-        if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
-        if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
         if (KEY_HOLD(KEY::S)) fireHeld = 1;
 
         if (session.IsHost())
@@ -677,7 +674,8 @@ void CScene_Stage01::update()
                         if (remote.objectId != spawn.objectId)
                         {
                             remote.objectId = spawn.objectId;
-                            remote.lastSnapshotTick.reset();
+                            if (auto* player = GetPlayer(spawn.ownerPlayerId))
+                                player->ResetNetworkPosition(Vec2(spawn.pos.x / 100.f, spawn.pos.y / 100.f));
                         }
                     }
                     else if (spawn.kind == protocol::NetObjectKind::PROJ_PLAYER ||
@@ -839,8 +837,12 @@ void CScene_Stage01::update()
                                 if (mon->GetsignalDead() && object.alive)
                                     continue;
 
-                                mon->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
-                                mon->SetConfirmedHP(static_cast<float>(object.hp));
+                                if (!mon->IsDead() && mon->ApplySnapshotPosition(
+                                    Vec2(object.pos.x / 100.f, object.pos.y / 100.f),
+                                    snapshot.snapshotTick, SnapshotLerpDuration))
+                                {
+                                    mon->SetConfirmedHP(static_cast<float>(object.hp));
+                                }
                             }
 
 
@@ -850,9 +852,13 @@ void CScene_Stage01::update()
                         if (object.kind == protocol::NetObjectKind::PROJ_MONSTER) {
                             if (auto* missile = dynamic_cast<CMissile*>
                                 (FindObjectById(object.objectId))) {
-                                missile->ApplySnapshotState(
+                                if (!missile->IsDead() && missile->ApplySnapshotPosition(
                                     Vec2(object.pos.x / 100.f, object.pos.y / 100.f),
-                                    Vec2(object.vel.x / 100.f, object.vel.y / 100.f));
+                                    snapshot.snapshotTick, SnapshotLerpDuration))
+                                {
+                                    missile->ApplySnapshotVelocity(
+                                        Vec2(object.vel.x / 100.f, object.vel.y / 100.f));
+                                }
                             }
                             continue;
                         }
@@ -867,12 +873,17 @@ void CScene_Stage01::update()
                             if (remote.objectId == 0 || remote.objectId != object.objectId)
                                 continue;
 
-                            if (remote.lastSnapshotTick && snapshot.snapshotTick <= *remote.lastSnapshotTick)
-                                break;
-
                             if (auto* player = GetPlayer(slot))
                             {
-                                player->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
+                                const bool applied = slot == session.GetLocalPlayerId()
+                                    ? player->ApplyLocalSnapshotPosition(object, snapshot.snapshotTick,
+                                        (snapshot.snapshotTick - session.GetStartInfo().startHostTick) * host::SIM_FIXED_DT,
+                                        SnapshotLerpDuration)
+                                    : player->ApplySnapshotPosition(Vec2(object.pos.x / 100.f, object.pos.y / 100.f),
+                                        snapshot.snapshotTick, object.alive ? SnapshotLerpDuration : 0.f);
+                                if (!applied)
+                                    break;
+
                                 if (object.alive == 0) {
                                     player->setdead();
                                     player->SetRespawnInvincible(false);
@@ -880,7 +891,6 @@ void CScene_Stage01::update()
                                 else {
                                     player->SetRespawnInvincible(object.fsmState == 1);
                                 }
-                                remote.lastSnapshotTick = snapshot.snapshotTick;
                             }
 
                             break;
