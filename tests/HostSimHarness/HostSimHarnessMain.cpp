@@ -1228,6 +1228,83 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1126Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 승리 조건이 연속 5틱 이상 유지되어도 RESULT(VICTORY) 이벤트·팀 점수가 정확히 1회만 발행됨 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 100);
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 100);
+            const ObjectId bossId = engine.RequestSpawn(NetObjectKind::MONSTER, MONSTER_SUBTYPE_BOSS, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 10'000 }, {}, 100, 1);
+            const ObjectId projId = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 0, FixedVec2{ 15'000, 10'000 }, {}, 1, 100);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            engine.ApplyProjectileHit(projId, bossId, sink); // 보스 처치 -> 팀 점수 +1500
+            // 연속 5틱 진행 (같은 승리 조건 유지)
+            engine.StepFrame(83'334, script, sink);
+
+            int resultCount = 0;
+            ResultPayload lastResult{};
+            for (const auto& entry : sink.GetCapturedMessages())
+            {
+                if (entry.channel == net::Channel::Tcp
+                    && entry.message.header.type == MessageType::RESULT)
+                {
+                    ++resultCount;
+                    lastResult = std::get<ResultPayload>(entry.message.payload);
+                }
+            }
+
+            Check(resultCount == 1
+                && lastResult.eventId != 0
+                && lastResult.outcome == MatchOutcome::VICTORY
+                && lastResult.finalTeamScore == engine.GetTeamScore()
+                && lastResult.finalTeamScore == 1500,
+                "HostSim1126: Emits RESULT(VICTORY) with finalTeamScore exactly once across consecutive ticks",
+                counters);
+        }
+
+        // 2. 패배 조건이 연속 5틱 이상 유지되어도 RESULT(DEFEAT) 이벤트가 정확히 1회만 발행됨 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 1, 2);
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 1, 2);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            engine.ApplyDamageToPlayer(0, 1);
+            engine.ApplyDamageToPlayer(1, 1);
+            engine.StepFrame(83'334, script, sink); // 연속 5틱 진행
+
+            int resultCount = 0;
+            ResultPayload lastResult{};
+            for (const auto& entry : sink.GetCapturedMessages())
+            {
+                if (entry.channel == net::Channel::Tcp
+                    && entry.message.header.type == MessageType::RESULT)
+                {
+                    ++resultCount;
+                    lastResult = std::get<ResultPayload>(entry.message.payload);
+                }
+            }
+
+            Check(resultCount == 1
+                && lastResult.eventId != 0
+                && lastResult.outcome == MatchOutcome::DEFEAT
+                && lastResult.finalTeamScore == engine.GetTeamScore(),
+                "HostSim1126: Emits RESULT(DEFEAT) exactly once across consecutive ticks",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -1253,6 +1330,7 @@ int main()
     RunHostSim1123Suite(counters);
     RunHostSim1124Suite(counters);
     RunHostSim1125Suite(counters);
+    RunHostSim1126Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';
