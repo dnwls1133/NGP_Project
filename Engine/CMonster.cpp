@@ -141,6 +141,31 @@ void CMonster::finalupdate()
     CObject::finalupdate();
 }
 
+void CMonster::PlayHitAnimation()
+{
+    if (IsDead() || m_signaldead)
+        return;
+
+    m_bHit = true;
+    dAccTime0 = 0.f;
+
+    const wchar_t* animationName;
+    switch (m_tInfo.eMType)
+    {
+    case MON_TYPE::NORMAL2: animationName = L"N2Enemy_Hit"; break;
+    case MON_TYPE::NORMAL3: animationName = L"N3Enemy_Hit"; break;
+    case MON_TYPE::NORMAL4: animationName = L"N4Enemy_Hit"; break;
+    case MON_TYPE::BOSS: animationName = L"Boss1Enemy_Hit"; break;
+    case MON_TYPE::EPIC: animationName = L"E1Enemy_Hit"; break;
+    case MON_TYPE::EPIC2: animationName = L"E2Enemy_Hit"; break;
+    default: return;
+    }
+
+    auto* animator = GetAnimator();
+    animator->LoadAnimation(std::wstring(L"animation\\") + animationName + L".anim");
+    animator->Play(animationName, true);
+}
+
 void CMonster::BeginDeath()
 {
     if (IsDead() || m_signaldead)
@@ -160,13 +185,6 @@ void CMonster::update()
         return;
     }
 
-    if (!CCore::GetInst()->GetSession().IsHost()) // 11/21 클라이언트는 AI 이동 발사 자체 삭제 실행 안함
-        return;
-
-    m_pAI->update();
-    Vec2 vBPos = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetPos();
-    Vec2 vBScale = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetScale();
-    Vec2 vMonPos = GetPos();
     if (m_bHit)
     {
         dAccTime0 += fDT;
@@ -174,13 +192,17 @@ void CMonster::update()
         {
             dAccTime0 = 0.f;
             m_bHit = false;
-            if (m_signaldead == false)
-            {
-                SetAnim(m_tInfo.eMType);
-            }
-           
+            SetAnim(m_tInfo.eMType);
         }
     }
+
+    if (!CCore::GetInst()->GetSession().IsHost()) // 11/21 클라이언트는 AI 이동 발사 자체 삭제 실행 안함
+        return;
+
+    m_pAI->update();
+    Vec2 vBPos = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetPos();
+    Vec2 vBScale = CSceneMgr::GetInst()->GetCurScene()->GetBackground()->GetScale();
+    Vec2 vMonPos = GetPos();
     if (vMonPos.x < vBPos.x - vBScale.x - 100.f
         || vMonPos.x > vBPos.x + vBScale.x + 100.f
         || vMonPos.y < vBPos.y - vBScale.y - 100.f
@@ -255,55 +277,6 @@ void CMonster::OnCollisionEnter(CCollider* _pOther)
         pMissile->PlayHitEffect();
         const int iDamage = pMissile->GetDamage();
 
-        m_bHit = true;
-        switch (m_tInfo.eMType)
-        {
-        case MON_TYPE::NORMAL1:
-        {
-            //GetAnimator()->LoadAnimation(L"animation\\N1EnemyH_Hit.anim");
-           // GetAnimator()->Play(L"N1EnemyH_Hit", true);
-        }
-        break;
-        case MON_TYPE::NORMAL2:
-        {
-            GetAnimator()->LoadAnimation(L"animation\\N2Enemy_Hit.anim");
-            GetAnimator()->Play(L"N2Enemy_Hit", true);
-        }
-        break;
-        case MON_TYPE::NORMAL3:
-        {
-            GetAnimator()->LoadAnimation(L"animation\\N3Enemy_Hit.anim");
-            GetAnimator()->Play(L"N3Enemy_Hit", true);
-        }
-        break;
-        case MON_TYPE::NORMAL4:
-        {
-            GetAnimator()->LoadAnimation(L"animation\\N4Enemy_Hit.anim");
-            GetAnimator()->Play(L"N4Enemy_Hit", true);
-        }
-        break;
-        case MON_TYPE::BOSS:
-        {
-            GetAnimator()->LoadAnimation(L"animation\\Boss1Enemy_Hit.anim");
-            GetAnimator()->Play(L"Boss1Enemy_Hit", true);
-        }
-        break;
-        case MON_TYPE::EPIC:
-        {
-            GetAnimator()->LoadAnimation(L"animation\\E1Enemy_Hit.anim");
-            GetAnimator()->Play(L"E1Enemy_Hit", true);
-        }
-        break;
-        case MON_TYPE::EPIC2:
-        {
-            GetAnimator()->LoadAnimation(L"animation\\E2Enemy_Hit.anim");
-            GetAnimator()->Play(L"E2Enemy_Hit", true);
-        }
-        break;
-        
-        default:
-            break;
-        }
         m_tInfo.fHP = max(0.f, m_tInfo.fHP - iDamage);
 
         bool justDied = false;
@@ -317,6 +290,10 @@ void CMonster::OnCollisionEnter(CCollider* _pOther)
             scoreDelta = ((int)m_tInfo.eMType) * 250;
             CRankMgr::GetInst()->CurrentRanking.Score +=
                 ((int)m_tInfo.eMType) * 250;
+        }
+        else
+        {
+            PlayHitAnimation();
         }
 
         // 11/21 호스트가 확정한 적 피격 사망 팀 점수를 COMBAT_EVENT로 큐에 등록

@@ -60,6 +60,7 @@ public:
     const tMonInfo& GetInfo() { return m_tInfo; }
     void SetAnim(MON_TYPE eType);
     bool GetsignalDead() { return m_signaldead; }
+    void PlayHitAnimation();
     void BeginDeath();
     void SetConfirmedHP(float _hp) { m_tInfo.fHP = _hp; }
     protocol::ObjectStateRecord ExportStateRecord() const;

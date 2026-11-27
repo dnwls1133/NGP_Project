@@ -809,6 +809,8 @@ void CScene_Stage01::update()
                             mon->SetConfirmedHP(static_cast<float>(combat.confirmedHp));
                             if (combat.kind == protocol::CombatEventKind::ENTITY_DIED)
                                 mon->BeginDeath();
+                            else if (combat.confirmedHp > 0)
+                                mon->PlayHitAnimation();
                         }
 
                         if (combat.kind == protocol::CombatEventKind::ENTITY_DIED)
