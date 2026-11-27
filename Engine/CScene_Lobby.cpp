@@ -553,10 +553,10 @@ void CScene_Lobby::GetRoomCodeInput(WPARAM character)
         (character >= L'0' && character <= L'9') ||
         (character >= L'A' && character <= L'F');
 
-    const bool separator = character == L'-' && inputRoomCode.size() == 4;
+    /*const bool separator = character == L'-' && inputRoomCode.size() == 4;
     const bool hasSeparator = inputRoomCode.find(L'-') != std::wstring::npos;
-    const std::size_t maxLength = hasSeparator || separator ? 9 : 8;
+    const std::size_t maxLength = hasSeparator || separator ? 9 : 8;*/
 
-    if ((hexDigit || separator) && inputRoomCode.size() < maxLength)
+    if (hexDigit && inputRoomCode.size() < 4)
         inputRoomCode.push_back(static_cast<wchar_t>(character));
 }
