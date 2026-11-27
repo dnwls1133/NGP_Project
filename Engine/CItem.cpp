@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "CItem.h"
+#include <cmath>
 #include "CPlayer.h"
 
 #include "CTimeMgr.h"
@@ -154,15 +155,20 @@ void CItem::update()
     Vec2 vBackPos = Background->GetPos();
     Vec2 vBackScale = Background->GetScale();
 
-    if (vIpos.y > resolution.y-10.f || vIpos.y < 10.f)
-    {
-        m_vDir.y *= -1;
-        
-    }
-    if (vIpos.x > vBackPos.x + vBackScale.x / 2 - 20.f || vIpos.x < vBackPos.x - vBackScale.x / 2 +20.f)
-    {
-        m_vDir.x *= -1;
-    }
+    const float minY = 10.f;
+    const float maxY = resolution.y - 10.f;
+    const float minX = vBackPos.x - vBackScale.x / 2.f + 20.f;
+    const float maxX = vBackPos.x + vBackScale.x / 2.f - 20.f;
+
+    if (vIpos.y > maxY)
+        m_vDir.y = std::fabs(m_vDir.y);      // y -= dir.y -> 위로(안쪽)
+    else if (vIpos.y < minY)
+        m_vDir.y = -std::fabs(m_vDir.y);     // y -= dir.y -> 아래로(안쪽)
+
+    if (vIpos.x > maxX)
+        m_vDir.x = -std::fabs(m_vDir.x);     // x += dir.x -> 왼쪽으로(안쪽)
+    else if (vIpos.x < minX)
+        m_vDir.x = std::fabs(m_vDir.x);      // x += dir.x -> 오른쪽으로(안쪽)
 
 
     vIpos.x += m_fVec * m_vDir.x * fDT;
