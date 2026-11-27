@@ -1305,6 +1305,57 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1127Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 생성 -> render(수명 불변) -> 삭제 -> 씬 종료 회귀: 그룹·슬롯·ObjectId 표·대기 이벤트 잔존 없음 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 2);
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 10'000 }, {}, 20, 1);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // 삭제 요청 직후 render는 컨테이너 크기를 바꾸지 않고(3 유지) 표시 대상만 제외(2)
+            engine.RequestDestroy(p0Id, DespawnReason::DESTROYED);
+            const bool renderSafe =
+                (engine.RenderPresentationOnly() == 2)
+                && (engine.GetActiveObjects().size() == 3);
+
+            // 틱 종료 경계에서 그룹·슬롯·ObjectId 표가 함께 정리됨
+            engine.FlushLifecycleAtTickEnd(sink);
+            const bool afterDestroyClean =
+                (engine.GetActiveObjects().size() == 2)
+                && (engine.GetPlayerSlotObjectId(0) == 0)
+                && (engine.FindObjectById(p0Id) == nullptr)
+                && (engine.FindObjectById(p1Id) != nullptr)
+                && (engine.FindObjectById(monId) != nullptr);
+
+            // 대기 중인 생성·삭제가 있는 상태에서 씬 종료(TransitionScene) -> 모든 그룹·슬롯·대기 이벤트 정리
+            const ObjectId pendingSpawnId = engine.RequestSpawn(NetObjectKind::ITEM, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 15'000 });
+            engine.RequestDestroy(monId, DespawnReason::STAGE_END);
+            engine.TransitionScene();
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            const bool afterSceneExitClean =
+                engine.GetActiveObjects().empty()
+                && (engine.GetPlayerSlotObjectId(0) == 0)
+                && (engine.GetPlayerSlotObjectId(1) == 0)
+                && (engine.FindObjectById(p1Id) == nullptr)
+                && (engine.FindObjectById(monId) == nullptr)
+                && (engine.FindObjectById(pendingSpawnId) == nullptr);
+
+            Check(renderSafe && afterDestroyClean && afterSceneExitClean,
+                "HostSim1127: Keeps render mutation-free and clears groups, player slots, ObjectId lookup, and pending events on destroy and scene exit",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -1331,6 +1382,7 @@ int main()
     RunHostSim1124Suite(counters);
     RunHostSim1125Suite(counters);
     RunHostSim1126Suite(counters);
+    RunHostSim1127Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

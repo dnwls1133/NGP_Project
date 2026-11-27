@@ -87,7 +87,7 @@ void CColliderMgr::CollisionGroupUpdate(GROUP_TYPE _eLeft, GROUP_TYPE _eRight)
 					{
 						pLeftCol->OnCollisionExit(pRightCol);
 						pRightCol->OnCollisionExit(pLeftCol);
-						iter->second = false;
+                        m_mapCollInfo.erase(iter);
 					}
 					else
 					{
