@@ -1805,6 +1805,20 @@ namespace network_mgr_test
             }
 
             std::cout << "[PASS] Room closed and session returned to Idle\n";
+
+            if (round == 1)
+            {
+                session.Stop();
+
+                if (session.GetState() != SessionState::Idle)
+                {
+                    std::cout << "[FAIL] Repeated Stop changed session state\n";
+                    std::cout << "[SUITE] FAIL\n";
+                    return false;
+                }
+
+                std::cout << "[PASS] Repeated Stop preserved Idle\n";
+            }
         }
 
         std::cout << "[SUITE] PASS\n";
