@@ -52,6 +52,9 @@ private:
     bool m_bBossBgmPlayed = false;
     bool m_bBossDefeated = false;
     bool m_bResultSent = false;
+    bool m_hostPlayInitialized = false;
+
+    void BeginHostPlay();
     void EvaluateHostMatchOutcome();
     void SendMatchResultOnce(protocol::MatchOutcome outcome);
     std::deque<protocol::Message> m_pendingItemEvents;

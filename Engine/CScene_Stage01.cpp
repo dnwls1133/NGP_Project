@@ -190,6 +190,60 @@ void CScene_Stage01::QueueDespawn(protocol::ObjectId objectId, protocol::Despawn
     m_pendingItemEvents.push_back(msg);
 }
 
+void CScene_Stage01::BeginHostPlay()
+{
+    auto& session = CCore::GetInst()->GetSession();
+
+    m_hostTick = session.GetStartInfo().startHostTick;
+
+    // 이번 위치 동기화에서 P0와 P1에 사용할 고정 ID.
+    m_playerObjectIds = { 1, 2 };
+
+    bool allQueued = true;
+
+    for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS; ++slot)
+    {
+        const auto* player = GetPlayer(slot);
+        if (!player)
+        {
+            allQueued = false;
+            break;
+        }
+
+        const auto record = player->ExportStateRecord(m_playerObjectIds[slot]);
+
+        protocol::SpawnPayload spawn{};
+        spawn.eventId = static_cast<protocol::EventId>(slot) + 1;
+        spawn.objectId = record.objectId;
+        spawn.kind = protocol::NetObjectKind::PLAYER;
+        spawn.subType = record.subType;
+        spawn.ownerPlayerId = slot;
+        spawn.pos = record.pos;
+        spawn.vel = record.vel;
+        spawn.hp = record.hp;
+
+        const auto result = session.SendSpawn(spawn, m_hostTick);
+        if (result != net::SendResult::Queued)
+        {
+#ifdef _DEBUG
+            std::cerr << "[HOST] Player SPAWN enqueue failed, slot=" << static_cast<int>(slot) << ", result=" << static_cast<int>(result) << '\n';
+#endif
+            allQueued = false;
+            break;
+        }
+    }
+
+    m_playerSpawnsQueued = allQueued;
+
+
+    // 충돌 지정
+    // Player 그룹과 Monster 그룹간의 충돌체크
+    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::PROJ_MONSTER);
+    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::MONSTER, GROUP_TYPE::PROJ_PLAYER);
+    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::ITEM);
+    CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::MONSTER);
+}
+
 void CScene_Stage01::EvaluateHostMatchOutcome()
 {
     if (m_bClear || m_bFail)
@@ -316,6 +370,28 @@ void CScene_Stage01::update()
     auto& session = CCore::GetInst()->GetSession();
     using network::SessionState;
     const auto state = session.GetState();
+
+    if (state == SessionState::Loading)
+    {
+        if (session.NotifyLocalLoaded() && session.IsHost() && session.HasClientLoaded())
+        {
+            constexpr std::uint32_t INITIAL_HOST_TICK = 120;
+            const auto result = session.RequestStart(INITIAL_HOST_TICK);
+
+#ifdef _DEBUG
+            std::cout << "[HOST] START requested. result="
+                << static_cast<int>(result) << '\n';
+#endif
+        }
+
+        return;
+    }
+
+    if (state == SessionState::Started && session.IsHost() && !m_hostPlayInitialized)
+    {
+        BeginHostPlay();
+        m_hostPlayInitialized = true;
+    }
 
     if (!m_bFail)
     {
@@ -1046,19 +1122,7 @@ void CScene_Stage01::Enter()
     // 타일 로딩
     //LoadTile(L"Tile\\Start.tile");
 
-
-    // 충돌 지정
-    // Player 그룹과 Monster 그룹간의 충돌체크
-    if (session.IsHost())
-    {
-        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::PROJ_MONSTER);
-        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::MONSTER, GROUP_TYPE::PROJ_PLAYER);
-        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::ITEM);
-        CColliderMgr::GetInst()->CheckGroup(GROUP_TYPE::PLAYER, GROUP_TYPE::MONSTER);
-    }
-
     //Camera 지정
-
     CCamera::GetInst()->SetLookAt(vResolution / 2.f);
 
     m_fadeTexture = CResMgr::GetInst()->CreateTexture(L"Stage Black Fade", 1, 1);
@@ -1081,50 +1145,7 @@ void CScene_Stage01::Enter()
     m_nextSpawnEventId = 2;
     m_lastQueuedSpawnObjectId = 0;
     m_pendingSpawns.clear();
-
-    if (session.IsHost() && session.GetState() == network::SessionState::Started)
-    {
-        m_hostTick = session.GetStartInfo().startHostTick;
-
-        // 이번 위치 동기화에서 P0와 P1에 사용할 고정 ID.
-        m_playerObjectIds = { 1, 2 };
-
-        bool allQueued = true;
-
-        for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS; ++slot)
-        {
-            const auto* player = GetPlayer(slot);
-            if (!player)
-            {
-                allQueued = false;
-                break;
-            }
-
-            const auto record = player->ExportStateRecord(m_playerObjectIds[slot]);
-
-            protocol::SpawnPayload spawn{};
-            spawn.eventId = static_cast<protocol::EventId>(slot) + 1;
-            spawn.objectId = record.objectId;
-            spawn.kind = protocol::NetObjectKind::PLAYER;
-            spawn.subType = record.subType;
-            spawn.ownerPlayerId = slot;
-            spawn.pos = record.pos;
-            spawn.vel = record.vel;
-            spawn.hp = record.hp;
-
-            const auto result = session.SendSpawn(spawn, m_hostTick);
-            if (result != net::SendResult::Queued)
-            {
-#ifdef _DEBUG
-                std::cerr << "[HOST] Player SPAWN enqueue failed, slot=" << static_cast<int>(slot) << ", result=" << static_cast<int>(result) << '\n';
-#endif
-                allQueued = false;
-                break;
-            }
-        }
-
-        m_playerSpawnsQueued = allQueued;
-    }
+    m_hostPlayInitialized = false;
 }
 
 void CScene_Stage01::Exit()
