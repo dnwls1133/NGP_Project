@@ -1156,11 +1156,36 @@ namespace host
             // Step 7: 틱 종료 경계에서 안전한 생성/삭제 및 슬롯 참조 정리 수행 (render가 아닌 시뮬레이션 틱 경계)
             FlushLifecycleAtTickEnd(sendSink);
 
-            // 11/25: 틱 종료 후 공동 승패 집계 (보스 사망 + 전우너 사망 동일 틱은 승리 우선)
+           
+
+            // 11/25 ~ 11/26: 틱 종료 후 공동 승패 집계 및 RESULT(TCP) 1회 전송
             if (!m_teamOutcome.has_value()) {
                 m_teamOutcome = EvaluateTeamOutcome(m_bossDefeated, AreAllPlayersDead());
-            }
 
+                if (m_teamOutcome.has_value()) {
+                    protocol::Message resultMsg{};
+                    resultMsg.header.magic = protocol::MAGIC;
+                    resultMsg.header.version = protocol::VERSION;
+                    resultMsg.header.type = protocol::MessageType::RESULT;
+                    resultMsg.header.flags = protocol::FLAGS_NONE;
+                    resultMsg.header.totalBytes = 44;
+                    resultMsg.header.sessionId = m_sessionId;
+                    resultMsg.header.roundId = 1;
+                    resultMsg.header.sequence = m_nextSequence++;
+                    resultMsg.header.hostTick = currentTick;
+                    resultMsg.header.reserved = protocol::RESERVED_VALUE;
+
+                    protocol::ResultPayload payload{};
+                    payload.eventId = m_nextEventId++;
+                    payload.outcome = *m_teamOutcome;
+                    payload.reserved0 = 0;
+                    payload.reserved1 = 0;
+                    payload.finalTeamScore = m_teamScore;
+                    resultMsg.payload = payload;
+
+                    sendSink.EnqueueSend(net::Channel::Tcp, resultMsg);
+                }
+            }
 
             // Step 8: 20Hz 주기(3틱마다)이고 활성 객체가 존재하면 STATE_SNAPSHOT 배치 발행
             if ((currentTick % STATE_PUBLISH_INTERVAL_TICKS) == 0 && !m_objects.empty())

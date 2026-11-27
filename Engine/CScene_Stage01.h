@@ -51,7 +51,9 @@ private:
     bool m_playerSpawnsQueued = false;
     bool m_bBossBgmPlayed = false;
     bool m_bBossDefeated = false;
+    bool m_bResultSent = false;
     void EvaluateHostMatchOutcome();
+    void SendMatchResultOnce(protocol::MatchOutcome outcome);
     std::deque<protocol::Message> m_pendingItemEvents;
 
     bool FlushItemEvents();
@@ -65,8 +67,8 @@ public:
     virtual void render(HDC _dc);
     virtual void Exit();
 
-    void Clear() { m_bClear = true; }
-    void Fail() { m_bFail = true; }
+    void Clear() { if(!m_bClear && !m_bFail) m_bClear = true; }
+    void Fail() { if (!m_bClear && !m_bFail) m_bFail = true; }
     void MarkBossDefeated() { m_bBossDefeated = true; }
     void InitEvents();
     bool ConfirmItemPickup(protocol::ObjectId itemId, protocol::PlayerSlot slot);
