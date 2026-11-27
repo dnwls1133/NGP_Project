@@ -272,13 +272,10 @@ namespace network
         constexpr std::string_view HEX = "0123456789ABCDEF";
 
         std::string result;
-        result.reserve(9);
+        result.reserve(4);
 
-        for (int digit = 0; digit < 8; ++digit)
+        for (int digit = 4; digit < 8; ++digit)
         {
-            if (digit == 4)
-                result.push_back('-');
-
             const int shift = (7 - digit) * 4;
             result.push_back(HEX[(value >> shift) & 0xFu]);
         }
@@ -289,32 +286,22 @@ namespace network
 
     bool CSessionMgr::DecodeRoomCode(const std::string& code, std::string& outIp)
     {
-        std::string digits;
-
-        if (code.size() == 8)
-        {
-            digits = code;
-        }
-        else if (code.size() == 9 && code[4] == '-')
-        {
-            digits = code.substr(0, 4) + code.substr(5);
-        }
-        else
+        if (code.size() != 4)
         {
             outIp.clear();
             return false;
         }
 
         // from_chars가 허용할 수 있는 부호 등의 입력도 명시적으로 거부
-        if (digits.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)
+        if (code.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)
         {
             outIp.clear();
             return false;
         }
 
         std::uint32_t value = 0;
-        const char* begin = digits.data();
-        const char* end = begin + digits.size();
+        const char* begin = code.data();
+        const char* end = begin + code.size();
         const auto parsed = std::from_chars(begin, end, value, 16);
 
         if (parsed.ec != std::errc{} || parsed.ptr != end)
@@ -323,14 +310,11 @@ namespace network
             return false;
         }
 
-        std::string result = std::to_string((value >> 24) & 0xFFu);
-        result += "." + std::to_string((value >> 16) & 0xFFu);
-        result += "." + std::to_string((value >> 8) & 0xFFu);
-        result += "." + std::to_string(value & 0xFFu);
-
+        std::string result = "192.168.";
+        result += std::to_string((value >> 8) & 0xFFu);
+        result += "." + std::to_string(value & 0xFFu);;
         outIp = std::move(result);
         return true;
-        return false;
     }
 
     std::string CSessionMgr::GetRoomCode() const
