@@ -204,7 +204,7 @@ void CDeadState::Exit()
         (CSceneMgr::GetInst()->GetCurScene());
     if (cursene != nullptr && CCore::GetInst()->GetSession().IsHost()) {
         if (GetMonster()->GetInfo().eMType == MON_TYPE::BOSS) {
-            cursene->Clear();
+            cursene->MarkBossDefeated();
         }
         cursene->QueueDespawn(GetMonster()->GetObjectId(),
             protocol::DespawnReason::DESTROYED);

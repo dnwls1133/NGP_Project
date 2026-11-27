@@ -313,9 +313,6 @@
     <ClInclude Include="CScene_Title.h">
       <Filter>Engine\05.Scene\Scene_Title</Filter>
     </ClInclude>
-    <ClInclude Include="CTitleBackground.h">
-      <Filter>Engine\04.Object\Background\TitleBackground</Filter>
-    </ClInclude>
     <ClInclude Include="CCamera.h">
       <Filter>Engine\03.Manager\Camera</Filter>
     </ClInclude>
@@ -421,14 +418,23 @@
     <ClInclude Include="NetworkTypes.h">
       <Filter>Engine\01.Header</Filter>
     </ClInclude>
-    <ClInclude Include="CLoadingBackground.h">
-      <Filter>Engine\04.Object\Background\LoadingBackground</Filter>
-    </ClInclude>
     <ClInclude Include="MissileMgr.h">
       <Filter>Engine\03.Manager\MissileMgr</Filter>
     </ClInclude>
     <ClInclude Include="CSessionMgr.h">
       <Filter>Engine\03.Manager\SessionMgr</Filter>
+    </ClInclude>
+    <ClInclude Include="CMenuTransition.h">
+      <Filter>Engine\04.Object\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="CTransitionBase.h">
+      <Filter>Engine\04.Object\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="CLoadingTransition.h">
+      <Filter>Engine\04.Object\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="CTitleTransition.h">
+      <Filter>Engine\04.Object\UI</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -547,9 +553,6 @@
     <ClCompile Include="CScene_Title.cpp">
       <Filter>Engine\05.Scene\Scene_Title</Filter>
     </ClCompile>
-    <ClCompile Include="CTitleBackground.cpp">
-      <Filter>Engine\04.Object\Background\TitleBackground</Filter>
-    </ClCompile>
     <ClCompile Include="CCamera.cpp">
       <Filter>Engine\03.Manager\Camera</Filter>
     </ClCompile>
@@ -646,14 +649,23 @@
     <ClCompile Include="CNetworkMgr.cpp">
       <Filter>Engine\03.Manager\NetworkMgr</Filter>
     </ClCompile>
-    <ClCompile Include="CLoadingBackground.cpp">
-      <Filter>Engine\04.Object\Background\LoadingBackground</Filter>
-    </ClCompile>
     <ClCompile Include="MissileMgr.cpp">
       <Filter>Engine\03.Manager\MissileMgr</Filter>
     </ClCompile>
     <ClCompile Include="CSessionMgr.cpp">
       <Filter>Engine\03.Manager\SessionMgr</Filter>
+    </ClCompile>
+    <ClCompile Include="CMenuTransition.cpp">
+      <Filter>Engine\04.Object\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="CTransitionBase.cpp">
+      <Filter>Engine\04.Object\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="CLoadingTransition.cpp">
+      <Filter>Engine\04.Object\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="CTitleTransition.cpp">
+      <Filter>Engine\04.Object\UI</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

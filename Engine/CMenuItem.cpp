@@ -13,6 +13,7 @@
 
 namespace
 {
+    constexpr float HoverScale = 1.05f;
     constexpr float ClickScale = 1.1f;
 }
 
@@ -53,11 +54,6 @@ void CMenuItem::MouseOn()
     if (m_pHoverTexture)
         m_pTexture = m_pHoverTexture;
 
-    const float curScaleX = GetScale().x * 1.05f;
-    const float curScaleY = GetScale().y * 1.05f;
-
-    SetScale(Vec2(curScaleX, curScaleY));
-
     if (m_pHoverSound)
         CSoundMgr::GetInst()->PlaySE(m_pHoverSound);
 
@@ -72,10 +68,6 @@ void CMenuItem::MouseOff()
     if (m_pIdleTexture)
         m_pTexture = m_pIdleTexture;
 
-    const float curScaleX = GetScale().x / 1.05f;
-    const float curScaleY = GetScale().y / 1.05f;
-    SetScale(Vec2(curScaleX, curScaleY));
-
     m_bHoverFlag = false;
 }
 
@@ -86,10 +78,6 @@ void CMenuItem::MouseLbtnUP()
 
     if (m_pHoverTexture)
         m_pTexture = m_pHoverTexture;
-
-    const float curScaleX = GetScale().x * ClickScale;
-    const float curScaleY = GetScale().y * ClickScale;
-    SetScale(Vec2(curScaleX, curScaleY));
 
     if (m_pClickSound)
         CSoundMgr::GetInst()->PlaySE(m_pClickSound);
@@ -105,11 +93,16 @@ void CMenuItem::MouseLbtnDown()
     if (m_pHoverTexture)
         m_pTexture = m_pHoverTexture;
 
-    const float curScaleX = GetScale().x / ClickScale;
-    const float curScaleY = GetScale().y / ClickScale;
-    SetScale(Vec2(curScaleX, curScaleY));
-
     m_bClickedFlag = false;
+}
+
+void CMenuItem::AdjustBounds(Vec2& position, Vec2& size) const
+{
+    const float factor = (m_bHoverFlag ? HoverScale : 1.f) * (m_bClickedFlag ? ClickScale : 1.f);
+    const Vec2 scaledSize(size.x * factor, size.y * factor);
+    position.x += (size.x - scaledSize.x) * 0.5f;
+    position.y += (size.y - scaledSize.y) * 0.5f;
+    size = scaledSize;
 }
 
 void CMenuItem::render(HDC canvas_)
@@ -117,14 +110,17 @@ void CMenuItem::render(HDC canvas_)
     if (!m_pTexture)
         return;
 
-    const Vec2 position = GetFinalPos();  // 중심 위치
-    const Vec2 scale = GetScale();     // 출력될 크기
+    Vec2 position = GetFinalPos();
+    Vec2 size = GetScale();
+    AdjustBounds(position, size);
 
     const int width = static_cast<int>(m_pTexture->Width());   // 원본 너비
     const int height = static_cast<int>(m_pTexture->Height());  // 원본 높이
 
-    const int drawX = static_cast<int>(position.x - (scale.x - width) / 2.0f);
-    const int drawY = static_cast<int>(position.y - (scale.y - height) / 2.0f);
+    const int drawX = static_cast<int>(position.x);
+    const int drawY = static_cast<int>(position.y);
+    const int drawWidth = static_cast<int>(size.x);
+    const int drawHeight = static_cast<int>(size.y);
 
     // 투명하게 처리할 색상 (예: RGB(255, 0, 255) → 마젠타)
     COLORREF transparentColor = RGB(255, 0, 255);
@@ -133,7 +129,7 @@ void CMenuItem::render(HDC canvas_)
     TransparentBlt(
         canvas_,             // 대상 DC
         drawX, drawY,        // 출력 위치 (좌상단)
-        scale.x, scale.y,    // 출력 크기 (확대/축소 적용)
+        drawWidth, drawHeight, // 출력 크기 (확대/축소 적용)
         m_pTexture->GetDC(), // 원본 DC
         0, 0,                // 원본 좌상단
         width, height,       // 원본 크기
@@ -150,7 +146,7 @@ void CMenuItem::render(HDC canvas_)
     constexpr int cursorGap = 8;
     const int sourceWidth = static_cast<int>(cursor->Width());
     const int sourceHeight = static_cast<int>(cursor->Height());
-    const int rightCursorX = drawX + static_cast<int>(scale.x) + cursorGap;
+    const int rightCursorX = drawX + drawWidth + cursorGap;
     const int screenWidth = static_cast<int>(CCore::GetInst()->GetResolution().x);
     const float cursorScale = m_bClickedFlag ? ClickScale : 1.f;
     const int scaledCursorWidth = static_cast<int>(sourceWidth * cursorScale);
@@ -159,7 +155,7 @@ void CMenuItem::render(HDC canvas_)
         return;
 
     const int cursorHeight = sourceHeight * cursorWidth / sourceWidth;
-    const int cursorY = drawY + (static_cast<int>(scale.y) - cursorHeight) / 2;
+    const int cursorY = drawY + (drawHeight - cursorHeight) / 2;
     const int leftCursorX = drawX - cursorGap - cursorWidth;
 
     for (const int cursorX : {leftCursorX, rightCursorX})

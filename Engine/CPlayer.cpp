@@ -1,4 +1,5 @@
 ﻿#include "pch.h"
+#include <cmath>
 #include "CPlayer.h"
 
 #include "CCore.h"
@@ -32,7 +33,7 @@ CPlayer::CPlayer()
 	:dAcc(0.)
 	,m_iHp(3)
     ,m_iAtk(2)
-    ,dStartAcc(3.f)
+    ,dStartAcc(EntryMovementDuration)
     ,m_bHit(false)
     ,m_iLvl(1)
     ,m_iBoomb(1)
@@ -69,63 +70,105 @@ CPlayer::~CPlayer()
 {
 	
 }
+std::uint8_t CPlayer::ReadMoveBits()
+{
+    std::uint8_t moveBits = protocol::MoveBit::NONE;
+    if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
+    if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
+    if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
+    if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
+    return moveBits;
+}
+
 void CPlayer::update()
 {
     auto& session = CCore::GetInst()->GetSession();
-    if (session.IsHost())
-    {
+    if (session.GetState() != network::SessionState::Started || session.IsHost()
+        || m_PlayerId != session.GetLocalPlayerId() || !m_predictLocalMovement
+        || m_clear || !IsAlivePlayer())
+        return;
 
+    m_localMoveBits = ReadMoveBits();
+    m_localMoveDt = fDT;
+}
+
+void CPlayer::finalupdate()
+{
+    // The stage can switch position modes while processing snapshots after update().
+    if (m_predictLocalMovement && m_localMoveDt > 0.f && !m_clear && IsAlivePlayer())
+    {
+        constexpr float correctionTime = 0.15f;
+        const float weight = 1.f - std::exp(-m_localMoveDt / correctionTime);
+        const Vec2 correction = m_localPositionError * weight;
+        SetPos(MoveFrom(GetPos(), m_localMoveBits, m_localMoveDt) + correction);
+        m_localPositionError = m_localPositionError - correction;
+    }
+    m_localMoveDt = 0.f;
+    CObject::finalupdate();
+}
+
+void CPlayer::ResetNetworkPosition(Vec2 pos)
+{
+    ResetSnapshotPosition();
+    m_localSnapshotTick.reset();
+    m_predictLocalMovement = false;
+    m_localMoveDt = 0.f;
+    m_localPositionError = Vec2();
+    SetPos(pos);
+}
+
+bool CPlayer::ApplyLocalSnapshotPosition(const protocol::ObjectStateRecord& state,
+    std::uint32_t tick, float hostElapsed, float interpolationDuration)
+{
+    if (m_localSnapshotTick && tick <= *m_localSnapshotTick)
+        return false;
+
+    m_localSnapshotTick = tick;
+    const Vec2 target(state.pos.x / 100.f, state.pos.y / 100.f);
+    const bool predict = state.alive && state.fsmState == 0
+        && hostElapsed >= EntryMovementDuration;
+    if (predict != m_predictLocalMovement)
+    {
+        ResetSnapshotPosition();
+        m_localMoveDt = 0.f;
+    }
+    m_predictLocalMovement = predict;
+
+    if (predict)
+    {
+        const Vec2 current = GetPos();
+        m_localPositionError = Vec2(target.x - current.x, target.y - current.y);
     }
     else
-    {
-        /*
-        std::uint8_t moveBits = protocol::MoveBit::NONE;
-        std::uint8_t fireHeld = 0;
+        ApplySnapshotPosition(target, tick, state.alive ? interpolationDuration : 0.f);
 
-        // 11/10: 로컬 슬롯(0) 임시 키 수집 (11/14 통합 시 이현범 담당 BuildInput/호스트 루프로 연결)
-        if (m_PlayerId == 0)
-        {
-            if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
-            if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
-            if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
-            if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
-            if (KEY_HOLD(KEY::S)) fireHeld = 1;
-            if (KEY_TAP(KEY::L)) m_iLvl = 5;
-        }
+    return true;
+}
 
-        Simulate(moveBits, fireHeld, fDT);
-        */
-    }
-    
-	
-	
-	//GetAnimator()->update();
+Vec2 CPlayer::MoveFrom(Vec2 pos, std::uint8_t moveBits, float dt) const
+{
+    const auto* back = CSceneMgr::GetInst()->GetCurScene()->GetBackground();
+    Vec2 vBackpos = back->GetPos();
+    Vec2 vBackScale = back->GetScale();
+    if ((moveBits & protocol::MoveBit::UP) != 0
+        && pos.y >= vBackpos.y - vBackScale.y / 2.f)
+        pos.y -= 300.f * dt;
+    if ((moveBits & protocol::MoveBit::DOWN) != 0
+        && pos.y <= vBackpos.y + vBackScale.y / 2.f)
+        pos.y += 300.f * dt;
+    if ((moveBits & protocol::MoveBit::LEFT) != 0
+        && pos.x >= vBackpos.x - vBackScale.x / 2.f)
+        pos.x -= 300.f * dt;
+    if ((moveBits & protocol::MoveBit::RIGHT) != 0
+        && pos.x <= vBackpos.x + vBackScale.x / 2.f)
+        pos.x += 300.f * dt;
+    return pos;
 }
 
 void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
 {
     Vec2 vPos = GetPos();
-    CBackground* back = (CBackground*)CSceneMgr::GetInst()->GetCurScene()->GetBackground();
-    Vec2 vBackpos = back->GetPos();
-    Vec2 vBackScale = back->GetScale();
-
-    auto ApplyMove = [&]()
-        {
-            if ((moveBits & protocol::MoveBit::UP) != 0
-                && vPos.y >= vBackpos.y - vBackScale.y / 2.f)
-                vPos.y -= 300.f * dt;
-            if ((moveBits & protocol::MoveBit::DOWN) != 0
-                && vPos.y <= vBackpos.y + vBackScale.y / 2.f)
-                vPos.y += 300.f * dt;
-            if ((moveBits & protocol::MoveBit::LEFT) != 0
-                && vPos.x >= vBackpos.x - vBackScale.x / 2.f)
-                vPos.x -= 300.f * dt;
-            if ((moveBits & protocol::MoveBit::RIGHT) != 0
-                && vPos.x <= vBackpos.x + vBackScale.x / 2.f)
-                vPos.x += 300.f * dt;
-        };
-
-    if (!m_clear && !m_dead)
+    if (!m_clear && IsAlivePlayer())
     {
         if (dStartAcc > 0.f)
         {
@@ -140,7 +183,7 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
                 vPos.y -= 300.f * dt;
             }
             else {
-                ApplyMove();
+                vPos = MoveFrom(vPos, moveBits, dt);
             }
 
             if (dAcc > 2.f) {
@@ -151,7 +194,7 @@ void CPlayer::Simulate(std::uint8_t moveBits, std::uint8_t fireHeld, float dt)
             SetPos(vPos);
         }
         else {
-            ApplyMove();
+            vPos = MoveFrom(vPos, moveBits, dt);
 
             if (fireHeld != 0)
             {
@@ -236,7 +279,7 @@ protocol::ObjectStateRecord CPlayer::ExportStateRecord(protocol::ObjectId object
     rec.kind = protocol::NetObjectKind::PLAYER;
     rec.subType = static_cast<std::uint8_t>(m_iLvl);
     rec.alive = (!m_dead && m_iHp > 0) ? 1 : 0;
-    rec.fsmState = m_clear ? 2 : (m_bHit ? 1 : 0);
+    rec.fsmState = m_clear ? 2 : ((!m_dead && m_bHit) ? 1 : 0);
     rec.pos.x = static_cast<std::int32_t>(m_vPos.x * 100.f);
     rec.pos.y = static_cast<std::int32_t>(m_vPos.y * 100.f);
     rec.hp = m_iHp;
@@ -278,7 +321,9 @@ void CPlayer::render(HDC _dc)
 	//	, m_pTex->GetDC()
 	//	, 0, 0, iWidith, iHeight
 	//	, RGB(255, 0, 255)); // 색상을 무시하고 나머지 복사해라
-	
+
+    if (m_dead)
+        return;
 	component_render(_dc);
    /* CTexture* pTex  = CResMgr::GetInst()->LoadTexture(L"M4Tex", L"texture\\Player_Walk_A.png");
 
@@ -399,6 +444,9 @@ void CPlayer::ApplyConfirmedItemLevel(std::uint8_t level)
 
 void CPlayer::OnCollisionEnter(CCollider* _pOther)
 {
+    if (m_dead || m_iHp <= 0)
+        return;
+
 	CObject* pOtherObj = _pOther->GetObj();
   
 	if (pOtherObj->GetName() == L"MsMissile" && m_bHit == false)
@@ -406,22 +454,26 @@ void CPlayer::OnCollisionEnter(CCollider* _pOther)
         if (isMujeok)
             return;
 
-        if (m_iHp <= 1)
-        {
-            CScene_Stage01* curscene = (CScene_Stage01*)CSceneMgr::GetInst()->GetCurScene();
-            curscene->Fail();
-        }
-        SetRespawnInvincible(true);
-		CPlayerDead* pDead = new CPlayerDead;
-		pDead->SetPos(GetPos());
-		CreateObject(pDead, GROUP_TYPE::DEAD_PLAYER);
-		--m_iHp;
+        CPlayerDead* pDead = new CPlayerDead;
+        pDead->SetPos(GetPos());
+        CreateObject(pDead, GROUP_TYPE::DEAD_PLAYER);
+
+        --m_iHp;
         m_iLvl = 1;
-		Vec2 vPos = GetPos();
-		vPos.y = 1200;
-		SetPos(vPos);
-		SetCollideroff();
         m_iBoomb = 1;
+        Vec2 vPos = GetPos();
+        vPos.y = 1200.f;
+        SetPos(vPos);
+        SetCollideroff();
+
+        if (m_iHp <= 0) {
+            m_iHp = 0;
+            m_dead = true;
+            SetRespawnInvincible(false);
+        }
+        else {
+            SetRespawnInvincible(true);
+        }
 	}
 
     // 아이템 보상은 CItem의 단일 획득자 확정 경로에서만 적용합니다.

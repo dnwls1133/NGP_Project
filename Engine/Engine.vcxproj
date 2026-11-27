@@ -183,10 +183,12 @@
     <ClInclude Include="CEenemi0.h" />
     <ClInclude Include="CEventMgr.h" />
     <ClInclude Include="CExposion.h" />
+    <ClInclude Include="CMenuTransition.h" />
+    <ClInclude Include="CTransitionBase.h" />
+    <ClInclude Include="CLoadingTransition.h" />
     <ClInclude Include="CNetworkMgr.h" />
     <ClInclude Include="CSessionMgr.h" />
     <ClInclude Include="Common.h" />
-    <ClInclude Include="CLoadingBackground.h" />
     <ClInclude Include="CRankMgr.h" />
     <ClInclude Include="CIdleState.h" />
     <ClInclude Include="CItem.h" />
@@ -224,7 +226,7 @@
     <ClInclude Include="CTexture.h" />
     <ClInclude Include="CTile.h" />
     <ClInclude Include="CTimeMgr.h" />
-    <ClInclude Include="CTitleBackground.h" />
+    <ClInclude Include="CTitleTransition.h" />
     <ClInclude Include="CTitleMenu.hpp" />
     <ClInclude Include="CTitleLogo.h" />
     <ClInclude Include="CTraceState.h" />
@@ -268,9 +270,11 @@
     <ClCompile Include="CEenemi0.cpp" />
     <ClCompile Include="CEventMgr.cpp" />
     <ClCompile Include="CExposion.cpp" />
+    <ClCompile Include="CMenuTransition.cpp" />
+    <ClCompile Include="CTransitionBase.cpp" />
+    <ClCompile Include="CLoadingTransition.cpp" />
     <ClCompile Include="CNetworkMgr.cpp" />
     <ClCompile Include="CSessionMgr.cpp" />
-    <ClCompile Include="CLoadingBackground.cpp" />
     <ClCompile Include="CRankMgr.cpp" />
     <ClCompile Include="CIdleState.cpp" />
     <ClCompile Include="CItem.cpp" />
@@ -308,7 +312,7 @@
     <ClCompile Include="CTexture.cpp" />
     <ClCompile Include="CTile.cpp" />
     <ClCompile Include="CTimeMgr.cpp" />
-    <ClCompile Include="CTitleBackground.cpp" />
+    <ClCompile Include="CTitleTransition.cpp" />
     <ClCompile Include="CTitleLogo.cpp" />
     <ClCompile Include="CTraceState.cpp" />
     <ClCompile Include="CUI.cpp" />

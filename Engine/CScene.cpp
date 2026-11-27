@@ -5,6 +5,7 @@
 #include "CPathMgr.h"
 
 #include "CObject.h"
+#include "CUI.h"
 #include "CPlayer.h"
 #include "CTile.h"
 
@@ -111,27 +112,16 @@ void CScene::render(HDC _dc)
             render_tile(_dc);
             continue;
         }
-		vector<CObject*>::iterator iter = m_arrObj[i].begin();
+		
         
 
-		for (iter; iter != m_arrObj[i].end();)
-		{
-			
-			if (!(*iter)->IsDead())
-			{
-				(*iter)->render(_dc);
-				++iter;
-			}
-			else
-			{
-                for (CPlayer* slotPlayer : m_players) {
-                    if ((CObject*)slotPlayer == *iter)
-                        slotPlayer = nullptr;
+        for (CObject* pObj : m_arrObj[i]) {
+            if (pObj != nullptr && !pObj->IsDead()) {
+                if (i != (UINT)GROUP_TYPE::UI || static_cast<CUI*>(pObj)->IsActive()) {
+                    pObj->render(_dc);
                 }
-				
-				iter = m_arrObj[i].erase(iter);
-			}
-		}
+            }
+        }
 	}
 }
 
@@ -213,6 +203,9 @@ void CScene::DeleteGroup(GROUP_TYPE _eTarget)
     if (_eTarget == GROUP_TYPE::PLAYER) {
         m_players.fill(nullptr); 
     }
+    if (_eTarget == GROUP_TYPE::BACKGROUND) {
+        m_pBackground = nullptr;
+    }
 	Safe_Delete_Vec<CObject*>(m_arrObj[(UINT)_eTarget]);
 }
 
@@ -222,6 +215,28 @@ void CScene::DeleteAll()
 	{
 		DeleteGroup((GROUP_TYPE)i);
 	}
+}
+
+void CScene::CleanupDeadObjects()
+{
+    for (UINT i = 0; i < (UINT)GROUP_TYPE::END; ++i) {
+        for (auto iter = m_arrObj[i].begin(); iter != m_arrObj[i].end();) {
+            if (*iter != nullptr && (*iter)->IsDead()) {
+                for (CPlayer*& slotPlayer : m_players) {
+                    if (static_cast<CObject*>(slotPlayer) == *iter) {
+                        slotPlayer = nullptr;
+                    }
+                }
+                if (m_pBackground == *iter)
+                    m_pBackground = nullptr;
+
+                iter = m_arrObj[i].erase(iter);
+            }
+            else {
+                ++iter;
+            }
+        }
+    }
 }
 
 void CScene::CreateTile(UINT _iXCount, UINT _iYCount)

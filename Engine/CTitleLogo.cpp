@@ -15,6 +15,23 @@ CTitleLogo::~CTitleLogo()
 
 }
 
+float CTitleLogo::GetImageCenterX() const
+{
+    if (!m_pTexture)
+    {
+        return GetPos().x + GetScale().x * 0.5f;
+    }
+
+    const int drawWidth = static_cast<int>(GetScale().x);
+    return GetImageLeft(GetPos().x) + drawWidth * 0.5f;
+}
+
+int CTitleLogo::GetImageLeft(float positionX) const
+{
+    const float sourceWidth = static_cast<float>(m_pTexture->Width());
+    return static_cast<int>(positionX - (GetScale().x - sourceWidth) * 0.5f);
+}
+
 void CTitleLogo::render(HDC canvas_)
 {
     if (!m_pTexture)
@@ -26,7 +43,7 @@ void CTitleLogo::render(HDC canvas_)
     const int width = static_cast<int>(m_pTexture->Width());   // 원본 너비
     const int height = static_cast<int>(m_pTexture->Height());  // 원본 높이
 
-    const int drawX = static_cast<int>(position.x - (scale.x - width) / 2.0f);
+    const int drawX = GetImageLeft(position.x);
     const int drawY = static_cast<int>(position.y - (scale.y - height) / 2.0f);
 
     // 투명하게 처리할 색상 (예: RGB(255, 0, 255) → 마젠타)

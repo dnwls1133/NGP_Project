@@ -55,26 +55,9 @@ void CScene_Lobby::Enter()
 {
     inputRoomCode.clear();
     leavingLobby = false;
+    requestedReady.reset();
+    readyAfterJoin = false;
 
-    m_backButton = new CMenuItem(
-        CResMgr::GetInst()->LoadTexture(L"Back Idle", L"texture\\Menu Items\\Go Back\\Sprite_Label_GoBack_0.png"),
-        CResMgr::GetInst()->LoadTexture(L"Back Hover", L"texture\\Menu Items\\Go Back\\Sprite_Label_GoBack_1.png")
-    );
-    m_backButton->SetPos(Vec2(940.0f, 770.0f));
-    m_backButton->SetScale(Vec2(210.0f, 70.0f));
-    m_backButton->SetClickedCallBack(
-        [](DWORD_PTR context, DWORD_PTR)
-        {
-            auto* lobby = reinterpret_cast<CScene_Lobby*>(context);
-            lobby->leavingLobby = true;
-
-            CCore::GetInst()->GetSession().Stop();
-            std::cout << "[LOBBY] Leaving room\n";
-            ChangeScene(SCENE_TYPE::TITLE);
-        },
-        reinterpret_cast<DWORD_PTR>(this), 0
-    );
-    AddObject(m_backButton, GROUP_TYPE::UI);
 
     // 배경 로드
     {
@@ -139,6 +122,56 @@ void CScene_Lobby::Enter()
 
     if (!session.IsHost())
         std::cout << "[CLIENT] Enter room code, then press Enter\n";
+
+    const Vec2 buttonSize(210.0f, 70.0f);
+    const Vec2 actionPosition(985.0f, 684.0f);
+
+    m_startButton = new CMenuItem(
+        CResMgr::GetInst()->LoadTexture(L"Start Idle", L"texture\\Menu Items\\Start Game\\Sprite_Label_StartGame_0.png"),
+        CResMgr::GetInst()->LoadTexture(L"Start Hover", L"texture\\Menu Items\\Start Game\\Sprite_Label_StartGame_1.png")
+    );
+    m_startButton->SetPos(actionPosition);
+    m_startButton->SetScale(buttonSize);
+    m_startButton->SetClickedCallBack([](DWORD_PTR context, DWORD_PTR)
+        {
+            reinterpret_cast<CScene_Lobby*>(context)->SubmitHostStart();
+        }, reinterpret_cast<DWORD_PTR>(this), 0
+    );
+    AddObject(m_startButton, GROUP_TYPE::UI);
+
+    m_readyButton = new CMenuItem(
+        CResMgr::GetInst()->LoadTexture(L"Ready Idle", L"texture\\Menu Items\\Ready Game\\Sprite_Label_ReadyGame_0.png"),
+        CResMgr::GetInst()->LoadTexture(L"Ready Hover", L"texture\\Menu Items\\Ready Game\\Sprite_Label_ReadyGame_1.png")
+    );
+    m_readyButton->SetPos(actionPosition);
+    m_readyButton->SetScale(buttonSize);
+    m_readyButton->SetClickedCallBack([](DWORD_PTR context, DWORD_PTR)
+        {
+            reinterpret_cast<CScene_Lobby*>(context)->SubmitClientAction();
+        }, reinterpret_cast<DWORD_PTR>(this), 0);
+    AddObject(m_readyButton, GROUP_TYPE::UI);
+
+    m_backButton = new CMenuItem(
+        CResMgr::GetInst()->LoadTexture(L"Back Idle", L"texture\\Menu Items\\Go Back\\Sprite_Label_GoBack_0.png"),
+        CResMgr::GetInst()->LoadTexture(L"Back Hover", L"texture\\Menu Items\\Go Back\\Sprite_Label_GoBack_1.png")
+    );
+    m_backButton->SetPos(Vec2(983.0f, 784.0f));
+    m_backButton->SetScale(buttonSize);
+    m_backButton->SetClickedCallBack(
+        [](DWORD_PTR context, DWORD_PTR)
+        {
+            auto* lobby = reinterpret_cast<CScene_Lobby*>(context);
+            lobby->leavingLobby = true;
+
+            CCore::GetInst()->GetSession().Stop();
+            std::cout << "[LOBBY] Leaving room\n";
+            ChangeScene(SCENE_TYPE::TITLE);
+        },
+        reinterpret_cast<DWORD_PTR>(this), 0
+    );
+    AddObject(m_backButton, GROUP_TYPE::UI);
+
+    UpdateActionButtons();
 }
 
 void CScene_Lobby::update()
@@ -162,40 +195,17 @@ void CScene_Lobby::update()
 
     auto& session = CCore::GetInst()->GetSession();
 
-    if (KEY_TAP(KEY::ENTER) && !session.IsHost())
+    if (readyAfterJoin && session.GetState() == network::SessionState::UdpRegistered)
     {
-        const auto state = session.GetState();
-        if (state == network::SessionState::Failed || state == network::SessionState::Rejected || state == network::SessionState::Disconnected)
-            session.Stop();
-
-        if (session.GetState() != network::SessionState::Idle)
-            return;
-
-        const std::string code(inputRoomCode.begin(), inputRoomCode.end());
-        const auto result = session.JoinRoom(code, 40000, 40001);
-
-        std::cout << "[CLIENT] Join by room code. result=" << static_cast<int>(result) << '\n';
-
-        if (result == network::NetworkResult::InvalidArgument)
-            std::cerr << "[CLIENT] Invalid room code\n";
+        readyAfterJoin = false;
+        SubmitReady(true);
     }
+    else if (KEY_TAP(KEY::ENTER) ||
+        (KEY_TAP(KEY::R) && session.GetState() == network::SessionState::UdpRegistered))
+        SubmitClientAction();
 
-    if (KEY_TAP(KEY::R) &&
-        session.GetState() == network::SessionState::UdpRegistered && !session.IsHost())
-    {
-        const bool ready = !session.IsClientReady();
-        const auto result = session.RequestReady(ready);
-
-        std::cout << "[CLIENT] READY requested=" << ready
-            << ", result=" << static_cast<int>(result) << '\n';
-    }
-
-    if (KEY_TAP(KEY::S) &&
-        session.IsHost() && session.GetState() == network::SessionState::UdpRegistered)
-    {
-        const auto result = session.RequestLoad();
-        std::cout << "[HOST] LOAD requested. result=" << static_cast<int>(result) << '\n';
-    }
+    if (KEY_TAP(KEY::S))
+        SubmitHostStart();
 
     if (session.GetState() == network::SessionState::Loading)
     {
@@ -211,12 +221,92 @@ void CScene_Lobby::update()
         }
     }
 
+    UpdateActionButtons();
+
     if (session.GetState() == network::SessionState::Started)
     {
         leavingLobby = true;
         ChangeScene(SCENE_TYPE::STAGE_01);
         return;
     }
+}
+
+void CScene_Lobby::SubmitClientAction()
+{
+    auto& session = CCore::GetInst()->GetSession();
+    if (leavingLobby || session.IsHost())
+        return;
+
+    using network::SessionState;
+    const auto state = session.GetState();
+    if (state == SessionState::UdpRegistered)
+    {
+        SubmitReady(!requestedReady.value_or(session.IsClientReady()));
+        return;
+    }
+
+    if (state == SessionState::Failed || state == SessionState::Rejected || state == SessionState::Disconnected)
+        session.Stop();
+
+    if (session.GetState() != SessionState::Idle)
+        return;
+
+    const std::string code(inputRoomCode.begin(), inputRoomCode.end());
+    const auto result = session.JoinRoom(code, 40000, 40001);
+    readyAfterJoin = result == network::NetworkResult::Success;
+    UpdateActionButtons();
+
+    std::cout << "[CLIENT] Join by room code. result=" << static_cast<int>(result) << '\n';
+
+    if (result == network::NetworkResult::InvalidArgument)
+        std::cerr << "[CLIENT] Invalid room code\n";
+}
+
+void CScene_Lobby::SubmitReady(bool ready)
+{
+    auto& session = CCore::GetInst()->GetSession();
+    const auto result = session.RequestReady(ready);
+    if (result == net::SendResult::Queued)
+        requestedReady = ready;
+    std::cout << "[CLIENT] READY requested=" << ready
+        << ", result=" << static_cast<int>(result) << std::endl;
+    UpdateActionButtons();
+}
+
+void CScene_Lobby::SubmitHostStart()
+{
+    auto& session = CCore::GetInst()->GetSession();
+    if (leavingLobby || !session.IsHost() || session.GetState() != network::SessionState::UdpRegistered)
+        return;
+
+    if (!session.IsClientReady())
+    {
+        std::cout << "[HOST] Waiting for Client ready" << std::endl;
+        return;
+    }
+
+    const auto result = session.RequestLoad();
+    std::cout << "[HOST] LOAD requested. result=" << static_cast<int>(result) << std::endl;
+    UpdateActionButtons();
+}
+
+void CScene_Lobby::UpdateActionButtons()
+{
+    const auto& session = CCore::GetInst()->GetSession();
+    using network::SessionState;
+    const auto state = session.GetState();
+    if (state != SessionState::UdpRegistered)
+        requestedReady.reset();
+
+    const bool canJoin = state == SessionState::Idle || state == SessionState::Failed ||
+        state == SessionState::Rejected || state == SessionState::Disconnected;
+    if (canJoin)
+        readyAfterJoin = false;
+
+    const bool canReady = state == SessionState::UdpRegistered;
+
+    m_startButton->SetActive(session.IsHost() && state == SessionState::UdpRegistered && session.IsClientReady());
+    m_readyButton->SetActive(!session.IsHost() && (canJoin || canReady));
 }
 
 void CScene_Lobby::LogSessionState()
@@ -259,7 +349,7 @@ void CScene_Lobby::LogSessionState()
         if (session.IsHost())
             std::cout << (ready ? ". Press S to start" : ". Waiting for Client ready");
         else
-            std::cout << ". Press R to toggle ready";
+            std::cout << ". Press Enter to ready";
     }
 
     if (state == SessionState::Failed || state == SessionState::Disconnected)
@@ -383,63 +473,48 @@ void CScene_Lobby::render(HDC _dc)
         static_cast<LONG>(resolution.x * 0.9f),
         static_cast<LONG>(resolution.y * 0.73f)
     };
+
     if (session.IsHost())
     {
-        if (state == SessionState::UdpRegistered || state == SessionState::Loading)
+        if (state == SessionState::UdpRegistered && session.IsClientReady())
+        {
+            DrawLobbyLogo(_dc, m_pEnterPlayerLogo, statusRect);
+        }
+        else if ((state == SessionState::Listening ||
+                  state == SessionState::AwaitingJoin ||
+                  state == SessionState::AwaitingUdpRegister) || !session.IsClientReady())
+        {
+            DrawLobbyLogo(_dc, m_pWaitPlayerLogo, statusRect, waitingLogoOpticalOffsetX);
+        }
+    }
+    else if (state == SessionState::UdpRegistered && session.IsClientReady())
+    {
+        DrawLobbyLogo(_dc, m_pWaitDecisionLogo, statusRect, waitingLogoOpticalOffsetX);
+    }
+
+    /*if (state == SessionState::UdpRegistered)
+    {
+        RECT readyRect = statusRect;
+        const HFONT oldFont = static_cast<HFONT>(SelectObject(_dc, m_hFont));
+        const wchar_t* readyText = session.IsClientReady() ? L"준비 완료" : L"준비 안 됨";
+        DrawText(_dc, readyText, -1, &readyRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(_dc, oldFont);
+    }*/
+    /*
+    if (session.IsHost())
+    {
+        if (state == SessionState::Loading)
             DrawLobbyLogo(_dc, m_pEnterPlayerLogo, statusRect);
         else if (state == SessionState::Listening || state == SessionState::AwaitingJoin ||
             state == SessionState::AwaitingUdpRegister)
             DrawLobbyLogo(_dc, m_pWaitPlayerLogo, statusRect, waitingLogoOpticalOffsetX);
     }
     else if (state == SessionState::Starting || state == SessionState::AwaitingAccept ||
-        state == SessionState::AwaitingUdpAck || state == SessionState::UdpRegistered)
+        state == SessionState::AwaitingUdpAck)
     {
         DrawLobbyLogo(_dc, m_pWaitDecisionLogo, statusRect, waitingLogoOpticalOffsetX);
     }
-
-    if (state == SessionState::UdpRegistered)
-    {
-        if (session.IsHost())
-        {
-            // Client 레디 상태 표시
-            if (session.IsClientReady())
-            {
-                if (m_backButton)
-                {
-                    DeleteObject(m_backButton);
-                    m_backButton = nullptr;
-                }
-
-                if (!m_startButton)
-                {
-                    m_startButton = new CMenuItem(
-                        CResMgr::GetInst()->LoadTexture(L"Start Idle", L"texture\\Menu Items\\Start Game\\Sprite_Label_StartGame_0.png"),
-                        CResMgr::GetInst()->LoadTexture(L"Start Hover", L"texture\\Menu Items\\Start Game\\Sprite_Label_StartGame_1.png")
-                    );
-                    m_startButton->SetPos(Vec2(940.0f, 770.0f));
-                    m_startButton->SetScale(Vec2(210.0f, 70.0f));
-                    m_startButton->SetClickedCallBack(
-                        [](DWORD_PTR context, DWORD_PTR)
-                        {
-                            CCore::GetInst()->GetSession().RequestLoad();
-                        },
-                        reinterpret_cast<DWORD_PTR>(this), 0
-                    );
-                    AddObject(m_startButton, GROUP_TYPE::UI);
-                }
-            }
-        }
-        else
-        {
-            session.RequestReady(true);
-
-            if (m_backButton)
-            {
-                DeleteObject(m_backButton);
-                m_backButton = nullptr;
-            }
-        }
-    }
+    */
 
     CScene::render(_dc);
 }

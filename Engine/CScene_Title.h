@@ -1,10 +1,11 @@
 ﻿#pragma once
 
 #include "CScene.h"
+#include "CMenuTransition.h"
+#include "CTitleTransition.h"
 class CScene;
 
 class CTitleLogo;
-class CTitleBackground;
 // class CTitleMessage;
 
 class CSound;
@@ -22,6 +23,7 @@ public:
 
     void Enter() override;
     void update() override;
+    void render(HDC dc) override;
     void Exit() override;
 
 private:
@@ -33,10 +35,16 @@ private:
     };
 
     void CreateMenus();
+    void ShowTitle();
+    void OpenMenu(CTitleMenu& menu);
+    bool UpdateMenuOpen();
+
+    CTitleTransition m_titleTransition;
+    CMenuTransition m_menuTransition;
+    std::vector<Vec2> m_menuTargetPositions;
+    float m_menuOpenElapsed = 0.f;
 
     EState m_CurrentState;
-
-    CTitleBackground* m_pBackground;
 
     CSound* m_pTitleTheme;
 

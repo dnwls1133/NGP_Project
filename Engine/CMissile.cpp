@@ -178,6 +178,37 @@ void CMissile::ChangemType(MISSILE_TYPE _eType)
     break;
     }
 }
+
+protocol::ObjectStateRecord CMissile::ExportStateRecord() const
+{
+    protocol::ObjectStateRecord rec{};
+    rec.objectId = GetObjectId();
+    rec.kind = (GetName() == L"MsMissile")
+        ? protocol::NetObjectKind::PROJ_MONSTER
+        : protocol::NetObjectKind::PROJ_PLAYER;
+    rec.subType = static_cast<std::uint8_t>(m_eMissileType);
+    rec.alive = IsDead() ? 0 : 1;
+    rec.fsmState = static_cast<std::uint8_t>(m_iType);
+    rec.pos.x = static_cast<std::int32_t> (GetPos().x * 100.f);
+    rec.pos.y = static_cast<std::int32_t> (GetPos().y * 100.f);
+    rec.vel.x = static_cast<std::int32_t> (m_vDir.x * m_fVec * 100.f);
+    rec.vel.y = static_cast<std::int32_t> (m_vDir.y * m_fVec * 100.f);
+    rec.hp = 1;
+    rec.maxHp = 1;
+    return rec;
+}
+
+void CMissile::ApplySnapshotVelocity(Vec2 vel)
+{
+    const float speed = vel.Length();
+    if (speed > 0.f) {
+        SetDir(vel);
+        m_fVec = speed;
+    }
+}
+
+
+
 protocol::SpawnPayload CMissile::ExportSpawnPayload(protocol::EventId eventId) const
 {
     protocol::SpawnPayload spawn{};

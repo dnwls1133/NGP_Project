@@ -967,8 +967,395 @@ namespace
                 counters);
         }
     }
+    void RunHostSim1123Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+        // 1. CHostWorldSync 분할기: 0/1/36/37/9181(255조각 초과) 실제 Encode 크기(<=1,200B), 단독 Decode, 다중 조각 미전송 교체 확인
+        {
+            auto makeRecords = [](std::size_t n) {
+                std::vector<ObjectStateRecord> recs;
+                recs.reserve(n);
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    ObjectStateRecord r{};
+                    r.objectId = static_cast<ObjectId>(i + 1);
+                    r.kind = NetObjectKind::MONSTER;
+                    r.subType = 1;
+                    r.alive = 1;
+                    r.hp = 100;
+                    r.maxHp = 100;
+                    recs.push_back(r);
+                }
+                return recs;
+                };
+            std::uint32_t seq = 1;
+            net::SnapshotBatch b0{}, b1{}, b36{}, b37{}, bOver{};
+            const auto r0 = CHostWorldSync::BuildSnapshotBatch(1000, 10, seq, makeRecords(0), b0);
+            const auto r1 = CHostWorldSync::BuildSnapshotBatch(1000, 11, seq, makeRecords(1), b1);
+            const auto r36 = CHostWorldSync::BuildSnapshotBatch(1000, 12, seq, makeRecords(36), b36);
+            const auto r37 = CHostWorldSync::BuildSnapshotBatch(1000, 13, seq, makeRecords(37), b37);
+            const auto rOver = CHostWorldSync::BuildSnapshotBatch(
+                1000, 14, seq, makeRecords(MAX_SNAPSHOT_OBJECTS_PER_PACKET * net::MAX_SNAPSHOT_PARTS_PER_BATCH + 1), bOver);
+            std::vector<std::uint8_t> bytes0, bytes1, bytes36, bytes37p0, bytes37p1;
+            const bool encodeOk =
+                (CPacketCodec::Encode(b0.parts[0], bytes0) == CodecError::NONE && bytes0.size() == 40)
+                && (CPacketCodec::Encode(b1.parts[0], bytes1) == CodecError::NONE && bytes1.size() == 72)
+                && (CPacketCodec::Encode(b36.parts[0], bytes36) == CodecError::NONE && bytes36.size() == 1192)
+                && (CPacketCodec::Encode(b37.parts[0], bytes37p0) == CodecError::NONE && bytes37p0.size() == 1192)
+                && (CPacketCodec::Encode(b37.parts[1], bytes37p1) == CodecError::NONE && bytes37p1.size() == 72)
+                && (bytes36.size() <= MAX_UDP_BYTES && bytes37p0.size() <= MAX_UDP_BYTES);
+            // 타 조각(part 0) 없이 part 1 단독 Decode 해석 가능 확인
+            Message decodedPart1{};
+            const bool standaloneDecodeOk =
+                (CPacketCodec::Decode(bytes37p1, decodedPart1) == CodecError::NONE)
+                && (std::get<StateSnapshotPayload>(decodedPart1.payload).partIndex == 1)
+                && (std::get<StateSnapshotPayload>(decodedPart1.payload).objects.size() == 1)
+                && (std::get<StateSnapshotPayload>(decodedPart1.payload).objects[0].objectId == 37);
+            // 다중 조각 배치 미전송 교체 확인 (틱 13 -> 틱 15 교체 시 혼합 없음)
+            net::FakeSendSink sink;
+            net::SnapshotBatch b37Next{};
+            CHostWorldSync::BuildSnapshotBatch(1000, 15, seq, makeRecords(37), b37Next);
+            const auto q1 = sink.EnqueueSnapshotBatch(b37);
+            const auto q2 = sink.EnqueueSnapshotBatch(b37Next);
+            const auto taken = sink.TakePendingBatchForSend();
+            const bool replaceOk =
+                (q1 == net::SendResult::Queued)
+                && (q2 == net::SendResult::ReplacedPending)
+                && taken.has_value()
+                && (taken->parts.size() == 2)
+                && (taken->parts[0].header.hostTick == 15 && taken->parts[1].header.hostTick == 15);
+            Check(r0 == net::SendResult::Queued && b0.parts.size() == 1
+                && r1 == net::SendResult::Queued && b1.parts.size() == 1
+                && r36 == net::SendResult::Queued && b36.parts.size() == 1
+                && r37 == net::SendResult::Queued && b37.parts.size() == 2
+                && rOver == net::SendResult::TooLarge
+                && encodeOk && standaloneDecodeOk && replaceOk,
+                "HostSim1123: Splits 0/1/36/37/overflow snapshots <=1200B, decodes parts independently, and replaces pending multi-part batch",
+                counters);
+        }
+        // 2. 특수 탄환(가속 patternType=2 30틱 x1.5 / 감속 patternType=3 42틱 /2) 속도·패턴 스냅샷 보존 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+            const ObjectId accelId = engine.RequestSpawn(
+                NetObjectKind::PROJ_MONSTER, 2, INVALID_PLAYER_SLOT,
+                FixedVec2{ 10'000, 10'000 }, FixedVec2{ 0, 40'000 }, 1, 1, 2);
+            const ObjectId decelId = engine.RequestSpawn(
+                NetObjectKind::PROJ_MONSTER, 3, INVALID_PLAYER_SLOT,
+                FixedVec2{ 20'000, 10'000 }, FixedVec2{ 0, 40'000 }, 1, 1, 3);
+            engine.FlushLifecycleAtTickEnd(sink);
+            // 30틱(500ms) 진행 -> 가속 탄환만 40,000 -> 60,000 전환
+            for (int i = 0; i < 6; ++i)
+                engine.StepFrame(83'334, script, sink);
+            const bool at30Ok =
+                (engine.FindObjectById(accelId)->vel.y == 60'000)
+                && (engine.FindObjectById(decelId)->vel.y == 40'000);
+            // +12틱(총 42틱 = 700ms) 진행 -> 감속 탄환 40,000 -> 20,000 전환 및 42틱 스냅샷 반영
+            engine.StepFrame(83'334, script, sink);
+            engine.StepFrame(83'334, script, sink);
+            engine.StepFrame(33'334, script, sink);
+            bool snapOk = false;
+            if (!sink.GetCapturedBatches().empty())
+            {
+                const auto& snap = std::get<StateSnapshotPayload>(sink.GetCapturedBatches().back().parts[0].payload);
+                std::int32_t accelVelY = 0, decelVelY = 0;
+                std::uint8_t accelState = 0, decelState = 0;
+                for (const auto& rec : snap.objects)
+                {
+                    if (rec.objectId == accelId) { accelVelY = rec.vel.y; accelState = rec.fsmState; }
+                    if (rec.objectId == decelId) { decelVelY = rec.vel.y; decelState = rec.fsmState; }
+                }
+                snapOk = (snap.snapshotTick == 42)
+                    && (accelVelY == 60'000 && accelState == 2)
+                    && (decelVelY == 20'000 && decelState == 3);
+            }
+            Check(at30Ok && snapOk,
+                "HostSim1123: Preserves special projectile patternType and tick-based accel/decel velocity in snapshot",
+                counters);
+        }
+    }
 
+    void RunHostSim1124Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
 
+        // 1. 무적/재등장(fsmState=1), 개인 전투 불능(hp=0, 이동/발사 제외, P1 생존 계속), 객체 삭제(RequestDestroy) 구분
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 2, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 2, 2);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // P0 피격 (HP 2->1): 재등장 무적(fsmState=1) 진입, 무적 중 추가 피격 무시, 120틱 후 무적 해제
+            const bool firstHit = engine.ApplyDamageToPlayer(0, 1);
+            const bool ignoredDuringInv = !engine.ApplyDamageToPlayer(0, 1);
+            const std::uint8_t stateInv = engine.FindObjectById(p0Id)->fsmState;
+            for (int i = 0; i < 24; ++i)
+                engine.StepFrame(83'334, script, sink); // 24 * 5 = 120틱 (2초)
+            const std::uint8_t stateAfterInv = engine.FindObjectById(p0Id)->fsmState;
+
+            // P0 치명타 (HP 1->0): 개인 전투 불능(alive=0, 객체는 유지), P1 생존으로 게임 계속(!AreAllPlayersDead)
+            const bool lethalHit = engine.ApplyDamageToPlayer(0, 1);
+            const bool continuesWithP1 = !engine.AreAllPlayersDead() && (engine.FindObjectById(p0Id) != nullptr);
+
+            // P0 이동/발사 입력을 넣어도 위치 고정 및 탄환 미생성 확인
+            const FixedVec2 deadPosBefore = engine.FindObjectById(p0Id)->pos;
+            script.ScheduleInput(121, 0, MoveBit::RIGHT, 1, 1, 2000);
+            for (int i = 0; i < 3; ++i)
+                engine.StepFrame(83'334, script, sink); // 15틱 진행
+            bool deadNoMoveNoFire = (engine.FindObjectById(p0Id)->pos == deadPosBefore);
+            for (const auto& obj : engine.GetActiveObjects())
+            {
+                if (obj.kind == NetObjectKind::PROJ_PLAYER && obj.ownerPlayerId == 0)
+                    deadNoMoveNoFire = false;
+            }
+
+            // P1도 사망 시 전원 사망, 객체 삭제 요청 후에는 FindObjectById == nullptr
+            engine.ApplyDamageToPlayer(1, 2);
+            const bool allDead = engine.AreAllPlayersDead();
+            engine.RequestDestroy(p0Id, DespawnReason::STAGE_END);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            Check(firstHit && ignoredDuringInv && stateInv == 1 && stateAfterInv == 0
+                && lethalHit && continuesWithP1 && deadNoMoveNoFire
+                && allDead && engine.FindObjectById(p0Id) == nullptr && p1Id != 0,
+                "HostSim1124: Distinguishes respawn invincibility, combat-disabled player, and object destruction while continuing if P1 lives",
+                counters);
+        }
+
+        // 2. 사망자 조준·아이템 획득 대상 제외 확인 (P0 사망·P1 생존 시 P1만 조준/획득)
+        {
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 1, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 30'000, 30'000 }, {}, 1, 2);
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 10'100, 29'000 }, {}, 50, 1);
+            const ObjectId itemId = engine.RequestSpawn(NetObjectKind::ITEM, 1, INVALID_PLAYER_SLOT, FixedVec2{ 10'100, 30'000 }, {}, 1, 0);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // P0 사망 -> 적/아이템 바로 옆에 P0가 있어도 조준·획득 모두 P1 선택
+            engine.ApplyDamageToPlayer(0, 1);
+            const PlayerSlot aimedSlot = engine.SelectNearestAlivePlayerId(FixedVec2{ 10'100, 29'000 });
+            const ObjectId firedProj = engine.TryFireEnemyAimedProjectile(monId);
+            const PlayerSlot itemWinner = engine.ResolveItemPickup(itemId, { 0, 1 }, sink);
+
+            Check(aimedSlot == 1 && firedProj != 0 && itemWinner == 1
+                && engine.FindObjectById(p0Id)->subType == 1
+                && engine.FindObjectById(p1Id)->subType == 2,
+                "HostSim1124: Excludes combat-disabled P0 from enemy aiming and item pickup",
+                counters);
+        }
+    }
+
+    void RunHostSim1125Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 동일 틱 보스 사망 + 전원 사망: 콜백 순서({보스->전원} vs {전원->보스})와 무관하게 틱 종료 후 VICTORY 확정
+        {
+            auto runSameTick = [](bool bossFirst) {
+                InputScript script;
+                CaptureSink sink;
+                HostSimEngine engine{ 1000 };
+
+                engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 1, 100);
+                engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 1, 100);
+                const ObjectId bossId = engine.RequestSpawn(NetObjectKind::MONSTER, MONSTER_SUBTYPE_BOSS, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 10'000 }, {}, 100, 1);
+                const ObjectId projId = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 0, FixedVec2{ 15'000, 10'000 }, {}, 1, 100);
+                engine.FlushLifecycleAtTickEnd(sink);
+
+                if (bossFirst)
+                {
+                    engine.ApplyProjectileHit(projId, bossId, sink);
+                    engine.ApplyDamageToPlayer(0, 1);
+                    engine.ApplyDamageToPlayer(1, 1);
+                }
+                else
+                {
+                    engine.ApplyDamageToPlayer(0, 1);
+                    engine.ApplyDamageToPlayer(1, 1);
+                    engine.ApplyProjectileHit(projId, bossId, sink);
+                }
+
+                // 개별 충돌 콜백 직후(틱 종료 전)에는 결과가 먼저 확정되지 않아야 함
+                const bool deferredBeforeTickEnd = !engine.GetTeamOutcome().has_value();
+
+                // 1틱 종료 후 집계 -> VICTORY 우선 확정
+                engine.StepFrame(16'667, script, sink);
+                return deferredBeforeTickEnd
+                    && engine.GetTeamOutcome().has_value()
+                    && (*engine.GetTeamOutcome() == MatchOutcome::VICTORY);
+                };
+
+            Check(runSameTick(true) && runSameTick(false),
+                "HostSim1125: Same-tick boss death + all players dead resolves to VICTORY at tick-end regardless of callback order",
+                counters);
+        }
+
+        // 2. 보스 생존 중 1명 사망이면 계속(nullopt), 전원 사망이면 틱 종료 후 DEFEAT 확정
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 1, 2);
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 1, 2);
+            engine.RequestSpawn(NetObjectKind::MONSTER, MONSTER_SUBTYPE_BOSS, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 10'000 }, {}, 100, 1);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // P0만 사망 -> 틱 종료 후에도 미확정(계속 진행)
+            engine.ApplyDamageToPlayer(0, 1);
+            engine.StepFrame(16'667, script, sink);
+            const bool stillRunning = !engine.GetTeamOutcome().has_value();
+
+            // P1도 사망 -> 콜백 직후 미확정, 틱 종료 후 DEFEAT 확정
+            engine.ApplyDamageToPlayer(1, 1);
+            const bool deferred = !engine.GetTeamOutcome().has_value();
+            engine.StepFrame(16'667, script, sink);
+            const bool defeatConfirmed = engine.GetTeamOutcome().has_value()
+                && (*engine.GetTeamOutcome() == MatchOutcome::DEFEAT);
+
+            Check(stillRunning && deferred && defeatConfirmed,
+                "HostSim1125: Continues while one player lives and confirms DEFEAT at tick-end when all players die",
+                counters);
+        }
+    }
+
+    void RunHostSim1126Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 승리 조건이 연속 5틱 이상 유지되어도 RESULT(VICTORY) 이벤트·팀 점수가 정확히 1회만 발행됨 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 100);
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 100);
+            const ObjectId bossId = engine.RequestSpawn(NetObjectKind::MONSTER, MONSTER_SUBTYPE_BOSS, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 10'000 }, {}, 100, 1);
+            const ObjectId projId = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 0, FixedVec2{ 15'000, 10'000 }, {}, 1, 100);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            engine.ApplyProjectileHit(projId, bossId, sink); // 보스 처치 -> 팀 점수 +1500
+            // 연속 5틱 진행 (같은 승리 조건 유지)
+            engine.StepFrame(83'334, script, sink);
+
+            int resultCount = 0;
+            ResultPayload lastResult{};
+            for (const auto& entry : sink.GetCapturedMessages())
+            {
+                if (entry.channel == net::Channel::Tcp
+                    && entry.message.header.type == MessageType::RESULT)
+                {
+                    ++resultCount;
+                    lastResult = std::get<ResultPayload>(entry.message.payload);
+                }
+            }
+
+            Check(resultCount == 1
+                && lastResult.eventId != 0
+                && lastResult.outcome == MatchOutcome::VICTORY
+                && lastResult.finalTeamScore == engine.GetTeamScore()
+                && lastResult.finalTeamScore == 1500,
+                "HostSim1126: Emits RESULT(VICTORY) with finalTeamScore exactly once across consecutive ticks",
+                counters);
+        }
+
+        // 2. 패배 조건이 연속 5틱 이상 유지되어도 RESULT(DEFEAT) 이벤트가 정확히 1회만 발행됨 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 1, 2);
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 1, 2);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            engine.ApplyDamageToPlayer(0, 1);
+            engine.ApplyDamageToPlayer(1, 1);
+            engine.StepFrame(83'334, script, sink); // 연속 5틱 진행
+
+            int resultCount = 0;
+            ResultPayload lastResult{};
+            for (const auto& entry : sink.GetCapturedMessages())
+            {
+                if (entry.channel == net::Channel::Tcp
+                    && entry.message.header.type == MessageType::RESULT)
+                {
+                    ++resultCount;
+                    lastResult = std::get<ResultPayload>(entry.message.payload);
+                }
+            }
+
+            Check(resultCount == 1
+                && lastResult.eventId != 0
+                && lastResult.outcome == MatchOutcome::DEFEAT
+                && lastResult.finalTeamScore == engine.GetTeamScore(),
+                "HostSim1126: Emits RESULT(DEFEAT) exactly once across consecutive ticks",
+                counters);
+        }
+    }
+
+    void RunHostSim1127Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 생성 -> render(수명 불변) -> 삭제 -> 씬 종료 회귀: 그룹·슬롯·ObjectId 표·대기 이벤트 잔존 없음 확인
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            const ObjectId p0Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 3, 2);
+            const ObjectId p1Id = engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 3, 2);
+            const ObjectId monId = engine.RequestSpawn(NetObjectKind::MONSTER, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 10'000 }, {}, 20, 1);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // 삭제 요청 직후 render는 컨테이너 크기를 바꾸지 않고(3 유지) 표시 대상만 제외(2)
+            engine.RequestDestroy(p0Id, DespawnReason::DESTROYED);
+            const bool renderSafe =
+                (engine.RenderPresentationOnly() == 2)
+                && (engine.GetActiveObjects().size() == 3);
+
+            // 틱 종료 경계에서 그룹·슬롯·ObjectId 표가 함께 정리됨
+            engine.FlushLifecycleAtTickEnd(sink);
+            const bool afterDestroyClean =
+                (engine.GetActiveObjects().size() == 2)
+                && (engine.GetPlayerSlotObjectId(0) == 0)
+                && (engine.FindObjectById(p0Id) == nullptr)
+                && (engine.FindObjectById(p1Id) != nullptr)
+                && (engine.FindObjectById(monId) != nullptr);
+
+            // 대기 중인 생성·삭제가 있는 상태에서 씬 종료(TransitionScene) -> 모든 그룹·슬롯·대기 이벤트 정리
+            const ObjectId pendingSpawnId = engine.RequestSpawn(NetObjectKind::ITEM, 1, INVALID_PLAYER_SLOT, FixedVec2{ 15'000, 15'000 });
+            engine.RequestDestroy(monId, DespawnReason::STAGE_END);
+            engine.TransitionScene();
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            const bool afterSceneExitClean =
+                engine.GetActiveObjects().empty()
+                && (engine.GetPlayerSlotObjectId(0) == 0)
+                && (engine.GetPlayerSlotObjectId(1) == 0)
+                && (engine.FindObjectById(p1Id) == nullptr)
+                && (engine.FindObjectById(monId) == nullptr)
+                && (engine.FindObjectById(pendingSpawnId) == nullptr);
+
+            Check(renderSafe && afterDestroyClean && afterSceneExitClean,
+                "HostSim1127: Keeps render mutation-free and clears groups, player slots, ObjectId lookup, and pending events on destroy and scene exit",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -991,6 +1378,11 @@ int main()
     RunHostSim1120Suite(counters);
     RunHostSim1121Suite(counters);
     RunHostSim1122Suite(counters);
+    RunHostSim1123Suite(counters);
+    RunHostSim1124Suite(counters);
+    RunHostSim1125Suite(counters);
+    RunHostSim1126Suite(counters);
+    RunHostSim1127Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

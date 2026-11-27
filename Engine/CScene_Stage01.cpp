@@ -41,6 +41,15 @@
 #include <cmath>
 #include <utility>
 
+namespace
+{
+    constexpr float SnapshotLerpDuration = host::SIM_FIXED_DT * host::STATE_PUBLISH_INTERVAL_TICKS;
+    constexpr float EntryFadeDuration = 1.5f;
+    constexpr float ClearFadeDuration = 3.f;
+    constexpr float FailCardDuration = 5.f;
+    constexpr float FailFadeDuration = 5.f;
+}
+
 #ifdef _DEBUG
 namespace
 {
@@ -158,7 +167,7 @@ void CScene_Stage01::ReportMonsterCombat(protocol::ObjectId monsterId, protocol:
         msg.payload = combat;
         m_pendingItemEvents.push_back(msg);
     }
-    
+
 }
 
 void CScene_Stage01::QueueDespawn(protocol::ObjectId objectId, protocol::DespawnReason reason)
@@ -179,6 +188,70 @@ void CScene_Stage01::QueueDespawn(protocol::ObjectId objectId, protocol::Despawn
     msg.header.hostTick = m_hostTick;
     msg.payload = despawn;
     m_pendingItemEvents.push_back(msg);
+}
+
+void CScene_Stage01::EvaluateHostMatchOutcome()
+{
+    if (m_bClear || m_bFail)
+        return;
+
+    bool anyAlive = false;
+    for (PlayerId slot = 0; slot < MAX_PLAYERS; ++slot) {
+        if (auto* player = GetPlayer(slot); player && player->IsAlivePlayer()) {
+            anyAlive = true;
+            break;
+        }
+    }
+
+    const auto outcome = host::EvaluateTeamOutcome(m_bBossDefeated, !anyAlive);
+    if (!outcome.has_value())
+        return;
+
+    if (*outcome == protocol::MatchOutcome::VICTORY) {
+        Clear();
+    }
+    else if (*outcome == protocol::MatchOutcome::DEFEAT) {
+        Fail();
+    }
+}
+
+void CScene_Stage01::SendMatchResultOnce(protocol::MatchOutcome outcome)
+{
+    if (m_bResultSent)
+        return;
+
+    auto& session = CCore::GetInst()->GetSession();
+    if (!session.IsHost())
+        return;
+
+    protocol::ResultPayload result{};
+    result.eventId = ++m_nextSpawnEventId;
+    result.outcome = outcome;
+    result.finalTeamScore = static_cast<std::uint32_t>(
+        CRankMgr::GetInst()->CurrentRanking.Score > 0
+        ? CRankMgr::GetInst()->CurrentRanking.Score
+        : 0);
+
+    protocol::Message message{};
+    message.header.type = protocol::MessageType::RESULT;
+    message.header.sessionId = session.GetSessionId();
+    message.header.hostTick = m_hostTick;
+    message.header.sequence = result.eventId;
+    message.payload = result;
+
+    const auto sendResult = session.EnqueueSend(net::Channel::Tcp, message);
+    if (sendResult == net::SendResult::Queued) {
+        m_bResultSent = true;
+    }
+#ifdef _DEBUG
+    else {
+        std::cerr << "[HOST] RESULT enqueue failed"
+            << ", sessionId=" << message.header.sessionId
+            << ", hostTick=" << message.header.hostTick
+            << ", eventId=" << result.eventId
+            << ", sendResult=" << static_cast<int>(sendResult) << '\n';
+    }
+#endif
 }
 
 bool CScene_Stage01::FlushItemEvents()
@@ -202,7 +275,7 @@ bool CScene_Stage01::FlushItemEvents()
 void CScene_Stage01::OnObjectAdded(CObject* _pObj, GROUP_TYPE _eType)
 {
     auto& session = CCore::GetInst()->GetSession();
-    if(!session.IsHost() || session.GetState() !=
+    if (!session.IsHost() || session.GetState() !=
         network::SessionState::Started)
         return;
 
@@ -228,7 +301,21 @@ void CScene_Stage01::OnObjectAdded(CObject* _pObj, GROUP_TYPE _eType)
 
 void CScene_Stage01::update()
 {
+    if (m_entryFadeAlpha > 0.f && !CSceneMgr::GetInst()->IsLoadingTransitionActive())
+    {
+        if (m_waitingForEntryFade)
+        {
+            m_waitingForEntryFade = false;
+        }
+        else
+        {
+            m_entryFadeAlpha = std::clamp(m_entryFadeAlpha - fDT / EntryFadeDuration, 0.f, 1.f);
+        }
+    }
+
     auto& session = CCore::GetInst()->GetSession();
+    using network::SessionState;
+    const auto state = session.GetState();
 
     if (!m_bFail)
     {
@@ -236,7 +323,7 @@ void CScene_Stage01::update()
         m_dAcc += fDT;
     }
 
-    if (session.IsHost() && session.GetState() == network::SessionState::Started)
+    if (session.IsHost() && state == network::SessionState::Started)
     {
         // Send SPAWN before combat events that reference the new objects.
         while (!m_pendingSpawns.empty())
@@ -270,36 +357,7 @@ void CScene_Stage01::update()
     {
         if (m_fClearAcc == 0.f)
         {
-            if (session.IsHost())
-            {
-                protocol::ResultPayload result{};
-                result.eventId = ++m_nextSpawnEventId;
-                result.outcome = protocol::MatchOutcome::VICTORY;
-                result.finalTeamScore = static_cast<std::uint32_t>(
-                    CRankMgr::GetInst()->CurrentRanking.Score > 0
-                    ? CRankMgr::GetInst()->CurrentRanking.Score
-                    : 0);
-
-                protocol::Message message{};
-                message.header.type = protocol::MessageType::RESULT;
-                message.header.sessionId = session.GetSessionId();
-                message.header.hostTick = m_hostTick;
-                message.header.sequence = result.eventId;
-                message.payload = result;
-
-                const auto sendResult = session.EnqueueSend(net::Channel::Tcp, message);
-
-#ifdef _DEBUG
-                if (sendResult != net::SendResult::Queued)
-                {
-                    std::cerr << "[HOST] RESULT enqueue failed"
-                        << ", sessionId=" << message.header.sessionId
-                        << ", hostTick=" << message.header.hostTick
-                        << ", eventId=" << result.eventId
-                        << ", sendResult=" << static_cast<int>(sendResult) << '\n';
-                }
-#endif
-            }
+            SendMatchResultOnce(protocol::MatchOutcome::VICTORY);
 
             m_pHud->SetActive(false);
             CRankMgr::GetInst()->SetPlayer(nullptr);
@@ -318,10 +376,9 @@ void CScene_Stage01::update()
                 if (auto* player = GetPlayer(slot))
                     player->setclear();
             }
-            CCamera::GetInst()->FadeOut(3.f);
         }
         m_fClearAcc += fDT;
-        if (m_fClearAcc > 3.f)
+        if (m_fClearAcc >= ClearFadeDuration)
         {
             ChangeScene(SCENE_TYPE::CREDITS);
         }
@@ -330,23 +387,7 @@ void CScene_Stage01::update()
     {
         if (m_fClearAcc == 0.f)
         {
-            if (session.IsHost())
-            {
-                protocol::ResultPayload result{};
-                result.eventId = ++m_nextSpawnEventId;
-                result.outcome = protocol::MatchOutcome::DEFEAT;
-                result.finalTeamScore = static_cast<std::uint32_t>(
-                    CRankMgr::GetInst()->CurrentRanking.Score > 0
-                    ? CRankMgr::GetInst()->CurrentRanking.Score
-                    : 0);
-                protocol::Message message{};
-                message.header.type = protocol::MessageType::RESULT;
-                message.header.sessionId = session.GetSessionId();
-                message.header.hostTick = m_hostTick;
-                message.header.sequence = result.eventId;
-                message.payload = result;
-                session.EnqueueSend(net::Channel::Tcp, message);
-            }
+            SendMatchResultOnce(protocol::MatchOutcome::DEFEAT);
 
             m_pHud->SetActive(false);
 
@@ -386,11 +427,7 @@ void CScene_Stage01::update()
             //CCamera::GetInst()->FadeIn(0.5f);
         }
         */
-        if (5.f + fDT >= m_fClearAcc && m_fClearAcc > 5.f)
-        {
-            CCamera::GetInst()->FadeOut(5.f);
-        }
-        if (m_fClearAcc >= 10.f)
+        if (m_fClearAcc >= FailCardDuration + FailFadeDuration)
         {
             CRankMgr::GetInst()->SetPlayer(nullptr);
             ChangeScene(SCENE_TYPE::TITLE);
@@ -398,7 +435,87 @@ void CScene_Stage01::update()
     }
     else
     {
-        if (session.GetState() != network::SessionState::Started)
+        if (state == SessionState::Disconnected || state == SessionState::Failed)
+        {
+            // TODO: 상대 연결 끊어지거나 종료했을 때 연결
+#ifdef _DEBUG
+            const auto& event = session.GetLastNetworkEvent();
+            const char* reason = "Network failed";
+
+            if (state == SessionState::Disconnected)
+            {
+                if (event.socketError == WSAETIMEDOUT)
+                    reason = "Heartbeat timeout";
+                else if (event.socketError == 0)
+                    reason = "Peer closed the TCP connection";
+                else
+                    reason = "Connection lost";
+            }
+
+            std::cout << (session.IsHost() ? "[HOST]" : "[CLIENT]")
+                << " [Stage01] " << reason
+                << ", socketError=" << event.socketError
+                << ", codecError=" << static_cast<int>(event.codecError)
+                << '\n';
+#endif
+            if (m_fClearAcc == 0.f)
+            {
+                if (session.IsHost())
+                {
+                    protocol::ResultPayload result{};
+                    result.eventId = ++m_nextSpawnEventId;
+                    result.outcome = protocol::MatchOutcome::DEFEAT;
+                    result.finalTeamScore = static_cast<std::uint32_t>(
+                        CRankMgr::GetInst()->CurrentRanking.Score > 0
+                        ? CRankMgr::GetInst()->CurrentRanking.Score
+                        : 0);
+                    protocol::Message message{};
+                    message.header.type = protocol::MessageType::RESULT;
+                    message.header.sessionId = session.GetSessionId();
+                    message.header.hostTick = m_hostTick;
+                    message.header.sequence = result.eventId;
+                    message.payload = result;
+                    session.EnqueueSend(net::Channel::Tcp, message);
+                }
+
+                m_pHud->SetActive(false);
+
+                CSoundMgr::GetInst()->PlayBGM(m_pFailTheme, false);
+
+                m_pFailCard = CResMgr::GetInst()->LoadTexture(L"Connection Lost Card", L"texture\\Stage Cards\\ConnectionLost.png");
+            }
+            m_fClearAcc += fDT;
+
+            /*
+            if (KEY_TAP(KEY::SPACE))
+            {
+                CPlayer* player = CSceneMgr::GetInst()->GetCurScene()->GetPlayer(0);
+                player->FullHP();
+                m_bFail = false;
+                m_fClearAcc = 0.f;
+                m_pFailCard = nullptr;
+                if (m_dAcc >= 130.f)
+                {
+                    CSoundMgr::GetInst()->PlayBGM(m_pBossTheme);
+                }
+                else
+                {
+                    CSoundMgr::GetInst()->PlayBGM(m_pStageTheme);
+                }
+
+                m_pHud->SetActive(true);
+
+                //CCamera::GetInst()->FadeIn(0.5f);
+            }
+            */
+            if (m_fClearAcc >= FailCardDuration + FailFadeDuration)
+            {
+                CRankMgr::GetInst()->SetPlayer(nullptr);
+                ChangeScene(SCENE_TYPE::TITLE);
+            }
+        }
+
+        if (state != SessionState::Started)
             return;
 
         if (KEY_TAP(KEY::SPACE))
@@ -411,12 +528,8 @@ void CScene_Stage01::update()
         }
 
         // 입력 생성
-        std::uint8_t moveBits = protocol::MoveBit::NONE;
+        const auto moveBits = CPlayer::ReadMoveBits();
         std::uint8_t fireHeld = 0;
-        if (KEY_HOLD(KEY::UP)) moveBits |= protocol::MoveBit::UP;
-        if (KEY_HOLD(KEY::DOWN)) moveBits |= protocol::MoveBit::DOWN;
-        if (KEY_HOLD(KEY::LEFT)) moveBits |= protocol::MoveBit::LEFT;
-        if (KEY_HOLD(KEY::RIGHT)) moveBits |= protocol::MoveBit::RIGHT;
         if (KEY_HOLD(KEY::S)) fireHeld = 1;
 
         if (session.IsHost())
@@ -471,6 +584,14 @@ void CScene_Stage01::update()
                                 states.push_back(static_cast<const CMonster*>(obj)->ExportStateRecord());
                             }
 
+                            // 11/23: 가속/감속 특수 탄환(m_iType 2, 3) 상태를 스냅샷에 포함
+                            for (CObject* obj : GetGroupObject(GROUP_TYPE::PROJ_MONSTER)) {
+                                if (obj == nullptr || obj->IsDead() || obj->GetObjectId() == 0)
+                                    continue;
+                                const auto* missile = static_cast<const CMissile*>(obj);
+                                if (missile->IsSpecialPattern())
+                                    states.push_back(missile->ExportStateRecord());
+                            }
 
                             const auto result = session.SendSnapshot(states, m_hostTick);
 
@@ -490,7 +611,7 @@ void CScene_Stage01::update()
                 {
                     if (!evt.triggered && hostElapsedSec >= evt.triggerTime) // 11/15 m_dAcc를 hostElapsedSec으로 수정
                     {
-                        
+
                         if (hostElapsedSec >= 130.f && !m_bBossBgmPlayed)
                         {
                             CSoundMgr::GetInst()->PlayBGM(m_pBossTheme);
@@ -503,6 +624,8 @@ void CScene_Stage01::update()
                         evt.triggered = true;
                     }
                 }
+
+                EvaluateHostMatchOutcome();
 
             }
         }
@@ -545,11 +668,12 @@ void CScene_Stage01::update()
                         if (remote.objectId != spawn.objectId)
                         {
                             remote.objectId = spawn.objectId;
-                            remote.lastSnapshotTick.reset();
+                            if (auto* player = GetPlayer(spawn.ownerPlayerId))
+                                player->ResetNetworkPosition(Vec2(spawn.pos.x / 100.f, spawn.pos.y / 100.f));
                         }
                     }
                     else if (spawn.kind == protocol::NetObjectKind::PROJ_PLAYER ||
-                             spawn.kind == protocol::NetObjectKind::PROJ_MONSTER)
+                        spawn.kind == protocol::NetObjectKind::PROJ_MONSTER)
                     {
                         const bool isMonsterProjectile = spawn.kind == protocol::NetObjectKind::PROJ_MONSTER;
                         if (isMonsterProjectile && FindObjectById(spawn.objectId) != nullptr)
@@ -700,18 +824,23 @@ void CScene_Stage01::update()
                     {
                         if (object.kind == protocol::NetObjectKind::MONSTER)
                         {
-                            // 생성된 몬스터를 object.objectId로 찾아 보간 샘플 등록
-                            // 생성 전 도착한 상태는 건너뛰고 다음 스냅샷부터 적용
                             if (auto* mon = dynamic_cast<CMonster*>(FindObjectById(object.objectId)))
-                            {
-                                if (mon->GetsignalDead() && object.alive)
-                                    continue;
+                                mon->ApplyMonsterSnapshot(object, snapshot.snapshotTick);
 
-                                mon->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
-                                mon->SetConfirmedHP(static_cast<float>(object.hp));
+                            continue;
+                        }
+
+                        if (object.kind == protocol::NetObjectKind::PROJ_MONSTER) {
+                            if (auto* missile = dynamic_cast<CMissile*>
+                                (FindObjectById(object.objectId))) {
+                                if (!missile->IsDead() && missile->ApplySnapshotPosition(
+                                    Vec2(object.pos.x / 100.f, object.pos.y / 100.f),
+                                    snapshot.snapshotTick, SnapshotLerpDuration))
+                                {
+                                    missile->ApplySnapshotVelocity(
+                                        Vec2(object.vel.x / 100.f, object.vel.y / 100.f));
+                                }
                             }
-
-
                             continue;
                         }
 
@@ -725,14 +854,24 @@ void CScene_Stage01::update()
                             if (remote.objectId == 0 || remote.objectId != object.objectId)
                                 continue;
 
-                            if (remote.lastSnapshotTick && snapshot.snapshotTick <= *remote.lastSnapshotTick)
-                                break;
-
                             if (auto* player = GetPlayer(slot))
                             {
-                                player->SetPos(Vec2(object.pos.x / 100.f, object.pos.y / 100.f));
-                                player->SetRespawnInvincible(object.fsmState == 1);
-                                remote.lastSnapshotTick = snapshot.snapshotTick;
+                                const bool applied = slot == session.GetLocalPlayerId()
+                                    ? player->ApplyLocalSnapshotPosition(object, snapshot.snapshotTick,
+                                        (snapshot.snapshotTick - session.GetStartInfo().startHostTick) * host::SIM_FIXED_DT,
+                                        SnapshotLerpDuration)
+                                    : player->ApplySnapshotPosition(Vec2(object.pos.x / 100.f, object.pos.y / 100.f),
+                                        snapshot.snapshotTick, object.alive ? SnapshotLerpDuration : 0.f);
+                                if (!applied)
+                                    break;
+
+                                if (object.alive == 0) {
+                                    player->setdead();
+                                    player->SetRespawnInvincible(false);
+                                }
+                                else {
+                                    player->SetRespawnInvincible(object.fsmState == 1);
+                                }
                             }
 
                             break;
@@ -822,6 +961,26 @@ void CScene_Stage01::render(HDC _dc)
             RGB(255, 0, 255)
         );
     }
+
+    float exitFadeAlpha = 0.f;
+    if (m_bClear)
+    {
+        exitFadeAlpha = m_fClearAcc / ClearFadeDuration;
+    }
+    else if (m_fClearAcc >= FailCardDuration)
+    {
+        exitFadeAlpha = (m_fClearAcc - FailCardDuration) / FailFadeDuration;
+    }
+
+    const float fadeAlpha = (std::max)(m_entryFadeAlpha, std::clamp(exitFadeAlpha, 0.f, 1.f));
+    if (fadeAlpha > 0.f && m_fadeTexture)
+    {
+        BLENDFUNCTION blend = {};
+        blend.BlendOp = AC_SRC_OVER;
+        blend.SourceConstantAlpha = static_cast<BYTE>(fadeAlpha * 255.f);
+        AlphaBlend(_dc, 0, 0, resolution.x, resolution.y,
+            m_fadeTexture->GetDC(), 0, 0, 1, 1, blend);
+    }
 }
 void CScene_Stage01::Enter()
 {
@@ -876,6 +1035,8 @@ void CScene_Stage01::Enter()
     m_remotePlayers = {};
     m_pendingItemEvents.clear();
     m_bBossBgmPlayed = false;
+    m_bBossDefeated = false;
+    m_bResultSent = false;
 
     // Monster Object 추가
 
@@ -900,11 +1061,11 @@ void CScene_Stage01::Enter()
 
     CCamera::GetInst()->SetLookAt(vResolution / 2.f);
 
-    CCamera::GetInst()->FadeOut(1.5f);
-    CCamera::GetInst()->FadeIn(1.5f);
+    m_fadeTexture = CResMgr::GetInst()->CreateTexture(L"Stage Black Fade", 1, 1);
+    PatBlt(m_fadeTexture->GetDC(), 0, 0, 1, 1, BLACKNESS);
+    m_entryFadeAlpha = 1.f;
+    m_waitingForEntryFade = true;
     m_dAcc = 0.f;
-    //Camera 효과 지정
-   // CCamera::GetInst()->Fadeout(5.f);
 
     CSoundMgr::GetInst()->PlayBGM(m_pStageTheme);
 
@@ -968,6 +1129,7 @@ void CScene_Stage01::Enter()
 
 void CScene_Stage01::Exit()
 {
+    CCore::GetInst()->GetSession().Stop();
     m_pendingItemEvents.clear();
     DeleteAll();
     m_dAcc = 0;
@@ -977,6 +1139,8 @@ void CScene_Stage01::Exit()
     m_vEvents.clear();
     m_pendingSpawns.clear();
     m_bBossBgmPlayed = false;
+    m_bBossDefeated = false;
+    m_bResultSent = false;
     CColliderMgr::GetInst()->Reset();
 }
 

@@ -13,6 +13,8 @@
 
 #pragma comment(lib, "Bcrypt.lib")
 
+// #define LOG_EVENT
+
 namespace network
 {
     static std::uint64_t NowMs()
@@ -887,7 +889,7 @@ namespace network
 
         const auto result = network.EnqueueSend(channel, message);
 
-#ifdef _DEBUG
+#if defined(_DEBUG) && defined(LOG_EVENT)
         if (IsHost() && result == net::SendResult::Queued)
             LogGameEvent("[HOST] QUEUED", message);
 #endif
@@ -1199,7 +1201,7 @@ namespace network
 
             if (queued)
             {
-#ifdef _DEBUG
+#if defined(_DEBUG) && defined(LOG_EVENT)
                 if (!IsHost() && eventId != 0)
                     LogGameEvent("[CLIENT] ACCEPTED", gameReceiveQueue.back().message);
 #endif

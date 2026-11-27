@@ -39,6 +39,19 @@ namespace host
     inline constexpr std::uint32_t BOSS_SPAWN_TICK = 130 * SIM_TICK_HZ;
     inline constexpr std::uint8_t MONSTER_SUBTYPE_BOSS = 6;
     inline constexpr std::int32_t BOSS_PHASE2_HP_THRESHOLD = 4000;
+    inline constexpr std::uint32_t PLAYER_RESPAWN_INVINCIBLE_TICKS = 120;
+
+    // 11/25: 공동 승패 결정 함수 (보스 사망 + 전원 사망 동일 틱은 승리 우선)
+    inline std::optional<protocol::MatchOutcome> EvaluateTeamOutcome(
+        bool bossDefeated,
+        bool allPlayersDead) noexcept
+    {
+        if (bossDefeated)
+            return protocol::MatchOutcome::VICTORY;
+        if (allPlayersDead)
+            return protocol::MatchOutcome::DEFEAT;
+        return std::nullopt;
+    }
 
     // 고정 틱 시뮬레이션 dt (전역 fDT와 분리된 호스트 계산 전용 고정 시간 간격)
     inline constexpr float SIM_FIXED_DT = 1.0f / static_cast<float>(SIM_TICK_HZ);
@@ -245,6 +258,72 @@ namespace host
     };
 
     // ─────────────────────────────────────────────────────────────────────────
+    // 5-1. 11/23 CHostWorldSync: 36개 단위 독립 상태 조각 분할기 (모든 조각 <= 1,200B)
+    // ─────────────────────────────────────────────────────────────────────────
+    class CHostWorldSync
+    {
+    public:
+        static net::SendResult BuildSnapshotBatch(
+            std::uint32_t sessionId,
+            std::uint32_t hostTick,
+            std::uint32_t& nextSequence,
+            const std::vector<protocol::ObjectStateRecord>& records,
+            net::SnapshotBatch& outBatch)
+        {
+            outBatch.parts.clear();
+
+            if (sessionId == 0)
+                return net::SendResult::InvalidRequest;
+
+            constexpr std::size_t perPart = protocol::MAX_SNAPSHOT_OBJECTS_PER_PACKET; //36
+            const std::size_t partCount = records.empty()
+                ? 1
+                : ((records.size() + perPart - 1) / perPart);
+
+            if (partCount > net::MAX_SNAPSHOT_PARTS_PER_BATCH)
+                return net::SendResult::TooLarge;
+
+            outBatch.parts.reserve(partCount);
+
+            for (std::size_t partIndex = 0; partIndex < partCount; ++partIndex) {
+                protocol::StateSnapshotPayload snap{};
+                snap.snapshotTick = hostTick;
+                snap.partIndex = static_cast<std::uint8_t>(partIndex);
+                snap.partCount = static_cast<std::uint8_t>(partCount);
+
+                if (!records.empty()) {
+                    const std::size_t offset = partIndex * perPart;
+                    const std::size_t count = (std::min)(perPart, records.size() - offset);
+                    snap.objects.assign(
+                        records.begin() + static_cast<std::ptrdiff_t>(offset),
+                        records.begin() + static_cast<std::ptrdiff_t>(offset + count));
+                }
+                protocol::Message msg{};
+                msg.header.magic = protocol::MAGIC;
+                msg.header.version = protocol::VERSION;
+                msg.header.type = protocol::MessageType::STATE_SNAPSHOT;
+                msg.header.flags = protocol::FLAGS_NONE;
+                msg.header.totalBytes = static_cast<std::uint32_t>(
+                     protocol::HEADER_BYTES
+                    + protocol::SNAPSHOT_HEADER_BYTES
+                    + (snap.objects.size() * protocol::OBJECT_STATE_RECORD_BYTES));
+                msg.header.sessionId = sessionId;
+                msg.header.roundId = 1;
+                msg.header.sequence = nextSequence++;
+                msg.header.hostTick = hostTick;
+                msg.header.reserved = protocol::RESERVED_VALUE;
+                msg.payload = std::move(snap);
+
+                outBatch.parts.push_back(std::move(msg));
+
+
+            }
+            return net::ValidateSnapshotBatch(outBatch);
+        }
+    };
+
+
+    // ─────────────────────────────────────────────────────────────────────────
     // 6. HostSimEngine: 고정 틱(60Hz)과 표시 분리 + 틱 종료 수명 관리 경계
     // ─────────────────────────────────────────────────────────────────────────
     class HostSimEngine
@@ -269,6 +348,8 @@ namespace host
             m_deathCandiateCount = 0;
             m_teamScore = 0;
             m_bossSpawned = false;
+            m_bossDefeated = false;
+            m_teamOutcome.reset();
             m_lastAppliedMoveBits.fill(protocol::MoveBit::NONE);
             m_lastAppliedFireHeld.fill(0);
             m_fireTickAccum.fill(0);
@@ -289,7 +370,8 @@ namespace host
             protocol::FixedVec2 pos,
             protocol::FixedVec2 vel = {},
             std::int32_t hp = 3,
-            std::int32_t damage = 1)
+            std::int32_t damage = 1,
+            std::uint8_t patternType = 0)
         {
 
             if (kind == protocol::NetObjectKind::PLAYER) {
@@ -313,6 +395,9 @@ namespace host
             obj.kind = kind;
             obj.subType = subType;
             obj.ownerPlayerId = ownerPlayerId;
+            obj.patternType = patternType;
+            if (kind == protocol::NetObjectKind::PROJ_MONSTER)
+                obj.fsmState = patternType;
             obj.pos = pos;
             obj.vel = vel;
             obj.hp = hp;
@@ -542,6 +627,9 @@ namespace host
                 monster->fsmState = 2; // MON_STATE::DEAD
                 justDied = true;
                 ++m_deathCandiateCount;
+                if (monster->subType == MONSTER_SUBTYPE_BOSS) {
+                    m_bossDefeated = true;
+                }
                 scoreDelta = static_cast<std::int32_t>(monster->subType) * 250;
                 m_teamScore += static_cast<std::int32_t>(scoreDelta);
                 RequestDestroy(monsterId, protocol::DespawnReason::DESTROYED);
@@ -720,6 +808,8 @@ namespace host
             m_playerSlotObjectIds.fill(0);
             m_fireTickAccum.fill(0);
             m_bossSpawned = false;
+            m_bossDefeated = false;
+            m_teamOutcome.reset();
         }
 
         // 11/22: 보스 등장 시간 경계(130초 = 7,800틱) 1회 생성
@@ -767,7 +857,42 @@ namespace host
             return false;
         }
 
+        // 11/24: 플레이어 피격 처리 (사망·삭제 예정·무적 상태는 제외)
+        bool ApplyDamageToPlayer(protocol::PlayerSlot slot, std::int32_t damage = 1) noexcept
+        {
+            if (slot >= protocol::MAX_PROTOCOL_PLAYERS)
+                return false;
 
+            const protocol::ObjectId playerObjId = m_playerSlotObjectIds[slot];
+            for (HostObjectValue& obj : m_objects) {
+                if (obj.objectId != playerObjId || obj.pendingDestroy || obj.hp <= 0 ||
+                    obj.fsmState == 1)
+                    continue;
+
+                obj.hp = (std::max)(std::int32_t{ 0 }, obj.hp - damage);
+                obj.stateTickAccum = 0;
+                obj.fsmState = (obj.hp > 0) ? 1 : 0; // 생존 잔여 시 무적/재등장(1),
+                // 0이면 개인 전투 불능(alive = 0)
+                return true;
+            }
+            return false;
+        }
+
+        // 11/24: 등록된 플레이어 전원 전투 불능(또는 삭제) 여부
+        bool AreAllPlayersDead() const noexcept
+        {
+            for (protocol::PlayerSlot slot = 0; slot < protocol::MAX_PROTOCOL_PLAYERS; ++slot) {
+                const HostObjectValue* p = FindObjectById(m_playerSlotObjectIds[slot]);
+                if (p != nullptr && !p->pendingDestroy && p->hp > 0)
+                    return false;
+            }
+            return true;
+        }
+
+        std::optional<protocol::MatchOutcome> GetTeamOutcome() const noexcept
+        {
+            return m_teamOutcome;
+        }
 
         // 11/11: 마지막 유효 입력 시각 기준 300ms 경과 시 이동·발사 중립화
         // - 경계 직전(elapsedMs == 299): 유지
@@ -962,6 +1087,17 @@ namespace host
                 if (obj.kind == protocol::NetObjectKind::PLAYER
                     && obj.ownerPlayerId < protocol::MAX_PROTOCOL_PLAYERS)
                 {
+                    if (obj.hp <= 0) {
+                        obj.vel = {};
+                        continue; // 개인 전투 불능 상태는 이동·발사 계산 제외 (객체 삭제는 아니다.)
+                    }
+                    if (obj.fsmState == 1) {
+                        ++obj.stateTickAccum;
+                        if (obj.stateTickAccum >= PLAYER_RESPAWN_INVINCIBLE_TICKS) {
+                            obj.fsmState = 0;
+                            obj.stateTickAccum = 0;
+                        }
+                    }
                     const std::uint8_t bits = m_lastAppliedMoveBits[obj.ownerPlayerId];
                     std::int32_t vx = 0;
                     std::int32_t vy = 0;
@@ -999,6 +1135,19 @@ namespace host
                         obj.fsmState = (obj.subType == MONSTER_SUBTYPE_BOSS) ? 10 : 1; // 30틱(0.5초) 경과 후 IDLE -> PATROL/RUN(1) 전환
                     }
                 }
+                else if (obj.kind == protocol::NetObjectKind::PROJ_MONSTER
+                    && (obj.patternType == 2 || obj.patternType == 3))
+                {
+                    ++obj.stateTickAccum;
+                    if (obj.patternType == 2 && obj.stateTickAccum == 30) {
+                        obj.vel.x = (obj.vel.x * 3) / 2;
+                        obj.vel.y = (obj.vel.y * 3) / 2;
+                    }
+                    else if (obj.patternType == 3 && obj.stateTickAccum == 42) {
+                        obj.vel.x /= 2;
+                        obj.vel.y /= 2;
+                    }
+                }
 
                 obj.pos.x += (obj.vel.x / static_cast<std::int32_t>(SIM_TICK_HZ));
                 obj.pos.y += (obj.vel.y / static_cast<std::int32_t>(SIM_TICK_HZ));
@@ -1006,6 +1155,37 @@ namespace host
 
             // Step 7: 틱 종료 경계에서 안전한 생성/삭제 및 슬롯 참조 정리 수행 (render가 아닌 시뮬레이션 틱 경계)
             FlushLifecycleAtTickEnd(sendSink);
+
+           
+
+            // 11/25 ~ 11/26: 틱 종료 후 공동 승패 집계 및 RESULT(TCP) 1회 전송
+            if (!m_teamOutcome.has_value()) {
+                m_teamOutcome = EvaluateTeamOutcome(m_bossDefeated, AreAllPlayersDead());
+
+                if (m_teamOutcome.has_value()) {
+                    protocol::Message resultMsg{};
+                    resultMsg.header.magic = protocol::MAGIC;
+                    resultMsg.header.version = protocol::VERSION;
+                    resultMsg.header.type = protocol::MessageType::RESULT;
+                    resultMsg.header.flags = protocol::FLAGS_NONE;
+                    resultMsg.header.totalBytes = 44;
+                    resultMsg.header.sessionId = m_sessionId;
+                    resultMsg.header.roundId = 1;
+                    resultMsg.header.sequence = m_nextSequence++;
+                    resultMsg.header.hostTick = currentTick;
+                    resultMsg.header.reserved = protocol::RESERVED_VALUE;
+
+                    protocol::ResultPayload payload{};
+                    payload.eventId = m_nextEventId++;
+                    payload.outcome = *m_teamOutcome;
+                    payload.reserved0 = 0;
+                    payload.reserved1 = 0;
+                    payload.finalTeamScore = m_teamScore;
+                    resultMsg.payload = payload;
+
+                    sendSink.EnqueueSend(net::Channel::Tcp, resultMsg);
+                }
+            }
 
             // Step 8: 20Hz 주기(3틱마다)이고 활성 객체가 존재하면 STATE_SNAPSHOT 배치 발행
             if ((currentTick % STATE_PUBLISH_INTERVAL_TICKS) == 0 && !m_objects.empty())
@@ -1016,10 +1196,8 @@ namespace host
 
         void PublishSnapshotBatch(std::uint32_t currentTick, net::ISendSink& sendSink)
         {
-            protocol::StateSnapshotPayload snap{};
-            snap.snapshotTick = currentTick;
-            snap.partIndex = 0;
-            snap.partCount = 1;
+            std::vector<protocol::ObjectStateRecord> records;
+            records.reserve(m_objects.size());
 
             for (const HostObjectValue& obj : m_objects)
             {
@@ -1038,31 +1216,22 @@ namespace host
                 rec.vel = obj.vel;
                 rec.hp = obj.hp;
                 rec.maxHp = obj.maxHp;
-                snap.objects.push_back(rec);
+                records.push_back(rec);
             }
 
-            if (snap.objects.empty())
+            if (records.empty())
             {
                 return;
             }
 
-            protocol::Message msg{};
-            msg.header.magic = protocol::MAGIC;
-            msg.header.version = protocol::VERSION;
-            msg.header.type = protocol::MessageType::STATE_SNAPSHOT;
-            msg.header.flags = protocol::FLAGS_NONE;
-            msg.header.totalBytes = static_cast<std::uint32_t>(
-                protocol::HEADER_BYTES + 8 + (snap.objects.size() * 32));
-            msg.header.sessionId = m_sessionId;
-            msg.header.roundId = 1;
-            msg.header.sequence = m_nextSequence++;
-            msg.header.hostTick = currentTick;
-            msg.header.reserved = protocol::RESERVED_VALUE;
-            msg.payload = snap;
-
+            
             net::SnapshotBatch batch{};
-            batch.parts.push_back(std::move(msg));
-            sendSink.EnqueueSnapshotBatch(batch);
+            if (CHostWorldSync::BuildSnapshotBatch(m_sessionId, currentTick, m_nextSequence, records, batch)
+                == net::SendResult::Queued)
+            {
+                sendSink.EnqueueSnapshotBatch(batch);
+            }
+            
         }
 
     private:
@@ -1078,6 +1247,8 @@ namespace host
         std::uint32_t m_deathCandiateCount = 0;
         std::uint32_t m_teamScore = 0;
         bool m_bossSpawned = false;
+        bool m_bossDefeated = false;
+        std::optional<protocol::MatchOutcome> m_teamOutcome;
 
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedMoveBits{};
         std::array<std::uint8_t, protocol::MAX_PROTOCOL_PLAYERS> m_lastAppliedFireHeld{};
