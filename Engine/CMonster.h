@@ -42,6 +42,8 @@ protected:
 
 public:
     virtual void update();
+    void finalupdate() override;
+    void ApplyMonsterSnapshot(const protocol::ObjectStateRecord& state, std::uint32_t tick);
     virtual void render(HDC _dc);
 public:
     virtual void CreateMissile(int type);
@@ -71,6 +73,12 @@ public:
         m_tInfo.ePattern = eType;
     }
 private:
+    std::optional<std::uint32_t> m_lastSnapshotTick;
+    Vec2 m_snapshotPosition;
+    Vec2 m_snapshotVelocity;
+    Vec2 m_snapshotOffset;
+    float m_snapshotElapsed = 0.f;
+
     void SetMonInfo(const tMonInfo& _info)
     {
         m_tInfo = _info;

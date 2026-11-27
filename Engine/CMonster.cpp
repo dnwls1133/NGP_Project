@@ -24,6 +24,13 @@
 #include "CSoundMgr.h"
 
 #include "CRankMgr.h"
+#include "../host/HostSimCore.h"
+
+namespace
+{
+    constexpr float MonsterCorrectionDuration = host::SIM_FIXED_DT * host::STATE_PUBLISH_INTERVAL_TICKS;
+    constexpr float MonsterPredictionLimit = 2.f * MonsterCorrectionDuration;
+}
 
 CMonster::CMonster()
 	: m_tInfo{}
@@ -92,6 +99,46 @@ CMonster::~CMonster()
     {
         delete m_pAI;
     }
+}
+
+void CMonster::ApplyMonsterSnapshot(const protocol::ObjectStateRecord& state, std::uint32_t tick)
+{
+    if (IsDead() || (m_signaldead && state.alive)
+        || (m_lastSnapshotTick && tick <= *m_lastSnapshotTick))
+        return;
+
+    Vec2 position(state.pos.x / 100.f, state.pos.y / 100.f);
+    m_snapshotVelocity = Vec2{};
+    if (m_lastSnapshotTick && state.alive)
+    {
+        const auto tickGap = tick - *m_lastSnapshotTick;
+        if (tickGap <= 2 * host::STATE_PUBLISH_INTERVAL_TICKS)
+            m_snapshotVelocity = (position - m_snapshotPosition) / (tickGap * host::SIM_FIXED_DT);
+    }
+
+    m_lastSnapshotTick = tick;
+    m_snapshotPosition = position;
+    m_snapshotOffset = GetPos() - position;
+    m_snapshotElapsed = 0.f;
+    SetConfirmedHP(static_cast<float>(state.hp));
+
+    if (!state.alive)
+    {
+        m_snapshotElapsed = MonsterPredictionLimit;
+        SetPos(position);
+    }
+}
+
+void CMonster::finalupdate()
+{
+    if (m_lastSnapshotTick && !IsDead() && !m_signaldead && m_snapshotElapsed < MonsterPredictionLimit)
+    {
+        m_snapshotElapsed = (std::min)(m_snapshotElapsed + fDT, MonsterPredictionLimit);
+        const float remaining = (std::max)(1.f - m_snapshotElapsed / MonsterCorrectionDuration, 0.f);
+        SetPos(m_snapshotPosition + m_snapshotVelocity * m_snapshotElapsed + m_snapshotOffset * remaining);
+    }
+
+    CObject::finalupdate();
 }
 
 void CMonster::BeginDeath()
