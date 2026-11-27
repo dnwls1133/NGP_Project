@@ -23,15 +23,24 @@ void CEventMgr::update()
 {
 	// =================================================
 	// 이전 프레임에서 등록해둔 Dead Object 들을 삭제한다.
+    // (render가 아닌 이벤트 경계에서 씬 컨테이너·슬롯 참조를 먼저 분리한 뒤 해제)
 	// =================================================
-	for (size_t i = 0; i < m_vecDead.size(); ++i)
-	{
-	
-		delete(m_vecDead[i]);
-		
-		
-	}
-	m_vecDead.clear();
+
+    if (!m_vecDead.empty()) {
+        if (CScene* pCurScene = CSceneMgr::GetInst()->GetCurScene()) {
+            pCurScene->CleanupDeadObjects();
+        }
+
+        for (size_t i = 0; i < m_vecDead.size(); ++i)
+        {
+
+            delete(m_vecDead[i]);
+
+
+        }
+        m_vecDead.clear();
+    }
+    
 
 	//============
 	//Event 처리

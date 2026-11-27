@@ -215,6 +215,45 @@ void CScene_Stage01::EvaluateHostMatchOutcome()
     }
 }
 
+void CScene_Stage01::SendMatchResultOnce(protocol::MatchOutcome outcome)
+{
+    if (m_bResultSent)
+        return;
+
+    auto& session = CCore::GetInst()->GetSession();
+    if (!session.IsHost())
+        return;
+
+    protocol::ResultPayload result{};
+    result.eventId = ++m_nextSpawnEventId;
+    result.outcome = outcome;
+    result.finalTeamScore = static_cast<std::uint32_t>(
+        CRankMgr::GetInst()->CurrentRanking.Score > 0
+        ? CRankMgr::GetInst()->CurrentRanking.Score
+        : 0);
+
+    protocol::Message message{};
+    message.header.type = protocol::MessageType::RESULT;
+    message.header.sessionId = session.GetSessionId();
+    message.header.hostTick = m_hostTick;
+    message.header.sequence = result.eventId;
+    message.payload = result;
+
+    const auto sendResult = session.EnqueueSend(net::Channel::Tcp, message);
+    if (sendResult == net::SendResult::Queued) {
+        m_bResultSent = true;
+    }
+#ifdef _DEBUG
+    else {
+        std::cerr << "[HOST] RESULT enqueue failed"
+            << ", sessionId=" << message.header.sessionId
+            << ", hostTick=" << message.header.hostTick
+            << ", eventId=" << result.eventId
+            << ", sendResult=" << static_cast<int>(sendResult) << '\n';
+    }
+#endif
+}
+
 bool CScene_Stage01::FlushItemEvents()
 {
     auto& session = CCore::GetInst()->GetSession();
@@ -318,36 +357,7 @@ void CScene_Stage01::update()
     {
         if (m_fClearAcc == 0.f)
         {
-            if (session.IsHost())
-            {
-                protocol::ResultPayload result{};
-                result.eventId = ++m_nextSpawnEventId;
-                result.outcome = protocol::MatchOutcome::VICTORY;
-                result.finalTeamScore = static_cast<std::uint32_t>(
-                    CRankMgr::GetInst()->CurrentRanking.Score > 0
-                    ? CRankMgr::GetInst()->CurrentRanking.Score
-                    : 0);
-
-                protocol::Message message{};
-                message.header.type = protocol::MessageType::RESULT;
-                message.header.sessionId = session.GetSessionId();
-                message.header.hostTick = m_hostTick;
-                message.header.sequence = result.eventId;
-                message.payload = result;
-
-                const auto sendResult = session.EnqueueSend(net::Channel::Tcp, message);
-
-#ifdef _DEBUG
-                if (sendResult != net::SendResult::Queued)
-                {
-                    std::cerr << "[HOST] RESULT enqueue failed"
-                        << ", sessionId=" << message.header.sessionId
-                        << ", hostTick=" << message.header.hostTick
-                        << ", eventId=" << result.eventId
-                        << ", sendResult=" << static_cast<int>(sendResult) << '\n';
-                }
-#endif
-            }
+            SendMatchResultOnce(protocol::MatchOutcome::VICTORY);
 
             m_pHud->SetActive(false);
             CRankMgr::GetInst()->SetPlayer(nullptr);
@@ -377,23 +387,7 @@ void CScene_Stage01::update()
     {
         if (m_fClearAcc == 0.f)
         {
-            if (session.IsHost())
-            {
-                protocol::ResultPayload result{};
-                result.eventId = ++m_nextSpawnEventId;
-                result.outcome = protocol::MatchOutcome::DEFEAT;
-                result.finalTeamScore = static_cast<std::uint32_t>(
-                    CRankMgr::GetInst()->CurrentRanking.Score > 0
-                    ? CRankMgr::GetInst()->CurrentRanking.Score
-                    : 0);
-                protocol::Message message{};
-                message.header.type = protocol::MessageType::RESULT;
-                message.header.sessionId = session.GetSessionId();
-                message.header.hostTick = m_hostTick;
-                message.header.sequence = result.eventId;
-                message.payload = result;
-                session.EnqueueSend(net::Channel::Tcp, message);
-            }
+            SendMatchResultOnce(protocol::MatchOutcome::DEFEAT);
 
             m_pHud->SetActive(false);
 
@@ -1042,6 +1036,7 @@ void CScene_Stage01::Enter()
     m_pendingItemEvents.clear();
     m_bBossBgmPlayed = false;
     m_bBossDefeated = false;
+    m_bResultSent = false;
 
     // Monster Object 추가
 
@@ -1145,6 +1140,7 @@ void CScene_Stage01::Exit()
     m_pendingSpawns.clear();
     m_bBossBgmPlayed = false;
     m_bBossDefeated = false;
+    m_bResultSent = false;
     CColliderMgr::GetInst()->Reset();
 }
 
