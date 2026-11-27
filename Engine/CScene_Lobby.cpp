@@ -11,7 +11,6 @@
 
 #include "CNetworkMgr.h"
 #include "CSessionMgr.h"
-#include "CSceneMgr.h"
 
 #include <cmath>
 #include <iostream>
@@ -208,9 +207,23 @@ void CScene_Lobby::update()
     if (KEY_TAP(KEY::S))
         SubmitHostStart();
 
+    if (session.GetState() == network::SessionState::Loading)
+    {
+        // 실제 로딩 완료 API가 정해지기 전까지 시험용으로 완료 처리
+        session.NotifyLocalLoaded();
+
+        if (session.IsHost() && session.HasClientLoaded())
+        {
+            constexpr std::uint32_t TEST_START_TICK = 120;
+            const auto result = session.RequestStart(TEST_START_TICK);
+
+            std::cout << "[HOST] START requested. result=" << static_cast<int>(result) << '\n';
+        }
+    }
+
     UpdateActionButtons();
 
-    if (session.GetState() == network::SessionState::Loading && !CSceneMgr::GetInst()->IsLoadingTransitionActive())
+    if (session.GetState() == network::SessionState::Started)
     {
         leavingLobby = true;
         ChangeScene(SCENE_TYPE::STAGE_01);
