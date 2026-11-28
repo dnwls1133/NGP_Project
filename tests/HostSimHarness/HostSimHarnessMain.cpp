@@ -1356,6 +1356,67 @@ namespace
                 counters);
         }
     }
+
+    void RunHostSim1128Suite(TestCounters& counters)
+    {
+        using namespace host;
+        using namespace protocol;
+
+        // 1. 4주차 통합: 보스 등장 -> 2페이즈 전환 -> 보스 사망+전원 사망 동시 틱 VICTORY & RESULT 1회 -> 종료 후 자원 정리
+        {
+            InputScript script;
+            CaptureSink sink;
+            HostSimEngine engine{ 1000 };
+
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 0, FixedVec2{ 10'000, 30'000 }, {}, 1, 4000);
+            engine.RequestSpawn(NetObjectKind::PLAYER, 1, 1, FixedVec2{ 20'000, 30'000 }, {}, 1, 4000);
+            const ObjectId bossId = engine.TrySpawnScheduledBoss(BOSS_SPAWN_TICK);
+            const ObjectId projPhase2 = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 0, FixedVec2{ 27'000, -20'000 }, {}, 1, 4000);
+            const ObjectId projFinish = engine.RequestSpawn(NetObjectKind::PROJ_PLAYER, 1, 1, FixedVec2{ 27'000, -20'000 }, {}, 1, 4000);
+            engine.FlushLifecycleAtTickEnd(sink);
+
+            // 30틱 진입 -> IDLE(0) -> MBOSS0(10)
+            for (int i = 0; i < 6; ++i)
+                engine.StepFrame(83'334, script, sink);
+
+            // 첫 타격(4000): HP 8000 -> 4000, MBOSS0 -> MBOSS1 1회 전환
+            engine.ApplyProjectileHit(projPhase2, bossId, sink);
+            const bool phase2Ok = engine.EvaluateBossFsmTransition(bossId);
+
+            // 동시 틱: 플레이어 전원 사망 + 보스 처치 -> 틱 종료 집계에서 VICTORY 우선 & RESULT 1회 발행
+            engine.ApplyDamageToPlayer(0, 1);
+            engine.ApplyDamageToPlayer(1, 1);
+            engine.ApplyProjectileHit(projFinish, bossId, sink);
+            engine.StepFrame(83'334, script, sink); // 연속 5틱 진행
+
+            int resultCount = 0;
+            ResultPayload confirmed{};
+            for (const auto& entry : sink.GetCapturedMessages())
+            {
+                if (entry.channel == net::Channel::Tcp && entry.message.header.type == MessageType::RESULT)
+                {
+                    ++resultCount;
+                    confirmed = std::get<ResultPayload>(entry.message.payload);
+                }
+            }
+
+            // 종료 후 씬·세션 자원 정리 및 Stop 이후 송신 차단(NotRunning) 확인
+            engine.TransitionScene();
+            sink.GetInnerFakeSink().Stop();
+            const bool stoppedBlocksSend =
+                (sink.GetInnerFakeSink().EnqueueSend(net::Channel::Tcp, Message{}) == net::SendResult::NotRunning);
+
+            Check(bossId != 0 && phase2Ok
+                && resultCount == 1
+                && confirmed.outcome == MatchOutcome::VICTORY
+                && confirmed.finalTeamScore == 1500
+                && engine.GetActiveObjects().empty()
+                && !engine.GetTeamOutcome().has_value()
+                && stoppedBlocksSend,
+                "HostSim1128: Integrates boss spawn/phase2, same-tick VICTORY RESULT once, and post-exit session/scene cleanup",
+                counters);
+        }
+    }
 }
 
 int main()
@@ -1383,6 +1444,7 @@ int main()
     RunHostSim1125Suite(counters);
     RunHostSim1126Suite(counters);
     RunHostSim1127Suite(counters);
+    RunHostSim1128Suite(counters);
     std::cout << "-------------------------------------------------------------------\n";
     std::cout << "Passed: " << counters.passed << '\n';
     std::cout << "Failed: " << counters.failed << '\n';

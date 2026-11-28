@@ -242,6 +242,14 @@ void CScene_Stage01::SendMatchResultOnce(protocol::MatchOutcome outcome)
     const auto sendResult = session.EnqueueSend(net::Channel::Tcp, message);
     if (sendResult == net::SendResult::Queued) {
         m_bResultSent = true;
+#ifdef _DEBUG
+        std::cout << "[HOST] RESULT confirmed"
+            << ", sessionId=" << message.header.sessionId
+            << ", hostTick=" << message.header.hostTick
+            << ", eventId=" << result.eventId
+            << ", outcome=" << (result.outcome == protocol::MatchOutcome::VICTORY ? "VICTORY" : "DEFEAT")
+            << ", finalTeamScore=" << result.finalTeamScore << '\n';
+#endif
     }
 #ifdef _DEBUG
     else {
@@ -883,6 +891,15 @@ void CScene_Stage01::update()
                 {
                     CRankMgr::GetInst()->CurrentRanking.Score = static_cast<int>(result.finalTeamScore);
 
+#ifdef _DEBUG
+                    std::cout << "[CLIENT] RESULT applied"
+                        << ", sessionId=" << header.sessionId
+                        << ", hostTick=" << header.hostTick
+                        << ", eventId=" << result.eventId
+                        << ", outcome=" << (result.outcome == protocol::MatchOutcome::VICTORY ? "VICTORY" : "DEFEAT")
+                        << ", finalTeamScore=" << result.finalTeamScore << '\n';
+#endif
+
                     if (result.outcome == protocol::MatchOutcome::DEFEAT)
                         Fail();
 
@@ -1129,7 +1146,13 @@ void CScene_Stage01::Enter()
 
 void CScene_Stage01::Exit()
 {
-    CCore::GetInst()->GetSession().Stop();
+    auto& session = CCore::GetInst()->GetSession();
+    const bool wasHost = session.IsHost();
+    const auto prevSessionId = session.GetSessionId();
+
+
+    session.Stop();
+    m_hostInput.ResetSession(0);
     m_pendingItemEvents.clear();
     DeleteAll();
     m_dAcc = 0;
@@ -1142,6 +1165,13 @@ void CScene_Stage01::Exit()
     m_bBossDefeated = false;
     m_bResultSent = false;
     CColliderMgr::GetInst()->Reset();
+
+#ifdef _DEBUG
+    std::cout << (wasHost ? "[HOST]" : "[CLIENT]")
+        << " Stage01 Exit: session stopped and scene resources cleared"
+        << ", sessionId=" << prevSessionId << '\n';
+#endif
+
 }
 
 void CScene_Stage01::InitEvents()
